@@ -1,0 +1,70 @@
+# Python & Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# PyTorch, Checkpoints & Datasets (Prevent committing large binaries)
+*.pt
+*.pth
+*.ckpt
+*.dcm
+*.nii
+*.nii.gz
+*.svs
+*.ndpi
+*.h5
+*.hdf5
+checkpoints/*
+!checkpoints/.gitkeep
+data/*
+!data/.gitkeep
+!data/README.md
+
+# Cloned External Repositories (Prevent committing nested git repositories)
+repos/*
+!repos/.gitkeep
+!repos/README.md
+
+# Research Papers (Store locally, prevent bloating git repo)
+docs/papers/*.pdf
+!docs/papers/.gitkeep
+!docs/papers/README.md
+papers/*.pdf
+
+# Testing, Linting & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Graphify & Local Analysis Artifacts
+graphify-out*/
+scratch/
+
+# LaTeX Build Artifacts (for reports)
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.toc
+product/reports/*.pdf
+product/reports/*.log
+reports/*.pdf
+reports/*.log
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
