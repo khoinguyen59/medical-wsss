@@ -1,0 +1,77 @@
+\documentclass[final]{hcmuitthesis}
+% Config reference source file
+\addbibresource{references/references.bib}
+% Define metadata
+% =========== Thay đổi thông tin tại phần này ===========
+\upperuniname{ĐẠI HỌC QUỐC GIA THÀNH PHỐ HỒ CHÍ MINH}
+\uniname{TRƯỜNG ĐẠI HỌC CÔNG NGHỆ THÔNG TIN}
+\deptname{KHOA KỸ THUẬT MÁY TÍNH}
+\title{THIẾT KẾ VÀ TRIỂN KHAI HỆ THỐNG PHÂN LOẠI MÀU SẮC
+ TRÊN BĂNG TẢI SỬ DỤNG ĐIỀU KHIỂN PID CHO ĐỘNG CƠ DC}
+\titleen{\color{red}DESIGN AND IMPLEMENTATION OF A COLOR SORTING SYSTEM ON A CONVEYOR BELT USING PID CONTROL FOR A DC MOTOR}
+\supervisor{GIẢNG VIÊN HƯỚNG DẪN}
+\supervisorname{Ths. Phạm Minh Quân
+}
+\stunamewithid{Trịnh Nguyễn Thanh Bình - 23520162\\
+Bùi Quốc Bảo - 23520092\\
+Diệp Thanh Phong - 23521160\\
+Lê Trần Huỳnh Phong - 23521164
+}
+\reportplace{TP. HỒ CHÍ MINH, NĂM }
+
+% =========== Hết phần thay đổi thông tin ===========
+
+\input{chapters/front/glossaries.tex}
+\makeglossaries
+% Begin thesis
+\begin{document}
+
+\coverpage%
+\secondcoverpage%
+% Begin above main thesis
+\pagenumbering{gobble}
+\pagestyle{empty}
+\include{chapters/front/decision.tex}
+\include{chapters/front/thanks.tex}
+\tableofcontents
+\clearpage
+\listoffigures
+\clearpage
+\listoftables
+\clearpage
+\lstlistoflistings
+\clearpage
+\printglossaries
+\clearpage
+% \include{chapters/front/translate.tex}
+\mainthesis
+
+% Main chapter in thesis
+\include{chapters/main/chapter1.tex}
+\include{chapters/main/chapter2.tex}
+\include{chapters/main/chapter3.tex}
+\include{chapters/main/chapter4.tex}
+
+% Appendix chapter in thesis
+\appendix
+\include{chapters/back/apendixA.tex}
+
+\chapter*{TÀI LIỆU THAM KHẢO}
+\addcontentsline{toc}{chapter}{TÀI LIỆU THAM KHẢO}
+
+% In tài liệu tiếng Việt
+\printbibliography[
+    keyword=vietnamese,
+    title={Tài liệu tiếng Việt},
+    heading=subbibliography
+]
+
+% In tài liệu tiếng Anh
+\printbibliography[
+    keyword=english,
+    title={Tài liệu tiếng Anh},
+    heading=subbibliography
+]
+
+
+\end{document}

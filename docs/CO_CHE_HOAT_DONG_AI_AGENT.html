@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cơ Chế Hoạt Động Của Hệ Thống AI Agent</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --primary: #1a73e8;
+            --primary-dark: #0d47a1;
+            --bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --text: #202124;
+            --text-secondary: #5f6368;
+            --border: #dadce0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            margin: 0;
+            padding: 30px 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid var(--border);
+        }
+        h1 {
+            color: var(--primary-dark);
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            border: 1px solid var(--border);
+        }
+        h2 {
+            color: var(--primary-dark);
+            font-size: 20px;
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .diagram-box {
+            background: #ffffff;
+            border: 1px dashed #c2e7ff;
+            border-radius: 8px;
+            padding: 20px 10px;
+            margin: 20px 0;
+            display: flex;
+            justify-content: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 15px;
+        }
+        th {
+            background-color: #f1f3f4;
+            color: #202124;
+            font-weight: 600;
+        }
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            background: #e8f0fe;
+            color: #1a73e8;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>CƠ CHẾ HOẠT ĐỘNG CỦA HỆ THỐNG AI AGENT</h1>
+        <div class="subtitle">Bản chất kỹ thuật: Cách AI sử dụng Agent, Rules, Skills, MCP Tools & Graphify</div>
+    </header>
+
+    <!-- SECTION 1 -->
+    <div class="card">
+        <h2>1. Khác Biệt Giữa "Chatbot Thụ Động" và "AI Agent Tự Trị"</h2>
+        <p>Mô hình ngôn ngữ lớn (LLM) thông thường chỉ tiếp nhận văn bản và sinh ra văn bản tiếp theo (Hỏi - Đáp đơn thuần). Khi được xây dựng thành <strong>AI Agent</strong>, mô hình được trang bị một hệ sinh thái hoàn chỉnh:</p>
+        
+        <div class="diagram-box">
+            <pre class="mermaid">
+%%{init: {'theme': 'neutral', 'themeVariables': {'fontSize': '15px'}}}%%
+flowchart LR
+    User["👤 Người Dùng<br>(Giao mục tiêu)"] --> Brain["🧠 Bộ Não AI<br>(Tư duy logic / LLM)"]
+    
+    Brain <--> Rules["⚖️ Rules<br>(Luật lệ bất biến)"]
+    Brain <--> Skills["📚 Skills<br>(Cẩm nang quy trình)"]
+    Brain <--> Graphify["🗺️ Graphify<br>(Bản đồ AST Code)"]
+    Brain --> Tools["🛠️ Tools & MCP<br>(Tay chân & Giác quan)"]
+    Tools --> OS["💻 Máy Tính<br>(File, Shell, Web)"]
+    OS -->|Đọc kết quả| Brain
+    
+    Brain --> Result["🎯 Báo Cáo Hoàn Thành"]
+
+    classDef mainNode fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px,color:#0d47a1;
+    classDef subNode fill:#ffffff,stroke:#5f6368,stroke-width:1.5px,color:#202124;
+    class Brain,Result mainNode;
+    class User,Rules,Skills,Graphify,Tools,OS subNode;
+            </pre>
+        </div>
+    </div>
+
+    <!-- SECTION 2 -->
+    <div class="card">
+        <h2>2. Ẩn Dụ Thực Tế & Vai Trò 5 Thành Phần</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Thành phần</th>
+                    <th>Ẩn dụ thực tế</th>
+                    <th>Vai trò kỹ thuật đối với AI</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>1. Agent Core (LLM)</strong></td>
+                    <td><span class="badge">Người Kỹ Sư</span></td>
+                    <td>Bộ não tư duy logic, chia nhỏ yêu cầu của bạn thành các bước và quyết định công cụ nào cần gọi tiếp theo.</td>
+                </tr>
+                <tr>
+                    <td><strong>2. Rules</strong></td>
+                    <td><span class="badge">Nội Quy & Đạo Đức</span></td>
+                    <td>Các ràng buộc bất biến (như <code>AGENTS.md</code>): Cấm bịa đặt số liệu (Zero-Mockup), cấm xóa file, bắt buộc hỏi khi tốn tiền.</td>
+                </tr>
+                <tr>
+                    <td><strong>3. Skills</strong></td>
+                    <td><span class="badge">Cẩm Nang Nghiệp Vụ</span></td>
+                    <td>Tài liệu hướng dẫn từng bước (trong <code>skills/</code>). AI chỉ mở file <code>SKILL.md</code> khi gặp việc cần dùng để tránh nghẽn bộ nhớ.</td>
+                </tr>
+                <tr>
+                    <td><strong>4. Tools / MCP</strong></td>
+                    <td><span class="badge">Bàn Tay & Giác Quan</span></td>
+                    <td>Công cụ thao tác thực tế: <code>run_command</code> (chạy terminal), <code>view_file</code> (đọc file), MCP <code>firecrawl</code> (lướt web cào paper).</td>
+                </tr>
+                <tr>
+                    <td><strong>5. Graphify AST</strong></td>
+                    <td><span class="badge">Bản Đồ Vệ Tinh GPS</span></td>
+                    <td>Đồ thị tri thức quét toàn bộ codebase: AI nhìn vào đây biết ngay hàm nào gọi hàm nào, chỉ đọc đúng file cần sửa mà không bị lạc giữa hàng trăm file.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- SECTION 3 -->
+    <div class="card">
+        <h2>3. Vòng Lặp Tư Duy ReAct (Reasoning - Action - Observation)</h2>
+        <p>Khi bạn giao một việc (ví dụ: <em>"Hãy kiểm tra và sửa lỗi rò rỉ dữ liệu trong code"</em>), AI sẽ hành động qua 5 bước lặp:</p>
+
+        <div class="diagram-box">
+            <pre class="mermaid">
+%%{init: {'theme': 'neutral', 'themeVariables': {'fontSize': '14px'}}}%%
+sequenceDiagram
+    autonumber
+    actor User as Bạn (User)
+    participant Brain as Bộ Não AI (LLM)
+    participant Rules as Rules & Skills
+    participant Graphify as Graphify AST
+    participant Tools as Tools / Terminal
+
+    User->>Brain: "Sửa lỗi rò rỉ dữ liệu trong code"
+    
+    Note over Brain: BƯỚC 1: SUY NGHĨ (Thought)
+    Brain->>Rules: Tra cứu: Có luật gì về rò rỉ dữ liệu không?
+    Rules-->>Brain: Trả về: Phải fit scaler duy nhất trên tập Train!
+
+    Note over Brain: BƯỚC 2: ĐỊNH VỊ (Navigation)
+    Brain->>Graphify: Hỏi: File nào quản lý việc chia dữ liệu?
+    Graphify-->>Brain: Trả về: `AntiLeakageSplitter` trong `src/datasets/`
+
+    Note over Brain: BƯỚC 3: HÀNH ĐỘNG (Action)
+    Brain->>Tools: Gọi `view_file` đọc file đó
+    Tools-->>Brain: Trả về code thực tế (Observation)
+
+    Note over Brain: BƯỚC 4: SỬA ĐỔI & KIỂM THỬ (Execution)
+    Brain->>Tools: Gọi `replace_file_content` sửa code
+    Brain->>Tools: Gọi `run_command` chạy test kiểm tra
+    Tools-->>Brain: Báo: Tests Passed 100% (Observation)
+
+    Brain->>User: "Đã tìm thấy lỗi tại AntiLeakageSplitter, đã sửa và test thành công!"
+            </pre>
+        </div>
+    </div>
+
+    <!-- SECTION 4 -->
+    <div class="card">
+        <h2>4. Tại Sao Cần Sự Kết Hợp Cả 4 Thứ Này?</h2>
+        <ul>
+            <li><strong>Nếu chỉ có LLM:</strong> AI chỉ "chém gió" lý thuyết suông, không đụng được vào máy tính để làm việc.</li>
+            <li><strong>Nếu có LLM + Tools nhưng không có Rules:</strong> AI hành động bừa bãi, dễ xóa nhầm file hoặc bịa đặt số liệu mà bạn không biết.</li>
+            <li><strong>Nếu không có Skills:</strong> Mỗi lần làm một tác vụ phức tạp (như viết báo cáo, cấu hình CI/CD), AI sẽ làm ngẫu hứng, thiếu chuẩn mực.</li>
+            <li><strong>Nếu không có Graphify:</strong> Khi dự án lớn lên hàng trăm file, AI sẽ bị "mù cấu trúc", đọc tràn lan làm cạn kiệt token, sinh ảo giác và sửa chỗ này làm hỏng chỗ khác.</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+    mermaid.initialize({ startOnLoad: true });
+</script>
+</body>
+</html>
