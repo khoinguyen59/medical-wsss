@@ -1,0 +1,62 @@
+{
+  "package_name": "SE374_WSSS_Drive_Code",
+  "target_drive_folder": "MyDrive/SE374_WSSS_Project/",
+  "src_files_count": 33,
+  "src_files": [
+    "src/__init__.py",
+    "src/colab_pkg/README.md",
+    "src/colab_pkg/__init__.py",
+    "src/colab_pkg/colab_runner.py",
+    "src/colab_pkg/downloader.py",
+    "src/colab_pkg/evaluator.py",
+    "src/colab_pkg/model_loader.py",
+    "src/colab_pkg/visualizer.py",
+    "src/config/bcss_patient_splits.json",
+    "src/datasets/__init__.py",
+    "src/datasets/bcss_dataset.py",
+    "src/datasets/otsu_filter.py",
+    "src/datasets/patient_split.py",
+    "src/losses_metrics/__init__.py",
+    "src/losses_metrics/losses.py",
+    "src/losses_metrics/metrics.py",
+    "src/models/__init__.py",
+    "src/models/backbone.py",
+    "src/models/deeplabv3plus.py",
+    "src/models/pda_generator.py",
+    "src/models/wsss_inference_methods.py",
+    "src/models/wsss_tissue.py",
+    "src/pipeline/__init__.py",
+    "src/pipeline/colab_runner.py",
+    "src/pipeline/comparative_runner.py",
+    "src/utils/__init__.py",
+    "src/utils/deliverable_auditor.py",
+    "src/visualization/__init__.py",
+    "src/visualization/api_server.py",
+    "src/visualization/clinical_viewer.py",
+    "src/visualization/draw_all_proposal_figures.py",
+    "src/visualization/draw_pipeline_diagram.py",
+    "src/visualization/static/index.html"
+  ],
+  "thin_runner_notebooks": [
+    "SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb",
+    "SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb",
+    "SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb",
+    "SE374_Colab_WSSS_T4_Sanity150_ThinDriveRunner_v2.ipynb"
+  ],
+  "legacy_notebooks_preserved": {
+    "SE374_Colab_WSSS_A100_Full4986.ipynb": "0aa22df689c66e8cdc6d577c6f671bf8607512fa9e15f295ea07e711a69f5fba",
+    "SE374_Colab_WSSS_L4_Full4986.ipynb": "4162c95c31f8e853b0b86280bd20532ca13926efc687e956d31398a62d0b7dad",
+    "SE374_Colab_WSSS_Pipeline.ipynb": "871cb966b5602cf4ba32e989cb6d5c5b7f7ddffa947645dff2e00a665bf06a70",
+    "SE374_Colab_WSSS_T4_Full4986.ipynb": "751c47c9516e1c29856f8e91bc0caa1ec84b5d6f8ec94ca112be4fb111a37376",
+    "SE374_Colab_WSSS_T4_Sanity150.ipynb": "70f0a03f48328e7357675a6aa051db14c2c2713d051fd58a7e8c522894e22178"
+  },
+  "supported_wsss_methods": [
+    "M1_Baseline_SingleScale",
+    "M2_MultiView_D4_TTA",
+    "M3_LongTail_Prior_Calibration",
+    "M4_Spatial_Bilateral_Refinement",
+    "M5_Proposed_SOTA_Ensemble",
+    "M6_MultiScale_Pyramid_D4_Ensemble",
+    "M7_Proposed_Ultra_SOTA_Curriculum"
+  ]
+}

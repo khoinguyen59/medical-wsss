@@ -33,6 +33,8 @@ repos/*
 
 # Research Papers (Store locally, prevent bloating git repo)
 docs/papers/*.pdf
+docs/papers/*_raw.txt
+docs/papers/figures/
 !docs/papers/.gitkeep
 !docs/papers/README.md
 papers/*.pdf
@@ -68,3 +70,7 @@ reports/*.log
 *.swo
 .DS_Store
 Thumbs.db
+
+# Temporary Colab Root Archives & Duplicates
+/SE374_Colab_Results*.zip
+/SE374_Colab_WSSS_T4_Full4986.ipynb
