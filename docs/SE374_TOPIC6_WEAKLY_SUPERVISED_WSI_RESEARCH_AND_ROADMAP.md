@@ -18,7 +18,7 @@
 2. **Nút thắt gán nhãn mức pixel (Pixel-level Annotation Bottleneck):**
    - Để huấn luyện mô hình phân vùng đầy đủ giám sát (Fully-Supervised Semantic Segmentation như U-Net, DeepLabV3+), các chuyên gia giải phẫu bệnh (Pathologists) phải mất hàng nghìn giờ làm việc thủ công dùng bút số viền từng ranh giới cụm tế bào ác tính vi thể. Điều này hoàn toàn bất khả thi trên quy mô dữ liệu lớn.
 3. **Bản chất của Phân vùng Giám sát Yếu (Weakly-Supervised Semantic Segmentation - WSSS):**
-   - Cho phép mô hình chỉ cần học từ **nhãn mức ảnh/patch thô (Image-level/Patch-level multi-hot labels)** – ví dụ: patch này chỉ cần nhãn nhị phân `[Tumor: 1, Stroma: 1, Necrosis: 0, Lymphocytes: 0]` mà không cần biết pixel nào là u, pixel nào là chất nền!
+   - Cho phép mô hình chỉ cần học từ **nhãn mức ảnh/patch thô (Image-level/Patch-level multi-hot labels)** - ví dụ: patch này chỉ cần nhãn nhị phân `[Tumor: 1, Stroma: 1, Necrosis: 0, Lymphocytes: 0]` mà không cần biết pixel nào là u, pixel nào là chất nền!
    - Mô hình tự động kích hoạt vùng quan tâm (Class Activation Maps - CAM), lọc ngưỡng sinh mặt nạ giả (Pseudo-Masks), và huấn luyện bộ phân vùng đạt độ chính xác tương đương giám sát toàn phần.
 
 ### 1.2. Đóng Góp Tiên Phong Từ Bài Báo Chỉ Định Của Giảng Viên: `LowMagWSS` (arXiv:2607.10783)

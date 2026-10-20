@@ -17,7 +17,7 @@ File Excel `SE374.R11 - Đồ án cuối kỳ.xlsx` ghi nhận hiện trạng đ
 | **Nhóm 2** | 24520554 - Nguyễn Huy Hoàng | **Tumor segmentation using CT/MRI** | **Topic 5** | Phân vùng khối u thể tích 3D (BraTS dataset). |
 | **Nhóm 3** | 24520336 - Huỳnh Đức Dũng | *Tên đề tài gì cho hay nhỉ* | *(Chưa chốt)* | Đang tìm kiếm định hướng đề tài. |
 | **Nhóm 4** | *(Trống)* | *(Trống)* | - | Vị trí nhóm còn trống. |
-| **Nhóm 5** | 23520922 - Hà Nhật Minh<br>23521267 - Nguyễn Việt Kỳ Quân | **Whole-Slide Image–Based Survival Risk Analysis Using Attention Multiple Instance Learning** | **Topic 4** | Phân tích thời gian sống sót bằng WSI giải phẫu bệnh số (TCGA cohorts). |
+| **Nhóm 5** | 23520922 - Hà Nhật Minh<br>23521267 - Nguyễn Việt Kỳ Quân | **Whole-Slide Image-Based Survival Risk Analysis Using Attention Multiple Instance Learning** | **Topic 4** | Phân tích thời gian sống sót bằng WSI giải phẫu bệnh số (TCGA cohorts). |
 | **Nhóm 6** | 23521262 - Nguyễn Hồng Quân<br>23521214 - Phạm Hoàng Phúc | **Weakly-supervised segmentation for whole slide images** | **Topic 6** | Phân vùng bán giám sát trên WSI (LowMagWSS). |
 | **Nhóm 7** | 23520707 - Phạm Tuấn Khang<br>Phạm Hùng<br>Nguyễn Đình Tri | **Ứng dụng hỏi đáp dành cho bác sĩ chẩn đoán hình ảnh** | **Topic 8 (Tự do)** | Hướng đề tài Medical Visual Question Answering (VQA) / Multimodal LLM. |
 | **Nhóm 8** | 23520826 - Võ Tuấn Kiệt | **Ứng dụng phát hiện người mắc rối loạn phổ tự kỉ dựa trên ảnh fMRI** | **Topic 8 (Tự do)** | Sử dụng ảnh fMRI tận dụng functional connectivity của não; dataset ABIDE I; xây dựng web demo. |
