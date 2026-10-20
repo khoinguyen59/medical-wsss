@@ -1,5 +1,5 @@
 # Báo Cáo Nghiên Cứu Toàn Văn: CG-GLORE (arXiv:2608.15246)
-## A Conjugate Gradient–Based Global-Local Regularization Network for Sparse-View CT Reconstruction
+## A Conjugate Gradient-Based Global-Local Regularization Network for Sparse-View CT Reconstruction
 
 > **Mã bài báo:** `arXiv:2608.15246v1 [cs.CV]`  
 > **Ngày công bố:** 15 Tháng 8, 2026  
@@ -54,7 +54,7 @@ CG-GLORE kết hợp hai thành phần đột phá:
 ```mermaid
 flowchart LR
     A["Sinogram thưa y'"] --> B["Khởi tạo FBP x_0"]
-    B --> C["Vòng lặp Unrolling t = 1..T"]
+    B --> C["Vòng lặp Unrolling t = 1, ..., T"]
     
     subgraph Iteration ["Một Giai Đoạn Unrolling"]
         direction TB

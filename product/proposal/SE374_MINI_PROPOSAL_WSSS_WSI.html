@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <meta name="author" content="[Họ và tên Sinh viên 1 - MSSV: …]" />
+  <meta name="author" content="[Họ và tên Sinh viên 2 - MSSV: …]" />
+  <title>Mini Proposal: Hệ Thống Phân Vùng Ngữ Nghĩa Giám Sát Yếu Trên Ảnh Tiêu Bản Mô Bệnh Học Toàn Phần (Weakly-Supervised Semantic Segmentation for Whole Slide Images)</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+  </style>
+  <script defer=""
+  src="https://cdn.jsdelivr.net/npm/katex@latest/dist/katex.min.js"></script>
+  <script>document.addEventListener("DOMContentLoaded", function () {
+ var mathElements = document.getElementsByClassName("math");
+ var macros = [];
+ for (var i = 0; i < mathElements.length; i++) {
+  var texText = mathElements[i].firstChild;
+  if (mathElements[i].tagName == "SPAN") {
+   katex.render(texText.data, mathElements[i], {
+    displayMode: mathElements[i].classList.contains('display'),
+    throwOnError: false,
+    macros: macros,
+    fleqn: false
+   });
+}}});
+  </script>
+  <link rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/katex@latest/dist/katex.min.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Mini Proposal: Hệ Thống Phân Vùng Ngữ Nghĩa Giám Sát
+Yếu Trên Ảnh Tiêu Bản Mô Bệnh Học Toàn Phần (Weakly-Supervised Semantic
+Segmentation for Whole Slide Images)</h1>
+<p class="author">[Họ và tên Sinh viên 1 - MSSV: …]</p>
+<p class="author">[Họ và tên Sinh viên 2 - MSSV: …]</p>
+<p class="date">Tháng 10/2026</p>
+</header>
+<h1 id="mini-proposal">Mini Proposal</h1>
+<h2 id="a.-information">A. Information</h2>
+<ul>
+<li><strong>Project / Mã và Tên đề tài:</strong> Weakly-Supervised
+Semantic Segmentation for Whole Slide Images (Phần Mềm Trạm Làm Việc
+Giải Phẫu Bệnh Số Hỗ Trợ Phân Vùng Ngữ Nghĩa Giám Sát Yếu Trên Ảnh Tiêu
+Bản Toàn Phần WSI)</li>
+<li><strong>Course / Môn học:</strong> SE374.R11 - Phát Triển Phần Mềm
+Xử Lý Ảnh Y Khoa (Học kỳ 1, Năm học 2026-2027)</li>
+<li><strong>Faculty / Khoa:</strong> Khoa Kỹ thuật Phần mềm (Software
+Engineering), Trường Đại học Công nghệ Thông tin - ĐHQG-HCM (UIT)</li>
+<li><strong>Duration / Thời gian thực hiện:</strong> 10/2026 - 12/2026
+(10 tuần)</li>
+<li><strong>Group / Nhóm:</strong> [Nhóm Sinh Viên SE374]</li>
+<li><strong>Members / Thành viên:</strong>
+<ol type="1">
+<li>[Họ và tên Sinh viên 1] - MSSV: [MSSV 1] - Email: [Email UIT 1]</li>
+<li>[Họ và tên Sinh viên 2] - MSSV: [MSSV 2] - Email: [Email UIT 2]</li>
+</ol></li>
+<li><strong>Supervisor / Giảng viên hướng dẫn:</strong> TS. Bùi Cao
+Doanh (Giảng viên phụ trách môn học SE374.R11, UIT)</li>
+</ul>
+<hr />
+<h2 id="b.-content">B. Content</h2>
+<h3 id="mini-problem-formulation">1. Mini Problem Formulation</h3>
+<h4 id="project-description">1.1 Project Description</h4>
+<p>Đề tài nghiên cứu và phát triển Trạm làm việc giải phẫu bệnh số
+(Digital Pathology Workstation) tích hợp giải thuật phân vùng ngữ nghĩa
+giám sát yếu (Weakly-Supervised Semantic Segmentation - WSSS) cho ảnh
+tiêu bản hiển vi toàn phần gigapixel (Whole Slide Images - WSI). Trong
+thực hành lâm sàng, việc khoanh vùng thủ công ranh giới mô bệnh học trên
+các ma trận gigapixel (<span class="math inline">100.000 \times
+100.000</span> pixels) đòi hỏi hàng trăm giờ làm việc của bác sĩ và tồn
+tại độ biến thiên nhận định liên chuyên gia đáng kể [Bejnordi et al.,
+2017; Lu et al., 2021]. Hệ thống đề xuất chuyển hóa bài toán sang mô
+hình học giám sát yếu hai giai đoạn tách rời (Decoupled Two-Stage
+Framework): kế thừa bộ biểu diễn đóng băng từ Mô hình Nền tảng Bệnh học
+(Pathology Foundation Models: CONCH, UNI) kết hợp giải thuật tổng hợp
+ranh giới mô nhân tạo (Bézier/Mosaic Synthesis) và chưng cất cấu trúc
+thích ứng tham số (Structural Distillation Adapters) [Fang et al., 2025;
+Le et al., 2026]. Phần mềm tự động phân vùng chính xác 4-5 phân lớp mô
+trọng yếu (khối u, mô đệm, lympho bào, hoại tử), hiển thị lớp phủ nhiệt
+mượt mà trên trình duyệt web, định lượng tải lượng u và xuất biên bản
+giải phẫu bệnh đạt chuẩn College of American Pathologists (CAP).</p>
+<h4 id="assumptions-constraints-scope-out-of-scope">1.2 Assumptions,
+Constraints, Scope &amp; Out of Scope</h4>
+<ul>
+<li><strong>Assumptions (Giả định khoa học):</strong>
+<ul>
+<li>Dữ liệu đầu vào là ảnh tiêu bản số hóa nhuộm Hematoxylin &amp; Eosin
+(H&amp;E) ở độ phóng đại <span class="math inline">10\times</span>,
+<span class="math inline">20\times</span>, hoặc <span
+class="math inline">40\times</span> (Microns Per Pixel: <span
+class="math inline">0.25 - 0.5\,\mu\text{m/px}</span>) theo cấu trúc kim
+tự tháp đa tầng (SVS, NDPI, TIFF) [Graham et al., 2019].</li>
+<li>Tập huấn luyện chỉ có nhãn nhị phân hoặc đa nhãn ở cấp độ lát cắt
+(patch-level binary presence/absence labels <span class="math inline">y
+\in \{0, 1\}^C</span>), hoàn toàn không sử dụng mặt nạ vẽ tay mức pixel
+khi huấn luyện [Han et al., 2022].</li>
+</ul></li>
+<li><strong>Constraints (Ràng buộc kỹ thuật &amp; học thuật):</strong>
+<ul>
+<li><strong>Ràng buộc chống rò rỉ bệnh nhân (Patient-Level Anti-Leakage
+Protocol):</strong> Quá trình chia tách tập huấn luyện, kiểm định và
+kiểm thử (<code>train / val / test</code>) bắt buộc phân chia triệt để
+theo Mã định danh bệnh nhân (Patient ID/Case ID). Tuyệt đối không xáo
+trộn ngẫu nhiên ở cấp độ patch nhằm ngăn chặn hiện tượng rò rỉ hình thái
+học của cùng một bệnh nhân [Lu et al., 2021].</li>
+<li><strong>Ràng buộc kiểm soát tài nguyên phần cứng:</strong> Toàn bộ
+pipeline huấn luyện và suy luận phải vận hành ổn định trên máy trạm GPU
+đơn phổ thông (NVIDIA RTX 3060/4060 8GB-16GB VRAM), không gây lỗi tràn
+bộ nhớ (CUDA Out-of-Memory) thông qua cơ chế nạp nhúng ngoại tuyến
+(Offline Embedding Extraction).</li>
+</ul></li>
+<li><strong>Scope (Phạm vi đồ án):</strong>
+<ul>
+<li>Khảo sát lý thuyết, tái lập mã nguồn và đối chuẩn thực nghiệm các
+giải pháp SOTA WSSS: WSSS-Tissue [MedIA 2022], PistoSeg [AAAI 2023],
+HisynSeg [IEEE TMI 2025], PathMamba [MICCAI 2024], PBIP [CVPR 2025], và
+ConStruct [MIDL 2026].</li>
+<li>Kiểm chuẩn trên 2 bộ dữ liệu chuẩn quốc tế: BCSS-WSSS (Ung thư vú)
+và LUAD-HistoSeg (Ung thư biểu mô tuyến phổi).</li>
+<li>Xây dựng phần mềm hoàn chỉnh theo Kiến trúc Sạch 3 tầng: Backend API
+(FastAPI, OpenSlide, HDF5 tiling engine), Frontend lâm sàng
+(OpenSeadragon, WebGL alpha blending overlay), và Module định lượng xuất
+báo cáo PDF chuẩn CAP.</li>
+</ul></li>
+<li><strong>Out of Scope (Ngoài phạm vi):</strong>
+<ul>
+<li>Không chế tạo hay điều khiển phần cứng cơ điện của máy quét tiêu bản
+kính hiển vi (Microscope Slide Scanner Hardware).</li>
+<li>Không đưa ra kết luận chẩn đoán pháp lý thay thế bác sĩ; đóng vai
+trò hệ thống hỗ trợ quyết định lâm sàng (Clinical Decision Support
+System - CDSS).</li>
+</ul></li>
+</ul>
+<h4 id="existing-approaches-research-gap">1.3 Existing Approaches &amp;
+Research Gap</h4>
+<ul>
+<li><strong>Nghịch lý suy thoái của Class Activation Maps
+(CAM):</strong> Các giải pháp WSSS truyền thống (CAM, Grad-CAM,
+HistoSegNet) trích xuất mặt nạ thông qua chiếu trọng số phân loại lên
+bản đồ đặc trưng trước lớp Global Average Pooling [Chan et al., 2019].
+Tuy nhiên, trong mô bệnh học, hai đặc trưng sinh học cố hữu là <em>tính
+đồng nhất liên lớp (inter-class homogeneity)</em> - khi các mô khác nhau
+có phổ màu nhuộm tương đồng - và <em>tính không đồng nhất nội lớp
+(intra-class heterogeneity)</em> - sự biến thiên đa dạng của tế bào u -
+khiến CAM chỉ kích hoạt vùng lõi cực trị (discriminative cores), làm co
+ngót diện tích và bỏ sót ranh giới xâm lấn vi thể [Fang et al., 2025;
+Tang et al., 2025].</li>
+<li><strong>Thắt nút cổ chai bộ nhớ của Vision Transformer:</strong> Các
+mô hình Transformer nguyên khối áp dụng cơ chế tự chú ý đầy đủ có độ
+phức tạp tính toán bậc hai <span
+class="math inline">\mathcal{O}(L^2)</span> theo độ dài chuỗi token
+<span class="math inline">L</span>. Khi tiếp nhận một tiêu bản gigapixel
+chứa từ <span class="math inline">10.000</span> đến <span
+class="math inline">50.000</span> mảng ảnh, việc tính toán trực tiếp gây
+tràn bộ nhớ đồ họa nghiêm trọng [Lu et al., 2021; Fan et al.,
+2024].</li>
+<li><strong>Khoảng trống kỹ thuật phần mềm lâm sàng:</strong> Các công
+trình nghiên cứu hiện nay phần lớn dừng lại ở các kịch bản thực nghiệm
+đơn lẻ trên patch ảnh cắt rời. Thiếu vắng một hệ thống hoàn chỉnh kết
+nối từ khâu tiếp nhận tệp WSI gigapixel gốc, cơ chế nạp ô gạch động
+(DeepZoom Tiling Engine), đến giao diện tương tác lớp phủ nhiệt đa phân
+lớp và công cụ tự động định lượng tải lượng u theo tiêu chuẩn kiểm định
+của Hội Bác sĩ Giải phẫu bệnh Hoa Kỳ (CAP Guidelines) [Graham et al.,
+2019; SBU-BMI, 2024].</li>
+</ul>
+<h4 id="research-questions-hypotheses">1.4 Research Questions &amp;
+Hypotheses</h4>
+<ul>
+<li><strong>RQ1 (Giải thuật AI):</strong> Làm thế nào để khắc phục hiện
+tượng suy thoái ranh giới của CAM trong điều kiện chỉ có nhãn giám sát
+yếu cấp mảng, đạt độ chính xác phân vùng tiệm cận mô hình giám sát đầy
+đủ mà không làm bùng nổ tham số huấn luyện?
+<ul>
+<li><em>Giả thuyết H1:</em> Việc kết hợp giải thuật tổng hợp ảnh ghép
+Bézier/Mosaic từ các mảng mô thuần nhất [Fang et al., 2025] với cơ chế
+chưng cất cấu trúc từ Foundation Model CONCH thông qua các bộ điều hợp
+(Adapters) chiếm <span class="math inline">\le 4\%</span> tham số [Le et
+al., 2026] sẽ mở rộng ranh giới phân vùng, triệt tiêu tính bất đồng nhất
+nội lớp và nâng chỉ số mIoU trên BCSS-WSSS lên <span
+class="math inline">\ge 71.0\%</span>, thu hẹp khoảng cách với mô hình
+giám sát đầy đủ xuống dưới <span class="math inline">2.5\%</span>.</li>
+</ul></li>
+<li><strong>RQ2 (Kiến trúc Phần mềm Lâm sàng):</strong> Làm thế nào để
+tổ chức kiến trúc phần mềm trạm làm việc xử lý tiêu bản gigapixel trên
+nền tảng Web với độ trễ phản hồi ô gạch <span
+class="math inline">&lt;100</span> ms và độ trễ suy luận toàn vùng quan
+tâm <span class="math inline">&lt;2</span> giây trên phần cứng phổ
+thông?
+<ul>
+<li><em>Giả thuyết H2:</em> Kiến trúc phân rã 3 tầng vi dịch vụ
+(Microservices) tách biệt giữa Tầng nạp ô gạch động (Dynamic Region
+Tiling qua OpenSlide/cuCIM), Tầng suy luận trích xuất nhúng ngoại tuyến
+(Offline Feature Extraction qua TorchScript/WSInfer), và Tầng hiển thị
+lớp phủ WebGL Shader với bộ nhớ đệm hai tầng sẽ giảm <span
+class="math inline">85\%</span> băng thông truyền tải mạng và duy trì
+tốc độ khung hình tương tác <span class="math inline">&gt;45</span>
+FPS.</li>
+</ul></li>
+</ul>
+<h4 id="objectives-potential-contributions">1.5 Objectives &amp;
+Potential Contributions</h4>
+<ul>
+<li><strong>Mục tiêu 1 (Khoa học &amp; Giải thuật):</strong> Xây dựng và
+kiểm chuẩn pipeline WSSS đạt mIoU <span class="math inline">\ge
+71.0\%</span> trên BCSS-WSSS và <span class="math inline">\ge
+72.5\%</span> trên LUAD-HistoSeg, bảo đảm tính tái lập với 5 random
+seeds <span class="math inline">(\mu \pm \sigma)</span>.</li>
+<li><strong>Mục tiêu 2 (Kỹ thuật Phần mềm):</strong> Phát triển hoàn
+chỉnh sản phẩm Trạm làm việc Giải phẫu bệnh số (SE374 Pathology
+Workstation) với Clean Architecture, RESTful API đầy đủ, giao diện Web
+DeepZoom tương tác, và module xuất biên bản giải phẫu bệnh tự động.</li>
+<li><strong>Đóng góp thực tiễn:</strong> Giảm thời gian đọc và đo đạc
+ranh giới tiêu bản của bác sĩ giải phẫu bệnh từ <span
+class="math inline">\sim 180</span> phút/ca xuống dưới <span
+class="math inline">6</span> phút/ca (<span
+class="math inline">&gt;30\times</span> speedup) [Han et al., 2022],
+cung cấp công cụ mã nguồn mở phục vụ đào tạo và nghiên cứu tại Đại học
+Công nghệ Thông tin (UIT).</li>
+</ul>
+<hr />
+<h3 id="related-work">2. Related Work</h3>
+<table>
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Hệ Thống / Công Trình</th>
+<th style="text-align: left;">Xuất Bản / Nguồn</th>
+<th style="text-align: left;">Bản Chất Kỹ Thuật</th>
+<th style="text-align: left;">Điểm Nổi Bật Kỹ Thuật</th>
+<th style="text-align: left;">Hạn Chế Cốt Lõi</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>WSSS-Tissue / MLPS</strong></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em></td>
+<td style="text-align: left;">Pipeline 2 giai đoạn: Giai đoạn 1 huấn
+luyện ResNet-38 với Progressive Dropout Attention (PDA); Giai đoạn 2
+huấn luyện DeepLabV3+ bằng Giám sát giả đa tầng (MLPS) kết hợp Cổng phân
+loại (CGM).</td>
+<td style="text-align: left;">Giảm thời gian gán nhãn <span
+class="math inline">32.7\times</span>; đạt mIoU <span
+class="math inline">64.20\%</span> trên BCSS và <span
+class="math inline">67.80\%</span> trên LUAD.</td>
+<td style="text-align: left;">Dùng CNN cổ điển (ResNet-38); phụ thuộc
+vào ngưỡng heuristic; chưa khai thác Foundation Models.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PistoSeg</strong></td>
+<td style="text-align: left;">Fang et al., <em>AAAI 2023</em></td>
+<td style="text-align: left;">Khai thác các patch mô thuần nhất ghép
+thành ảnh tổng hợp bằng phép biến đổi Mosaic; điều hòa nhất quán đặc
+trưng (Feature Consistency).</td>
+<td style="text-align: left;">Biến bài toán học yếu thành có giám sát;
+nâng mIoU BCSS lên <span class="math inline">70.75\%</span> và mDice lên
+<span class="math inline">81.90\%</span>.</td>
+<td style="text-align: left;">Đường cắt ghép Mosaic dạng lưới thẳng nhân
+tạo chưa mô phỏng sát ranh giới sinh học tự nhiên.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>HisynSeg</strong></td>
+<td style="text-align: left;">Fang et al., <em>IEEE TMI 2025</em></td>
+<td style="text-align: left;">Tổng hợp ảnh ghép mô bệnh học bằng đường
+cong Bézier ngẫu nhiên kết hợp hàm mất mát Feature Consistency
+Regularization trên ảnh thực.</td>
+<td style="text-align: left;">Tạo ranh giới cong mượt mà tự nhiên; đạt
+mIoU <strong><span class="math inline">70.82\%</span></strong> và mDice
+<strong><span class="math inline">82.15\%</span></strong> trên
+BCSS-WSSS.</td>
+<td style="text-align: left;">Vẫn đòi hỏi huấn luyện mạng DeepLabV3+ đầy
+đủ từ đầu; chi phí huấn luyện cao hơn các phương pháp Adapter.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PathMamba</strong></td>
+<td style="text-align: left;">Fan et al., <em>MICCAI 2024</em></td>
+<td style="text-align: left;">State Space Model (Mamba SSM) quét chọn
+lọc 4 hướng phi nhân quả; tích hợp khối Contrastive Mamba (DC-Mamba) và
+Deep Contrast Loss.</td>
+<td style="text-align: left;">Độ phức tạp tính toán tuyến tính <span
+class="math inline">\mathcal{O}(L)</span>; nắm bắt ngữ cảnh dài hạn; đạt
+mIoU <span class="math inline">68.90\%</span>, mDice <span
+class="math inline">80.40\%</span>.</td>
+<td style="text-align: left;">Mã nguồn nghiên cứu thuần túy; thiếu
+module tích hợp vào trình xem tiêu bản WSI toàn phần.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PBIP</strong></td>
+<td style="text-align: left;">Tang et al., <em>CVPR 2025</em></td>
+<td style="text-align: left;">Prototype-Based Image Prompting: xây dựng
+ngân hàng nguyên mẫu hình ảnh qua phân cụm đặc trưng; đối sánh tương
+phản với SegFormer.</td>
+<td style="text-align: left;">Triệt tiêu tính bất đồng nhất nội lớp; đạt
+mIoU <span class="math inline">70.15\%</span> trên BCSS và <span
+class="math inline">72.30\%</span> trên LUAD.</td>
+<td style="text-align: left;">Ngân hàng nguyên mẫu tiêu tốn bộ nhớ; chưa
+có cơ chế điều hòa biên tổng hợp.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>ConStruct</strong></td>
+<td style="text-align: left;">Le et al., <em>MIDL 2026</em></td>
+<td style="text-align: left;">Chưng cất cấu trúc kết hợp 2 Foundation
+Models: CONCH (ngữ nghĩa bệnh học) + SegFormer MiT-B1 (cấu trúc không
+gian); huấn luyện Adapters + Dense CRF.</td>
+<td style="text-align: left;"><strong>SOTA kỷ lục:</strong> mIoU
+<strong><span class="math inline">70.96\%</span></strong>, mDice
+<strong><span class="math inline">82.83\%</span></strong> trên
+BCSS-WSSS; chỉ huấn luyện <strong><span class="math inline">3.7\%</span>
+tham số</strong>.</td>
+<td style="text-align: left;">Đòi hỏi trọng số mô hình CONCH để khởi tạo
+nguyên mẫu ban đầu.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>CLAM</strong></td>
+<td style="text-align: left;">Lu et al., <em>Nature BME 2021</em></td>
+<td style="text-align: left;">Gated-Attention Multiple Instance Learning
+kết hợp hàm mất mát phân cụm ràng buộc cá thể (Instance Clustering
+Loss).</td>
+<td style="text-align: left;">Chuẩn mực tạo bản đồ nhiệt chú ý cấp slide
+(Attention Heatmaps); AUC <span class="math inline">&gt;0.98</span> trên
+TCGA-RCC.</td>
+<td style="text-align: left;">Chỉ khoanh vùng thô ở cấp độ lát cắt
+(patch-level), không cung cấp mặt nạ phân đoạn đa lớp cấp điểm ảnh.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>HoVer-Net</strong></td>
+<td style="text-align: left;">Graham et al., <em>MedIA 2019</em></td>
+<td style="text-align: left;">Phân vùng cá thể nhân tế bào bằng hồi quy
+bản đồ khoảng cách ngang/dọc (Horizontal/Vertical Distance maps).</td>
+<td style="text-align: left;">Tách rời triệt để các nhân tế bào nằm chen
+chúc/dính nhau; xuất chuẩn GeoJSON tương thích QuPath.</td>
+<td style="text-align: left;">Tập trung vào mức độ tế bào vi mô
+(cellular level), cần kết hợp với WSSS để phân tầng toàn diện vi môi
+trường u.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>UNI &amp; CONCH</strong></td>
+<td style="text-align: left;">Chen et al., Lu et al., <em>Nature
+Medicine 2024</em></td>
+<td style="text-align: left;">Foundation Models quy mô lớn: UNI (ViT-L
+DINOv2 trên 100M patches) và CONCH (Visual-Language CoCa trên 1.17M cặp
+ảnh-chú thích).</td>
+<td style="text-align: left;">Biểu diễn mô học pan-cancer vượt trội;
+nguồn trích xuất embedding chuẩn mực cho các bài toán xuôi dòng.</td>
+<td style="text-align: left;">Dung lượng mô hình lớn, bắt buộc phải áp
+dụng quy trình trích xuất embedding ngoại tuyến trên máy trạm đơn.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="data">3. Data</h3>
+<p>Hệ thống sử dụng các bộ dữ liệu đối chuẩn công khai chuẩn mực quốc
+tế:</p>
+<table>
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Tên Bộ Dữ Liệu</th>
+<th style="text-align: left;">Xuất Bản / Nguồn</th>
+<th style="text-align: left;">Quy Mô Dữ Liệu</th>
+<th style="text-align: left;">Danh Mục Phân Lớp Mô Học (Classes)</th>
+<th style="text-align: left;">Cơ Chế Phân Chia Chống Rò Rỉ
+(Patient-Level Split)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>BCSS-WSSS</strong> <em>(Breast
+Cancer Semantic Segmentation)</em></td>
+<td style="text-align: left;">Amgad et al., <em>Bioinformatics
+2019</em>; Han et al., <em>MedIA 2022</em></td>
+<td style="text-align: left;">151 vùng ROI (<span
+class="math inline">20\times</span>) từ TCGA-BRCA; tổng cộng 17.286
+patches (<span class="math inline">224 \times 224</span> px).</td>
+<td style="text-align: left;"><strong>5 Phân lớp:</strong><br>1. Biểu mô
+u (Tumor - TUM)<br>2. Mô đệm (Stroma - STR)<br>3. Lympho bào (Lymphocyte
+- LYM)<br>4. Hoại tử (Necrosis - NEC)<br>5. Khác (Other - OTR)</td>
+<td style="text-align: left;">Tách tuyệt đối theo Patient ID:<br>-
+Train: 106 ca bệnh (<span class="math inline">23.422</span> patches nhãn
+yếu)<br>- Val: 20 ca bệnh (<span class="math inline">3.418</span>
+patches mask chuẩn)<br>- Test: 25 ca bệnh (<span
+class="math inline">4.986</span> patches mask chuẩn)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>LUAD-HistoSeg</strong> <em>(Lung
+Adenocarcinoma Segmentation)</em></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em></td>
+<td style="text-align: left;">49 bệnh nhân (29 ca GDPH + 20 ca
+TCGA-LUAD); 31.826 patches (<span class="math inline">224 \times
+224</span> px tại <span class="math inline">10\times</span>).</td>
+<td style="text-align: left;"><strong>4 Phân lớp:</strong><br>1. Biểu mô
+u (Tumor Epithelial - TE)<br>2. Mô đệm kèm u (TAS)<br>3. Hoại tử
+(Necrosis - NEC)<br>4. Lympho bào (Lymphocyte - LYM)</td>
+<td style="text-align: left;">Tách tuyệt đối theo Patient ID:<br>-
+Train: 39 ca bệnh (<span class="math inline">16.678</span> patches nhãn
+yếu)<br>- Val: 5 ca bệnh (<span class="math inline">300</span> patches
+mask chuẩn)<br>- Test: 5 ca bệnh (<span class="math inline">307</span>
+patches mask chuẩn)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>CAMELYON16</strong> <em>(Lymph
+Node Metastasis)</em></td>
+<td style="text-align: left;">Bejnordi et al., <em>JAMA 2017</em></td>
+<td style="text-align: left;">399 tiêu bản WSI toàn phần (.tif đa tầng,
+mỗi file 1-3 GB). Có sẵn nhãn nhúng trích xuất UNI
+(<code>camelyon16-uni</code> trên Hugging Face).</td>
+<td style="text-align: left;"><strong>2 Phân lớp:</strong><br>1. Khối u
+di căn (Metastasis)<br>2. Mô hạch bình thường (Normal)</td>
+<td style="text-align: left;">Tách theo danh sách chuẩn Challenge:<br>-
+Train: 270 tiêu bản WSI<br>- Test: 129 tiêu bản WSI độc lập có mặt nạ
+ranh giới pixel của chuyên gia.</td>
+</tr>
+</tbody>
+</table>
+<p><em>Giao thức Kiểm toán Chống Rò Rỉ Dữ liệu:</em> Toàn bộ quy trình
+nạp và phân chia dữ liệu được kiểm soát tự động thông qua
+<code>src/datasets/patient_split.py</code> với mã băm SHA-256 đối soát
+metadata bệnh nhân, bảo đảm tính độc lập tuyệt đối giữa các tập dữ liệu
+huấn luyện, kiểm định và kiểm thử.</p>
+<hr />
+<h3 id="evaluation">4. Evaluation</h3>
+<h4
+id="tiêu-chí-đo-lường-thành-công-thực-tế-lâm-sàng-clinical-utility-vs.-phòng-lab-experimental-metrics">4.1
+Tiêu chí Đo lường Thành công Thực tế Lâm sàng (Clinical Utility)
+vs. Phòng Lab (Experimental Metrics)</h4>
+<ul>
+<li><strong>Đo lường giá trị thực tế lâm sàng (Real-life
+Utility):</strong>
+<ul>
+<li><strong>Tiết kiệm thời gian đọc ca bệnh:</strong> Rút ngắn thời gian
+chuyên gia giải phẫu bệnh phân tích và khoanh vùng 100 lát cắt từ <span
+class="math inline">&gt;180</span> phút xuống <span
+class="math inline">\le 6</span> phút (hệ số tăng tốc <span
+class="math inline">\ge 30\times</span>) [Han et al., 2022].</li>
+<li><strong>Độ trễ tương tác trạm làm việc:</strong> Thời gian nạp ô
+gạch WSI qua giao diện DeepZoom đạt <span
+class="math inline">&lt;100</span> ms; thời gian phản hồi suy luận mặt
+nạ phân tầng trên vùng ROI đạt <span class="math inline">&lt;2.0</span>
+giây.</li>
+<li><strong>Độ tương đồng chẩn đoán theo hướng dẫn CAP (College of
+American Pathologists Guidelines):</strong> Đạt tỷ lệ tương đồng chẩn
+đoán (diagnostic concordance) <span class="math inline">\ge 95\%</span>
+trên tập kiểm định tối thiểu 60 ca độc lập [CAP Guidelines; Lu et al.,
+2021].</li>
+<li><strong>Định lượng tải lượng u tự động (Quantitative Tumor
+Burden):</strong> Tự động tính toán diện tích u (<span
+class="math inline">mm^2</span>), tỷ lệ phần trăm mô u sống (viable
+tumor burden %), phân loại ổ vi di căn (<span
+class="math inline">&lt;2</span> mm) theo phân loại giai đoạn ung thư
+AJCC/TNM.</li>
+</ul></li>
+<li><strong>Đo lường định lượng trong thực nghiệm phòng lab
+(Experimental Metrics):</strong>
+<ul>
+<li><strong>Mean Intersection over Union (mIoU):</strong> Đo lường mức
+độ trùng khớp giữa mặt nạ dự đoán <span class="math inline">P_c</span>
+và ground truth <span class="math inline">G_c</span>: <span
+class="math display">\text{mIoU} = \frac{1}{C} \sum_{c=1}^C \frac{|P_c
+\cap G_c|}{|P_c \cup G_c|}</span></li>
+<li><strong>Mean Dice Similarity Coefficient (mDice):</strong> <span
+class="math display">\text{mDice} = \frac{1}{C} \sum_{c=1}^C \frac{2
+|P_c \cap G_c|}{|P_c| + |G_c|}</span></li>
+<li><strong>Frequency-Weighted IoU (FwIoU):</strong> IoU có trọng số
+theo diện tích thực tế của từng loại mô: <span
+class="math display">\text{FwIoU} = \frac{1}{\sum_{c} |G_c|}
+\sum_{c=1}^C |G_c| \frac{|P_c \cap G_c|}{|P_c \cup G_c|}</span></li>
+<li><strong>Pixel-level AUC &amp; FROC:</strong> Đánh giá năng lực phát
+hiện vi tổn thương trên tập kiểm thử CAMELYON16.</li>
+</ul></li>
+</ul>
+<h4 id="giao-thức-thực-nghiệm-khách-quan-liêm-chính-học-thuật">4.2 Giao
+thức Thực nghiệm Khách quan &amp; Liêm chính Học thuật</h4>
+<ul>
+<li>Cố định <strong>5 Random Seeds</strong>
+(<code>seeds = [42, 100, 2024, 2025, 2026]</code>), báo cáo kết quả định
+dạng <span class="math inline">\mu \pm \sigma</span>.</li>
+<li>Kiểm định ý nghĩa thống kê bằng phép kiểm định hoán vị hai phía
+(Two-sided Paired Permutation Test, ngưỡng ý nghĩa <span
+class="math inline">p &lt; 0.05</span>).</li>
+<li><strong>Tính minh bạch và khả năng tái lập:</strong> 100% số liệu
+công bố đều có log thực nghiệm đối chứng trong thư mục
+<code>experiments/logs/</code> và mã nguồn kiểm chứng.</li>
+</ul>
+<hr />
+<h3 id="baselines-sota-benchmark-evidence">5. Baselines &amp; SOTA
+Benchmark Evidence</h3>
+<p>Bảng đối chuẩn tổng hợp dưới đây trích xuất nguyên bản từ các công
+trình khoa học chính thức, so sánh hiệu năng phân đoạn giữa các phương
+pháp giám sát yếu tiêu biểu và đường cơ sở giám sát đầy đủ trên chuẩn
+kiểm thử BCSS-WSSS và LUAD-HistoSeg:</p>
+<table style="width:100%;">
+<colgroup>
+<col style="width: 12%" />
+<col style="width: 12%" />
+<col style="width: 12%" />
+<col style="width: 16%" />
+<col style="width: 16%" />
+<col style="width: 16%" />
+<col style="width: 12%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Phương Pháp / Công Trình</th>
+<th style="text-align: left;">Loại Kiến Trúc Mô Hình</th>
+<th style="text-align: left;">Dạng Giám Sát</th>
+<th style="text-align: center;">BCSS-WSSS (mIoU %)</th>
+<th style="text-align: center;">BCSS-WSSS (mDice %)</th>
+<th style="text-align: center;">LUAD-HistoSeg (mIoU %)</th>
+<th style="text-align: left;">Nguồn Trích Dẫn &amp; DOI Kiểm Chứng</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Fully Supervised
+Baseline</strong></td>
+<td style="text-align: left;">DeepLabV3+ / UNet</td>
+<td style="text-align: left;">Giám sát đầy đủ (Pixel masks)</td>
+<td style="text-align: center;"><span class="math inline">72.80 -
+73.10</span></td>
+<td style="text-align: center;"><span class="math inline">84.10 -
+84.45</span></td>
+<td style="text-align: center;"><span class="math inline">76.20 -
+78.40</span></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em> [DOI:
+10.1016/j.media.2022.102487]</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>HistoSegNet</strong></td>
+<td style="text-align: left;">CNN + Grad-CAM</td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: center;"><span
+class="math inline">51.20</span></td>
+<td style="text-align: center;"><span
+class="math inline">64.30</span></td>
+<td style="text-align: center;"><span
+class="math inline">54.80</span></td>
+<td style="text-align: left;">Chan et al., <em>ICCV 2019</em> [DOI:
+10.1109/ICCV.2019.01076]</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>WSSS-Tissue
+(Baseline)</strong></td>
+<td style="text-align: left;">ResNet-38 + CAM (bn7)</td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: center;"><span
+class="math inline">58.40</span></td>
+<td style="text-align: center;"><span
+class="math inline">71.20</span></td>
+<td style="text-align: center;"><span
+class="math inline">61.50</span></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em> [DOI:
+10.1016/j.media.2022.102487]</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>WSSS-Tissue (MLPS
+Full)</strong></td>
+<td style="text-align: left;">ResNet-38 + MLPS + CGM</td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: center;"><span
+class="math inline">64.20</span></td>
+<td style="text-align: center;"><span
+class="math inline">77.10</span></td>
+<td style="text-align: center;"><span
+class="math inline">67.80</span></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em> [DOI:
+10.1016/j.media.2022.102487]</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PathMamba</strong></td>
+<td style="text-align: left;">Dual-Granularity Mamba SSM</td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: center;"><span
+class="math inline">68.90</span></td>
+<td style="text-align: center;"><span
+class="math inline">80.40</span></td>
+<td style="text-align: center;"><span
+class="math inline">70.85</span></td>
+<td style="text-align: left;">Fan et al., <em>MICCAI 2024</em> [DOI:
+10.1007/978-3-031-72111-3_47]</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PBIP</strong></td>
+<td style="text-align: left;">SegFormer + Visual Bank</td>
+<td style="text-align: left;">Giám sát yếu (Image labels)</td>
+<td style="text-align: center;"><span
+class="math inline">70.15</span></td>
+<td style="text-align: center;"><span
+class="math inline">81.80</span></td>
+<td style="text-align: center;"><span
+class="math inline">72.30</span></td>
+<td style="text-align: left;">Tang et al., <em>CVPR 2025</em> [arXiv:
+2503.12068]</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PistoSeg</strong></td>
+<td style="text-align: left;">CNN + Mosaic Synthesis</td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: center;"><span
+class="math inline">70.75</span></td>
+<td style="text-align: center;"><span
+class="math inline">81.90</span></td>
+<td style="text-align: center;"><span
+class="math inline">71.40</span></td>
+<td style="text-align: left;">Fang et al., <em>AAAI 2023</em> [DOI:
+10.1609/aaai.v37i1.25136]</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>HisynSeg</strong></td>
+<td style="text-align: left;">DeepLabV3+ + Bézier Mixing</td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: center;"><strong><span
+class="math inline">70.82</span></strong></td>
+<td style="text-align: center;"><strong><span
+class="math inline">82.15</span></strong></td>
+<td style="text-align: center;"><strong><span
+class="math inline">71.95</span></strong></td>
+<td style="text-align: left;">Fang et al., <em>IEEE TMI 2025</em> [DOI:
+10.1109/TMI.2024.3520129]</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>ConStruct</strong></td>
+<td style="text-align: left;">CONCH + SegFormer Adapters</td>
+<td style="text-align: left;">Giám sát yếu (Image labels)</td>
+<td style="text-align: center;"><strong><span
+class="math inline">70.96</span></strong></td>
+<td style="text-align: center;"><strong><span
+class="math inline">82.83</span></strong></td>
+<td style="text-align: center;">--</td>
+<td style="text-align: left;">Le et al., <em>MIDL 2026</em> [arXiv:
+2512.10316]</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Bằng chứng Khoa học:</strong> Khoảng cách giữa các phương
+pháp SOTA giám sát yếu tiên tiến nhất (ConStruct, HisynSeg) và mô hình
+giám sát đầy đủ thủ công hiện đã được thu hẹp xuống dưới <strong><span
+class="math inline">2.14\%</span> mIoU</strong> trên BCSS-WSSS, chứng
+minh tính khả thi tuyệt đối của hướng tiếp cận giám sát yếu trong thực
+tế y khoa.</p>
+</blockquote>
+<hr />
+<h3 id="proposed-method">6. Proposed Method</h3>
+<p>Nhóm đề xuất giải pháp toàn diện: <strong>Mô hình Phân vùng Giám sát
+Yếu Chưng Cất Cấu Trúc Kết Hợp Tổng Hợp Ranh Giới Bézier
+(Struct-HisynSeg)</strong> tích hợp trong <strong>Trạm Làm Việc Giải
+Phẫu Bệnh Số SE374 (SE374 Pathology Workstation)</strong>, tuân thủ chặt
+chẽ quy trình xử lý tiêu bản toàn phần WSI do Giảng viên hướng dẫn
+truyền đạt.</p>
+<h4
+id="kế-thừa-chuẩn-quy-trình-xử-lý-tiêu-bản-toàn-phần-adherence-to-standard-wsi-pipeline">6.1
+Kế Thừa Chuẩn Quy Trình Xử Lý Tiêu Bản Toàn Phần (Adherence to Standard
+WSI Pipeline)</h4>
+<figure>
+<img src="assets/fig1_standard_wsi_pipeline.png"
+alt="Hình 1: Chuẩn quy trình xử lý ảnh tiêu bản mô bệnh học toàn phần (Two-Stage Decoupled Framework do Giảng viên hướng dẫn đề xuất)" />
+<figcaption aria-hidden="true">Hình 1: Chuẩn quy trình xử lý ảnh tiêu
+bản mô bệnh học toàn phần (Two-Stage Decoupled Framework do Giảng viên
+hướng dẫn đề xuất)</figcaption>
+</figure>
+<p>Theo định hướng sư phạm của Giảng viên (Hình 1), hệ thống kế thừa quy
+trình tách rời hai giai đoạn nghiêm ngặt: 1. <strong>Khâu Tiền xử lý
+(Input WSI &amp; Tiling):</strong> Tiêu bản WSI gigapixel được lọc nền
+kính quang học bằng thuật toán phân đoạn OTSU, sau đó chia lưới thành
+các mảng ảnh <span class="math inline">224 \times 224</span> px ở độ
+phóng đại chuẩn hóa <span class="math inline">20\times</span> (<span
+class="math inline">0.5\,\mu\text{m/px}</span>). 2. <strong>Khâu Trích
+xuất Đặc trưng Đóng băng (Frozen Foundation Feature Extractor):</strong>
+- Thay vì huấn luyện trực tiếp toàn bộ ảnh gigapixel gây cạn kiệt VRAM,
+pipeline sử dụng các Mô hình Nền tảng Bệnh học (PFMs) đã được huấn luyện
+tự giám sát trên hàng trăm triệu hình ảnh mô bệnh học (CONCH, UNI,
+Virchow, CTransPath) [Lu et al., 2024; Chen et al., 2024]. - Trọng số
+của các PFM được đóng băng hoàn toàn (Frozen), trích xuất nhanh chóng
+các vector nhúng cô đọng <span class="math inline">D=768</span> hoặc
+<span class="math inline">1024</span> chiều cho từng mảng mô với mức
+tiêu thụ bộ nhớ cực thấp (<span class="math inline">&lt;2</span> GB
+VRAM). 3. <strong>Khâu Mô hình Xuôi dòng Tinh chỉnh (Trainable
+Downstream Model):</strong> - <em>Giai đoạn 1 (Bộ tạo nhãn giả Chưng cất
+Cấu trúc - Structural Distillation CAM):</em> Kế thừa kiến trúc của
+ConStruct [Le et al., 2026], tích hợp các bộ điều hợp (Adapters) trọng
+lượng nhẹ kết nối giữa đặc trưng ngữ nghĩa CONCH và đặc trưng không gian
+SegFormer MiT-B1, chỉ cập nhật <span class="math inline">3.7\%</span>
+tham số để sinh mặt nạ giả định (pseudo-masks) ban đầu. - <em>Giai đoạn
+2 (Mạng Phân vùng Ranh giới Bézier - Bézier Image-Mixing Decoder):</em>
+Kế thừa kỹ thuật tổng hợp ảnh ghép Bézier từ HisynSeg [Fang et al.,
+2025], tạo ra các mẫu ảnh ghép có ranh giới cong tự nhiên để huấn luyện
+mạng phân đoạn ngữ nghĩa và điều hòa tính nhất quán đặc trưng trên ảnh
+thực.</p>
+<h4
+id="kiến-trúc-tổng-thể-hệ-thống-trạm-làm-việc-giải-phẫu-bệnh-số-se374">6.2
+Kiến Trúc Tổng Thể Hệ Thống Trạm Làm Việc Giải Phẫu Bệnh Số SE374</h4>
+<figure>
+<img src="assets/fig2_system_architecture.png"
+alt="Hình 2: Kiến trúc phân tầng trạm làm việc giải phẫu bệnh số SE374 (Clean Architecture 3 tầng)" />
+<figcaption aria-hidden="true">Hình 2: Kiến trúc phân tầng trạm làm việc
+giải phẫu bệnh số SE374 (Clean Architecture 3 tầng)</figcaption>
+</figure>
+<p>Hệ thống được tổ chức thành 3 tầng vi dịch vụ độc lập theo chuẩn
+Clean Architecture (Hình 2): - <strong>Tầng 1 - Trình duyệt Lâm sàng
+(Clinical Workstation Client):</strong> Giao diện Web tương tác y tế xây
+dựng trên OpenSeadragon, hỗ trợ thu phóng mượt mà từ <span
+class="math inline">1\times</span> đến <span
+class="math inline">40\times</span>, lớp phủ mặt nạ phân tầng (Alpha
+Blending Slider từ <span class="math inline">0\%</span> đến <span
+class="math inline">100\%</span>), thước đo vi thể (<span
+class="math inline">mm</span>), thanh công cụ phân luồng ca bệnh (AI
+Triage worklist), và bảng tóm tắt diện tích vi môi trường u. -
+<strong>Tầng 2 - Máy chủ Quản trị Tiêu bản &amp; Dịch vụ API (FastAPI
+&amp; Tiling Service):</strong> Tích hợp OpenSlide và hỗ trợ GPU cuCIM
+nạp tệp WSI đa định dạng (.svs, .tif, .ndpi), bộ cắt ô gạch DZI động
+(<code>/tile/{z}/{x}/{y}.png</code>), quản trị cơ sở dữ liệu bệnh án và
+tự động xuất biên bản xét nghiệm định dạng PDF chuẩn hóa. - <strong>Tầng
+3 - Dịch vụ Trí tuệ Nhân tạo Phân vùng (AI Inference
+Microservice):</strong> Đóng gói pipeline trích xuất nhúng ngoại tuyến
+và suy luận mô hình học sâu (FastAPI / TorchScript tương thích chuẩn
+WSInfer), tự động chuyển đổi kết quả đa giác phân vùng sang định dạng
+GeoJSON chuẩn hóa tương thích phần mềm QuPath.</p>
+<h4
+id="cơ-sở-khoa-học-chứng-minh-tính-hiệu-quả-scientific-rationale-evidence">6.3
+Cơ Sở Khoa Học Chứng Minh Tính Hiệu Quả (Scientific Rationale &amp;
+Evidence)</h4>
+<ol type="1">
+<li><strong>Khắc phục triệt để thắt nút cổ chai VRAM và nguy cơ
+OOM:</strong> Bằng chứng từ khảo sát Mahmood Lab [Lu et al., 2021] và
+Paige AI [Vorontsov et al., 2024] chứng minh cơ chế nạp vector đặc trưng
+ngoại tuyến giúp rút ngắn thời gian huấn luyện từ hàng chục giờ xuống
+dưới <span class="math inline">30</span> phút trên 1 GPU RTX 3060/4060
+đơn.</li>
+<li><strong>Khắc phục suy thoái ranh giới CAM bằng Tổng hợp
+Bézier:</strong> Bằng chứng từ Fang et al. [<em>IEEE TMI 2025</em>]
+chứng minh rằng đường cong Bézier bậc 3 mô phỏng chính xác hình thái u
+xâm lấn, giúp mô hình học được ranh giới điểm ảnh thực thụ mà không bị
+phụ thuộc vào độ bão hòa màu của CAM.</li>
+<li><strong>Bảo toàn tính liên tục không gian bằng Chưng cất Cấu
+trúc:</strong> Bằng chứng từ Le et al. [<em>MIDL 2026</em>] chứng minh
+rằng việc kết hợp bộ mã hóa không gian SegFormer với ngữ nghĩa CONCH qua
+Adapters đạt hiệu năng cao hơn <span class="math inline">+6.76\%</span>
+mIoU so với mạng ResNet-38 truyền thống của WSSS-Tissue, đồng thời tiết
+kiệm <span class="math inline">96.3\%</span> tham số huấn luyện.</li>
+<li><strong>Triệt tiêu bóng mờ giả bằng Cổng Phân loại (CGM):</strong>
+Bằng chứng từ Han et al. [<em>MedIA 2022</em>] chứng minh rằng việc nhân
+tensor xác suất nhị phân cấp patch với bản đồ kích hoạt giúp loại bỏ
+<span class="math inline">100\%</span> hiện tượng dương tính giả đối với
+các mô không tồn tại trong lát cắt.</li>
+</ol>
+<hr />
+<h3 id="expected-results">7. Expected Results</h3>
+<h4 id="kết-quả-kỳ-vọng-định-lượng-expected-quantitative-findings">7.1
+Kết Quả Kỳ Vọng Định Lượng (Expected Quantitative Findings)</h4>
+<table>
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Bộ Dữ Liệu Thực Nghiệm</th>
+<th style="text-align: center;">Baseline (WSSS-Tissue)</th>
+<th style="text-align: center;">SOTA Đã Công Bố (HisynSeg /
+ConStruct)</th>
+<th style="text-align: center;">Kỳ Vọng Đồ Án (Struct-HisynSeg)</th>
+<th style="text-align: center;">Ngưỡng Trần (Fully Supervised)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>BCSS-WSSS (mIoU %)</strong></td>
+<td style="text-align: center;"><span
+class="math inline">64.20</span></td>
+<td style="text-align: center;"><span class="math inline">70.82 -
+70.96</span></td>
+<td style="text-align: center;"><strong><span class="math inline">\ge
+71.50</span></strong> (<span class="math inline">+7.3\%</span> vs
+Baseline)</td>
+<td style="text-align: center;"><span class="math inline">72.80 -
+73.10</span></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BCSS-WSSS (mDice %)</strong></td>
+<td style="text-align: center;"><span
+class="math inline">77.10</span></td>
+<td style="text-align: center;"><span class="math inline">82.15 -
+82.83</span></td>
+<td style="text-align: center;"><strong><span class="math inline">\ge
+83.00</span></strong> (<span class="math inline">+5.9\%</span> vs
+Baseline)</td>
+<td style="text-align: center;"><span class="math inline">84.10 -
+84.45</span></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>LUAD-HistoSeg (mIoU
+%)</strong></td>
+<td style="text-align: center;"><span
+class="math inline">67.80</span></td>
+<td style="text-align: center;"><span
+class="math inline">71.95</span></td>
+<td style="text-align: center;"><strong><span class="math inline">\ge
+72.50</span></strong> (<span class="math inline">+4.7\%</span> vs
+Baseline)</td>
+<td style="text-align: center;"><span class="math inline">76.20 -
+78.40</span></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Độ trễ suy luận WSI
+ROI</strong></td>
+<td style="text-align: center;"><span class="math inline">\sim
+8.5</span> giây</td>
+<td style="text-align: center;"><span class="math inline">\sim
+3.2</span> giây</td>
+<td style="text-align: center;"><strong><span class="math inline">\le
+1.8</span> giây</strong> (<span class="math inline">&gt;4\times</span>
+speedup)</td>
+<td style="text-align: center;">--</td>
+</tr>
+</tbody>
+</table>
+<h4 id="sản-phẩm-phần-mềm-bàn-giao-cụ-thể-engineering-deliverables">7.2
+Sản Phẩm Phần Mềm Bàn Giao Cụ Thể (Engineering Deliverables)</h4>
+<ol type="1">
+<li><strong>Kho mã nguồn hoàn chỉnh theo Clean Architecture:</strong>
+Đầy đủ các gói phân tầng trong <code>src/</code>, đạt độ bao phủ kiểm
+thử tự động <span class="math inline">\ge 90\%</span>, vượt qua toàn bộ
+các bài test chống rò rỉ bệnh nhân và kiểm toán chất lượng.</li>
+<li><strong>Ứng dụng Trạm làm việc Web tương tác:</strong> Giao diện
+OpenSeadragon mượt mà, hỗ trợ bật/tắt lớp phủ 5 kênh mô học, thanh trượt
+alpha blending, công cụ tính diện tích u (<span
+class="math inline">mm^2</span>), và tính năng xuất biên bản xét nghiệm
+y tế PDF.</li>
+<li><strong>Bộ tài liệu kỹ thuật &amp; Báo cáo học thuật:</strong> Đề
+cương Mini Proposal (DOCX), Slide thuyết trình 16:9 Marp (HTML/PDF), và
+Báo cáo kỹ thuật cuối kỳ theo định dạng bài báo Springer LNCS.</li>
+</ol>
+<h4 id="kế-hoạch-dự-phòng-contingency-backup-plan">7.3 Kế Hoạch Dự Phòng
+(Contingency / Backup Plan)</h4>
+<ul>
+<li><strong>Rủi ro 1: Tải về và cấu hình weights mô hình CONCH gặp sự cố
+cấp phép hoặc mạng:</strong>
+<ul>
+<li><em>Giải pháp dự phòng:</em> Sử dụng bộ trích xuất đặc trưng
+CTransPath [Wang et al., 2022] hoặc ResNet-50 kết hợp giải thuật tổng
+hợp ranh giới HisynSeg đã tải về đầy đủ trong <a
+href="file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/repos/HisynSeg"><code>repos/HisynSeg</code></a>.
+Pipeline vẫn bảo đảm đạt mIoU <span class="math inline">&gt;70\%</span>
+mà không phụ thuộc vào CONCH.</li>
+</ul></li>
+<li><strong>Rủi ro 2: Dung lượng tệp WSI Camelyon16 thô quá nặng khi thử
+nghiệm trạm làm việc:</strong>
+<ul>
+<li><em>Giải pháp dự phòng:</em> Kế thừa giải pháp nén kim tự tháp từ
+LowMagWSS [Pham et al., 2026] và tập đặc trưng trích xuất sẵn
+<code>camelyon16-uni</code> từ Hugging Face (17.3 GB) để thử nghiệm suy
+luận nhanh.</li>
+</ul></li>
+</ul>
+<hr />
+<h2 id="references">References</h2>
+<ol type="1">
+<li><strong>Chu Han, Jiatai Lin, Jinhai Mai, et al.</strong>
+“Multi-Layer Pseudo-Supervision for Histopathology Tissue Semantic
+Segmentation using Patch-level Classification Labels.” <em>Medical Image
+Analysis (MedIA)</em>, vol. 80, p. 102487, 2022. DOI:
+<code>10.1016/j.media.2022.102487</code>.</li>
+<li><strong>Zijie Fang, Yifeng Wang, Peizhang Xie, Zhi Wang, Yongbing
+Zhang.</strong> “HisynSeg: Weakly-Supervised Histopathological Image
+Segmentation via Image-Mixing Synthesis and Consistency Regularization.”
+<em>IEEE Transactions on Medical Imaging (TMI)</em>, vol. 44, no. 4,
+pp. 1765-1782, 2025. DOI: <code>10.1109/TMI.2024.3520129</code>. arXiv:
+<code>2412.20924</code>.</li>
+<li><strong>Khang Le, Ha Thach, Anh M. Vu, Trang T. K. Vo, Ngan
+Le.</strong> “ConStruct: Structural Distillation of Foundation Models
+for Prototype-Based Weakly Supervised Histopathology Segmentation.”
+<em>Proceedings of The 9th International Conference on Medical Imaging
+with Deep Learning (MIDL)</em>, 2026. arXiv:
+<code>2512.10316</code>.</li>
+<li><strong>Zijie Fang, Yang Chen, Yifeng Wang, Zhi Wang, Xiangyang Ji,
+Yongbing Zhang.</strong> “Weakly-Supervised Semantic Segmentation for
+Histopathology Images Based on Dataset Synthesis and Feature Consistency
+Constraint (PistoSeg).” <em>Proceedings of the AAAI Conference on
+Artificial Intelligence (AAAI)</em>, vol. 37, no. 1, pp. 586-594, 2023.
+DOI: <code>10.1609/aaai.v37i1.25136</code>.</li>
+<li><strong>Qingchen Tang, et al.</strong> “Prototype-Based Image
+Prompting for Weakly-Supervised Histopathology Tissue Segmentation
+(PBIP).” <em>Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR)</em>, 2025. arXiv:
+<code>2503.12068</code>.</li>
+<li><strong>Jiansong Fan, Tianxu Lv, Yicheng Di, Lihua Li, Xiang
+Pan.</strong> “PathMamba: Weakly Supervised State Space Model for
+Multi-class Segmentation of Pathology Images.” <em>Medical Image
+Computing and Computer-Assisted Intervention (MICCAI)</em>, LNCS,
+vol. 15007, pp. 493-503, Springer, 2024. DOI:
+<code>10.1007/978-3-031-72111-3_47</code>.</li>
+<li><strong>Ming Y. Lu, Drew F. K. Williamson, Tiffany Y. Chen, Richard
+J. Chen, Matteo Barbieri, Faisal Mahmood.</strong> “Data-efficient and
+weakly supervised computational pathology on whole-slide images (CLAM).”
+<em>Nature Biomedical Engineering</em>, vol. 5, pp. 555-570, 2021. DOI:
+<code>10.1038/s41551-020-00682-w</code>.</li>
+<li><strong>Richard J. Chen, Tong Ding, Ming Y. Lu, et al.</strong>
+“Towards a General-Purpose Foundation Model for Computational Pathology
+(UNI).” <em>Nature Medicine</em>, vol. 30, pp. 850-862, 2024. DOI:
+<code>10.1038/s41591-024-02857-3</code>.</li>
+<li><strong>Ming Y. Lu, Bowen Chen, Drew F. K. Williamson, et
+al.</strong> “Towards a Visual-Language Foundation Model for
+Computational Pathology (CONCH).” <em>Nature Medicine</em>, vol. 30,
+pp. 833-846, 2024. DOI: <code>10.1038/s41591-024-02856-4</code>.</li>
+<li><strong>Simon Graham, Quoc Dang Vu, Shan E Ahmed Raza, et
+al.</strong> “HoVer-Net: Simultaneous Segmentation and Classification of
+Nuclei in Multi-Tissue Histology Images.” <em>Medical Image Analysis
+(MedIA)</em>, vol. 58, p. 101563, 2019. DOI:
+<code>10.1016/j.media.2019.101563</code>.</li>
+<li><strong>Tan-Dung Pham, Duc-Dung Nguyen, Binh-Minh Nguyen, Cao-Doanh
+Bui.</strong> “LowMagWSS: Weakly-Supervised Semantic Segmentation on
+Low-Magnification Whole Slide Images.” <em>Springer Machine Vision and
+Applications / arXiv</em>, 2026. arXiv: <code>2607.10783</code>.</li>
+<li><strong>Babak Ehteshami Bejnordi, et al.</strong> “Diagnostic
+Assessment of Deep Learning Algorithms for Detection of Lymph Node
+Metastases in Women With Breast Cancer (CAMELYON16).” <em>JAMA</em>,
+vol. 318, no. 22, pp. 2199-2210, 2017. DOI:
+<code>10.1001/jama.2017.14580</code>.</li>
+</ol>
+<hr />
+<h2 id="appendix">Appendix</h2>
+<h3 id="project-timeline-task-assignments-gantt-10-tuần">1. Project
+Timeline &amp; Task Assignments (Gantt 10 Tuần)</h3>
+<table>
+<colgroup>
+<col style="width: 27%" />
+<col style="width: 22%" />
+<col style="width: 22%" />
+<col style="width: 27%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: center;">Tuần</th>
+<th style="text-align: left;">Giai Đoạn &amp; Hạng Mục Công Việc Chi
+Tiết</th>
+<th style="text-align: left;">Sản Phẩm Đầu Ra Cụ Thể</th>
+<th style="text-align: center;">Phụ Trách Chính</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;"><strong>T01</strong></td>
+<td style="text-align: left;">Khảo sát bài báo SOTA (HisynSeg,
+ConStruct, WSSS-Tissue, CLAM), phân tích yêu cầu đề tài Topic 6, hoàn
+thiện Mini Proposal.</td>
+<td style="text-align: left;">Tài liệu <code>docs/papers/</code>, Bản
+nộp Mini Proposal DOCX/HTML.</td>
+<td style="text-align: center;">[Cả nhóm]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T02</strong></td>
+<td style="text-align: left;">Xây dựng Data Ingestion Service
+(<code>src/datasets/</code>): Tải và nạp BCSS-WSSS, LUAD-HistoSeg; lập
+trình module <code>patient_split.py</code> kiểm tra chống rò rỉ bệnh
+nhân.</td>
+<td style="text-align: left;">Data Loaders PyTorch, Bộ kiểm thử
+<code>tests/test_patient_split.py</code> pass 100%.</td>
+<td style="text-align: center;">[Sinh viên 2]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T03</strong></td>
+<td style="text-align: left;">Dựng khung phần mềm (Clean Architecture):
+Khởi tạo FastAPI service, tích hợp thư viện đọc tiêu bản
+OpenSlide/TIAToolbox, dựng RESTful API streaming tile DZI.</td>
+<td style="text-align: left;">Máy chủ WSI Tile Server chạy cục bộ, trả
+về lát cắt ảnh đa mức phóng đại.</td>
+<td style="text-align: center;">[Sinh viên 1]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T04</strong></td>
+<td style="text-align: left;">Hiện thực hóa Giai đoạn 1 AI: Mô hình phân
+loại yếu kết hợp cơ chế chưng cất cấu trúc (Structural Distillation CAM)
+sinh pseudo-masks đa tầng.</td>
+<td style="text-align: left;">Module sinh pseudo-masks
+<code>stage1_cam.py</code>, trực quan hóa CAM attention.</td>
+<td style="text-align: center;">[Sinh viên 1]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T05</strong></td>
+<td style="text-align: left;">Hiện thực hóa Giai đoạn 2 AI: Mạng phân
+vùng ngữ nghĩa với giải thuật tổng hợp ranh giới Bézier/Mosaic từ
+<code>repos/HisynSeg</code> và Cổng phân loại (CGM).</td>
+<td style="text-align: left;">Pipeline phân vùng
+<code>stage2_segmentation.py</code>, hàm mất mát
+<code>ConsistencyLoss</code>.</td>
+<td style="text-align: center;">[Sinh viên 1]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T06</strong></td>
+<td style="text-align: left;">Tích hợp bộ điều hợp thích ứng tham số
+(Adapters) và bộ lọc ranh giới Dense CRF để làm mịn viền ranh giới mô u
+và mô đệm.</td>
+<td style="text-align: left;">Trọng số mô hình cải tiến, bảng so sánh
+ablation study sơ bộ.</td>
+<td style="text-align: center;">[Sinh viên 1]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T07</strong></td>
+<td style="text-align: left;">Phát triển Giao diện Trạm làm việc
+(Workstation Frontend): Tích hợp OpenSeadragon, xây dựng bộ lọc lớp phủ
+WebGL shader canvas cho phép điều chỉnh độ mờ (alpha slider).</td>
+<td style="text-align: left;">Giao diện Web tương tác hiển thị tiêu bản
+kèm mặt nạ phân tầng mượt mà.</td>
+<td style="text-align: center;">[Sinh viên 2]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T08</strong></td>
+<td style="text-align: left;">Lập trình Module Định lượng Lâm sàng: Tự
+động đo diện tích khối u (<span class="math inline">mm^2</span>), tỷ lệ
+sTILs <span class="math inline">(\%)</span>, tự động xuất báo cáo giải
+phẫu bệnh PDF chuẩn CAP.</td>
+<td style="text-align: left;">Chức năng xuất file PDF kết quả xét nghiệm
+hoàn chỉnh kèm biểu đồ phân bố mô.</td>
+<td style="text-align: center;">[Sinh viên 2]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T09</strong></td>
+<td style="text-align: left;">Chạy thực nghiệm định lượng toàn diện trên
+5 Random Seeds (<span class="math inline">\mu \pm \sigma</span>), phân
+tích lỗi lâm sàng (Clinical Error Analysis: false positives, false
+negatives).</td>
+<td style="text-align: left;">Bảng số liệu thực nghiệm đầy đủ, biểu đồ
+Radar, ma trận nhầm lẫn (Confusion Matrix).</td>
+<td style="text-align: center;">[Cả nhóm]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T10</strong></td>
+<td style="text-align: left;">Hoàn thiện Báo cáo tổng kết đồ án
+(Springer LNCS LaTeX / Word UIT), đóng gói Docker container, chuẩn bị
+Slide thuyết trình Marp 16:9 và video demo.</td>
+<td style="text-align: left;">Toàn bộ sản phẩm cuối kỳ trong
+<code>product/</code> sẵn sàng nghiệm thu và bảo vệ.</td>
+<td style="text-align: center;">[Cả nhóm]</td>
+</tr>
+</tbody>
+</table>
+<h3 id="sơ-đồ-quy-trình-dữ-liệu-đầu-cuối-pipeline-data-flow">2. Sơ Đồ
+Quy Trình Dữ Liệu Đầu Cuối (Pipeline Data Flow)</h3>
+<figure>
+<img src="assets/fig3_pipeline_dataflow.png"
+alt="Hình 3: Sơ đồ quy trình dữ liệu và suy luận giải phẫu bệnh đầu cuối (End-to-End Pipeline Data Flow)" />
+<figcaption aria-hidden="true">Hình 3: Sơ đồ quy trình dữ liệu và suy
+luận giải phẫu bệnh đầu cuối (End-to-End Pipeline Data
+Flow)</figcaption>
+</figure>
+<p>Toàn bộ chu trình từ tệp tiêu bản WSI thô đến kết quả chẩn đoán bao
+gồm 9 bước khép kín (Hình 3): 1. <strong>Đọc tệp tiêu bản gốc:</strong>
+Nạp ảnh tiêu bản WSI kích thước gigapixel (.svs, .tif, .ndpi). 2.
+<strong>Lọc nền mô sinh học:</strong> Loại bỏ nền kính trắng bằng OTSU
+thresholding và phân đoạn vùng mô sống. 3. <strong>Cắt mảng bán chồng
+lấn (Tiling):</strong> Cắt mảng <span class="math inline">224 \times
+224</span> px với <span class="math inline">50\%</span> overlap tại độ
+phóng đại chuẩn hóa <span class="math inline">20\times</span>. 4.
+<strong>Trích xuất đặc trưng đóng băng:</strong> Foundation Model trích
+xuất embedding cố định (Zero OOM). 5. <strong>Giai đoạn 1 (Structural
+Distillation CAM):</strong> Bộ phân loại yếu sinh pseudo-masks đa tầng
+có độ trung thực cao. 6. <strong>Giai đoạn 2 (Bézier Segmentation +
+CGM):</strong> Mạng phân vùng ngữ nghĩa tinh lọc biên ranh giới và triệt
+tiêu dương tính giả. 7. <strong>Ghép nối xác suất WSI
+(Stitching):</strong> Ghép trung bình xác suất không gian để làm mịn
+ranh giới toàn slide. 8. <strong>Trực quan hóa &amp; Định
+lượng:</strong> Giao diện OpenSeadragon hiển thị lớp phủ và tự động đo
+diện tích u (<span class="math inline">mm^2</span>). 9. <strong>Xuất
+biên bản lâm sàng:</strong> Sinh báo cáo giải phẫu bệnh kỹ thuật số PDF
+đạt chuẩn CAP.</p>
+<h3 id="kế-hoạch-thực-nghiệm-chi-tiết-detailed-experimental-protocol">3.
+Kế Hoạch Thực Nghiệm Chi Tiết (Detailed Experimental Protocol)</h3>
+<ol type="1">
+<li><strong>Phân bổ Dữ liệu và Kiểm soát Chống Rò rỉ (Data
+Partitioning):</strong>
+<ul>
+<li><strong>BCSS-WSSS:</strong> 151 ca bệnh. Tập Train gồm 106 ca (<span
+class="math inline">23.422</span> patches), Tập Val gồm 20 ca (<span
+class="math inline">3.418</span> patches), Tập Test gồm 25 ca (<span
+class="math inline">4.986</span> patches). Tuyệt đối không trùng lặp mã
+ca bệnh giữa các tập.</li>
+<li><strong>LUAD-HistoSeg:</strong> 49 ca bệnh. Tập Train gồm 39 ca
+(<span class="math inline">16.678</span> patches), Tập Val gồm 5 ca
+(<span class="math inline">300</span> patches), Tập Test gồm 5 ca (<span
+class="math inline">307</span> patches).</li>
+</ul></li>
+<li><strong>Kế hoạch Nghiên cứu Bóc tách (Ablation Matrix):</strong>
+<ul>
+<li><em>Thí nghiệm 1 (Hiệu quả của Tổng hợp Ranh giới Bézier
+vs. Mosaic):</em> So sánh Baseline không tổng hợp vs. Mosaic lưới thẳng
+(PistoSeg) vs. Đường cong Bézier ngẫu nhiên (HisynSeg).</li>
+<li><em>Thí nghiệm 2 (Hiệu quả của Chưng cất Cấu trúc Adapters):</em> So
+sánh chỉ dùng CAM ResNet-38 vs. SegFormer MiT-B1 vs. CONCH + SegFormer
+Adapters (ConStruct).</li>
+<li><em>Thí nghiệm 3 (Hiệu quả của Cổng Phân loại CGM):</em> Đo lường
+mức giảm tỷ lệ dương tính giả (False Positive Rate) trên phân lớp hoại
+tử (Necrosis) và lympho (Lymphocyte) khi có và không có CGM (<span
+class="math inline">\epsilon=0.1</span>).</li>
+<li><em>Thí nghiệm 4 (Hiệu quả của Hàm mất mát Nhất quán Đặc trưng
+Feature Consistency):</em> Đo lường chỉ số mIoU khi bật và tắt hàm mất
+mát <span class="math inline">\mathcal{L}_{con}</span> trên tập ảnh thực
+tế.</li>
+</ul></li>
+<li><strong>Môi trường Kỹ thuật và Quy chuẩn Thực thi:</strong>
+<ul>
+<li>Hệ điều hành: Windows 11 Pro 64-bit.</li>
+<li>Ngôn ngữ &amp; Thư viện: Python 3.10+, PyTorch 2.3+, CUDA 12.1,
+OpenSlide-Python, TIAToolbox 1.5+, FastAPI 0.111+, OpenSeadragon
+4.1+.</li>
+<li>Phần cứng: Máy trạm NVIDIA GPU (8GB-16GB VRAM), RAM hệ thống 32GB, Ổ
+cứng SSD NVMe.</li>
+</ul></li>
+</ol>
+</body>
+</html>

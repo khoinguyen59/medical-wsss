@@ -9,22 +9,30 @@ description: "Quy chuẩn kỹ thuật, pipeline khép kín, phân chia chống 
 
 ## 1. Nguyên Tắc Cốt Lõi: Tận Dụng Tri Thức Sẵn Có, Bảo Toàn Sáng Tạo & An Toàn Tài Nguyên
 
-1. **Hỏi Ý Kiến Người Dùng Trước Quyết Định Quan Trọng & Huấn Luyện Nặng (Human-in-the-Loop & Resource Safeguard):**
-   - **Các quyết định bắt buộc phải hỏi người dùng:** Chốt đề tài lựa chọn (trong 8 topic của môn học), chốt bộ dữ liệu (AAPM, DeepLesion, TCGA, BraTS, ABIDE I, ISLES...), chốt kiến trúc baseline và proposed method.
+1. **Hỏi Ý Kiến Người Dùng Trước Mọi Quyết Định Quan Trọng, Cấm Tự Ý Quyết Định Công Nghệ & Kiểm Soát Tài Nguyên (Human-in-the-Loop Supremacy & Resource Safeguard):**
+   - **MỌI QUYẾT ĐỊNH QUAN TRỌNG ĐỀU PHẢI HỎI NGƯỜI DÙNG:** Chốt đề tài lựa chọn (trong 8 topic của môn học), chốt bộ dữ liệu (AAPM, DeepLesion, TCGA, BraTS, ABIDE I, ISLES...), chốt kiến trúc baseline và proposed method.
+   - **CẤM TUYỆT ĐỐI TỰ Ý QUYẾT ĐỊNH CÔNG NGHỆ:** Agent không được tự ý chốt hay áp đặt ngăn xếp công nghệ (tech stack, framework, model backbone, thư viện, database, kiến trúc). Luôn phân tích so sánh ưu - nhược điểm và hỏi ý kiến người dùng qua `ask_question`.
+   - **CẤM TỰ Ý THỰC HIỆN KHI CHƯA ĐƯỢC DUYỆT:** Tuyệt đối không tự ý hành động hay nhảy cóc sang giai đoạn code khi người dùng chưa đồng thuận.
    - **Bắt buộc hỏi trước khi chạy tác vụ tốn VRAM/GPU hoặc thời gian:**
-     * *Dữ liệu y tế (3D CT/MRI, WSI gigapixel):* Rất nặng và tốn VRAM. Trước khi train full-resolution hoặc full-epoch, bắt buộc phải chạy Sanity Run / Dry Run (1-2 batch nhỏ, downsampled slice hoặc tập con bệnh nhân) để kiểm tra pipeline.
+     * *Dữ liệu y tế (3D CT/MRI, WSI gigapixel):* Rất nặng và tốn VRAM. Trước khi train full-resolution hoặc full-epoch, bắt buộc phải chạy Sanity Run / Dry Run (1-2 batch nhỏ, downsampled slice hoặc tập con bệnh nhân) để kiểm tra pipeline không bị lỗi OOM.
      * Báo cáo ước tính thời gian, dung lượng bộ nhớ và xin xác nhận của người dùng trước khi chạy training dài hạn hoặc multi-seed (5 seeds).
      * Tuyệt đối không tự ý gọi API trả phí hoặc cloud compute khi chưa được duyệt.
 
 2. **Chống Rò Rỉ Dữ Liệu Bệnh Nhân Tuyệt Đối (Patient-Level Anti-Leakage):**
    - Trong ảnh y khoa (CT, MRI, fMRI, WSI), một bệnh nhân có thể có hàng trăm lát cắt (slices), hàng nghìn mảng nhỏ (patches), hoặc nhiều chuỗi xung (sequences).
    - **Quy tắc bất biến:** Phân chia tập `train / val / test` **BẮT BUỘC theo Patient ID / Case ID**, tuyệt đối không chia ngẫu nhiên ở cấp độ slice hay patch.
-   - Nếu lát cắt của cùng một bệnh nhân xuất hiện ở cả tập train và test $\rightarrow$ Vi phạm nghiêm trọng về rò rỉ dữ liệu (Data Leakage) và khiến mô hình mất giá trị đánh giá lâm sàng thực tế.
+   - Nếu lát cắt của cùng một bệnh nhân xuất hiện ở cả tập train và test -> Vi phạm nghiêm trọng về rò rỉ dữ liệu (Data Leakage) và khiến mô hình mất giá trị đánh giá lâm sàng thực tế.
    - Mọi bước chuẩn hóa (Hounsfield Unit clipping, z-score normalization, min-max scaling) phải tính toán tham số trên tập train của bệnh nhân rồi mới áp dụng sang val/test.
 
-3. **Liêm Chính Học Thuật & Y Khoa Tuyệt Đối (Zero Mockup):**
-   - Mọi kết quả thực nghiệm, bảng chỉ số (Dice, IoU, PSNR, SSIM, C-Index, AUC, Macro-F1) và hình ảnh trực quan hóa tổn thương/tái tạo bắt buộc phải chạy từ script thật trên dữ liệu thật.
-   - Tuyệt đối nghiêm cấm việc dùng dummy metrics, fake score hay số liệu tự suy đoán. Vi phạm tính trung thực khoa học bị xử lý 0 điểm theo quy chế của Giảng viên và Nhà trường.
+3. **Liêm Chính Khoa Học Tuyệt Đối & Cấm Bịa Số Liệu (Zero Mockup, Zero Fabricated Metrics):**
+   - 100% kết quả thực nghiệm, bảng chỉ số (Dice, IoU, mIoU, PSNR, SSIM, C-Index, AUC, Macro-F1) và hình ảnh trực quan hóa tổn thương/tái tạo bắt buộc phải chạy từ script thật trên dữ liệu y khoa thật hoặc trích dẫn chính xác từ paper gốc có DOI/arXiv kiểm chứng.
+   - TUYỆT ĐỐI NGHIÊM CẤM dùng dummy metrics, fake score, số liệu giả lập do AI hoặc người tự suy diễn. Vi phạm tính trung thực khoa học bị xử lý 0 điểm và đình chỉ đồ án theo quy chế.
+   - Mọi bảng số liệu công bố đều phải có log thực nghiệm thật làm bằng chứng.
+
+4. **Bắt Buộc Review & Khảo Sát Nghiên Cứu Trước Khi Làm (Mandatory Research Gate):**
+   - TUYỆT ĐỐI KHÔNG tự ý làm khi chưa review, research kỹ lưỡng.
+   - Trước khi đề xuất phương án hoặc viết mã nguồn, bắt buộc phải khảo sát paper học thuật, đối soát repo mã nguồn mở trên GitHub và phân tích sâu cơ sở lý thuyết.
+
 
 4. **Kế Thừa Tối Đa Nền Tảng Mã Nguồn Mở Uy Tín (MCP & GitHub-First):**
    - Ưu tiên sử dụng và kế thừa các thư viện chuẩn mực quốc tế:

@@ -120,7 +120,7 @@ $$p(t, \theta) = -\ln\left(\frac{I(t, \theta)}{I_0}\right) = \mathcal{R}\{\mu\}(
 - **Hệ quả toán học:** Sinogram bị thiếu dữ liệu nghiêm trọng $\rightarrow$ FBP truyền thống sinh ra các vệt nhiễu sọc (*streak artifacts*) che khuất tổn thương.
 - **Đóng góp của Giảng viên TS. Bùi Cao Doanh (Slide 32):**
   1. *Long-Sequence Modeling for Sparse-View Computed Tomography Reconstruction*, Machine Vision and Applications (MVAP).
-  2. *CG-GLORE: A Conjugate Gradient–Based Global-Local Regularization Network for Sparse-View CT Reconstruction*, BMVC 2026.
+  2. *CG-GLORE: A Conjugate Gradient-Based Global-Local Regularization Network for Sparse-View CT Reconstruction*, BMVC 2026.
 
 ---
 

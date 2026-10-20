@@ -32,33 +32,39 @@ c:\Users\Nguyen Trong Khoi\Downloads\Y_KHOA/
 ├── AGENTS.md                          # Master Governance Specification (18 Luật Bất Biến Quản Trị)
 ├── README.md                          # Tài liệu tổng quan dự án (File này)
 ├── requirements.txt                   # Danh mục thư viện Python chuẩn mực (PyTorch, MONAI, NiBabel...)
-├── topic.md                           # Danh mục topic & đường link bài báo gốc từ Giảng viên
-├── SE374.R11 - Đồ án cuối kỳ.xlsx     # File Excel đăng ký đề tài của các nhóm trong lớp
 ├── .agents/                           # Bộ não tự trị của AI Agent
 │   ├── rules/                         # 12 Luật kiến trúc & quy chuẩn học thuật y khoa
 │   ├── workflows/                     # Quy trình chuẩn SOP từng bước (Workflow 00 -> 09)
 │   └── skills/                        # Các kỹ năng chuyên sâu (medical-imaging-architect, etc.)
 ├── docs/                              # Tài liệu học thuật, phân tích chuyên sâu & templates
-│   ├── SE374_TOPIC_MATRIX_AND_GUIDE.md# Cẩm nang phân tích chi tiết 8 topic, papers, datasets & SOTA code
+│   ├── course/                        # Thông tin môn học (topic.md, SE374.R11 - Đồ án cuối kỳ.xlsx)
+│   ├── architecture/                  # Thiết kế hệ thống & cơ chế hoạt động AI Agent
+│   ├── lectures/                      # Bài giảng chính khóa môn SE374.R11 (Slides PDF & MD)
+│   ├── papers/                        # Lưu trữ bài báo khoa học chuẩn mực (PDF & MD)
+│   ├── references/                    # Hồ sơ tài liệu tham khảo nguồn (Dossier, Deep Research)
+│   ├── research/                      # Bóc tách 8 topic, ma trận bài toán, lộ trình kỹ thuật
 │   ├── templates/                     # Biểu mẫu chính thức (UIT Thesis Word/LaTeX, Springer LNCS, Proposal)
-│   ├── papers/                        # Lưu trữ bài báo khoa học PDF/MD
-│   └── diary/                         # Nhật ký nghiên cứu & theo dõi tiến độ
+│   ├── design/                        # Sơ đồ thiết kế kiến trúc y khoa
+│   ├── diary/                         # Nhật ký nghiên cứu & theo dõi tiến độ
+│   └── notes/                         # Ghi chú thảo luận & phản hồi
 ├── src/                               # Mã nguồn chính theo Kiến trúc Module phân tầng
 │   ├── config/                        # Cấu hình siêu tham số, random seeds, paths, device GPU
-│   ├── datasets/                      # Data Ingestion (DICOM/NIfTI/WSI loaders, Patient-Level Split)
+│   ├── datasets/                      # Data Ingestion (WSI loaders, Patient-Level Split)
 │   ├── models/                        # Kiến trúc mô hình (Reconstruction, Segmentation, WSI-MIL)
-│   ├── losses_metrics/                # Loss Functions & Metrics (Dice, Focal, PSNR, SSIM, C-Index)
-│   ├── visualization/                 # Trực quan hóa lát cắt 3D & Web Demo Streamlit
+│   ├── losses_metrics/                # Loss Functions & Metrics (Dice, IoU, mIoU, C-Index)
+│   ├── visualization/                 # Trực quan hóa lát cắt & Web Demo
 │   ├── pipeline/                      # Trình điều phối chạy tự động toàn chu trình
-│   └── utils/                         # Hàm tiện ích y khoa (HU windowing, spacing normalization)
+│   └── utils/                         # Hàm tiện ích y khoa (Logger, Normalization)
+├── scripts/                           # Kịch bản tự động hóa (Dọn dẹp, kiểm tra dấu, biên dịch)
 ├── product/                           # Sản phẩm bàn giao cho Giảng viên
-│   ├── proposal/                      # Đề cương Mini Proposal (DOCX / PDF)
+│   ├── proposal/                      # Đề cương Mini Proposal (DOCX, HTML, Markdown)
 │   ├── slides/                        # Slide thuyết trình 16:9 (Marp HTML, PDF, PPTX)
 │   └── reports/                       # Báo cáo kỹ thuật cuối kỳ (Springer / UIT Word & LaTeX)
 ├── tests/                             # Unit tests & Sanity checks (Zero-Mockup & Leakage tests)
+├── scratch/                           # Thư mục nháp và lưu trữ scripts tạm thời (scratch/archive)
 ├── data/                              # Dữ liệu thực nghiệm (đã đưa vào .gitignore)
 ├── checkpoints/                       # Trọng số mô hình đã huấn luyện (đã đưa vào .gitignore)
-└── repos/                             # Meta-repos tài nguyên thiết kế & công cụ ngoại tuyến
+└── repos/                             # Kho mã nguồn SOTA từ GitHub & meta_tools
 ```
 
 ---

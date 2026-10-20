@@ -24,7 +24,7 @@ jobs:
       - name: Install Lint & Test Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flake8 pytest
+          pip install flake8 pytest Pillow
 
       - name: 1. Code Style & Linting Check
         run: |
@@ -42,10 +42,15 @@ jobs:
             echo "PASSED: Zero mockup verified."
           fi
 
-      - name: 3. Run Unit Tests & Integration Tests
+      - name: 3. Deliverables & Scientific Visuals Quality Gate
+        run: |
+          echo "Running Deliverable Quality Auditor on Proposal..."
+          python -m src.utils.deliverable_auditor product/proposal/SE374_MINI_PROPOSAL_WSSS_WSI.md
+
+      - name: 4. Run Unit Tests & Integration Tests
         run: |
           if [ -d "tests" ]; then
-            pytest tests/ -v || true
+            pytest tests/ -v
           else
             echo "No tests directory found yet. Skipping pytest."
           fi

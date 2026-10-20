@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <meta name="author" content="[Họ và tên Sinh viên 1 - MSSV: …]" />
+  <meta name="author" content="[Họ và tên Sinh viên 2 - MSSV: …]" />
+  <title>Mini Proposal: Phân Vùng Ngữ Nghĩa Giám Sát Yếu Trên Ảnh Tiêu Bản Mô Bệnh Học Dựa Trên Mạng Nơ-ron Đa Tầng Và Cổng Phân Loại (Weakly-Supervised Histopathology Segmentation via MLPS and CGM)</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+  </style>
+  <script
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"
+  type="text/javascript"></script>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Mini Proposal: Phân Vùng Ngữ Nghĩa Giám Sát Yếu Trên
+Ảnh Tiêu Bản Mô Bệnh Học Dựa Trên Mạng Nơ-ron Đa Tầng Và Cổng Phân Loại
+(Weakly-Supervised Histopathology Segmentation via MLPS and CGM)</h1>
+<p class="author">[Họ và tên Sinh viên 1 - MSSV: …]</p>
+<p class="author">[Họ và tên Sinh viên 2 - MSSV: …]</p>
+<p class="date">Tháng 10/2026</p>
+</header>
+<h1 id="mini-proposal">Mini Proposal</h1>
+<h2 id="a.-information">A. Information</h2>
+<ul>
+<li><strong>Project / Tên đề tài:</strong> Weakly-Supervised
+Histopathology Tissue Segmentation via Multi-Layer Pseudo-Supervision
+and Classification Gate Mechanism (Phần Mềm Hỗ Trợ Phân Vùng Ngữ Nghĩa
+Giám Sát Yếu Trên Ảnh Tiêu Bản Mô Bệnh Học Dựa Trên Mạng Nơ-ron Đa Tầng
+Và Cổng Phân Loại)</li>
+<li><strong>Course / Môn học:</strong> SE374.R11 - Phát Triển Phần Mềm
+Xử Lý Ảnh Y Khoa (Học kỳ 1, Năm học 2026-2027)</li>
+<li><strong>Faculty / Khoa:</strong> Khoa Kỹ thuật Phần mềm (Software
+Engineering), Trường Đại học Công nghệ Thông tin - ĐHQG-HCM (UIT)</li>
+<li><strong>Duration / Thời gian thực hiện:</strong> 10/2026 - 12/2026
+(10 tuần)</li>
+<li><strong>Group / Nhóm:</strong> [Nhóm Sinh Viên SE374]</li>
+<li><strong>Members / Thành viên:</strong>
+<ol type="1">
+<li>[Họ và tên Sinh viên 1] - MSSV: [MSSV 1] - Email: [Email UIT 1]</li>
+<li>[Họ và tên Sinh viên 2] - MSSV: [MSSV 2] - Email: [Email UIT 2]</li>
+</ol></li>
+<li><strong>Supervisor / Giảng viên hướng dẫn:</strong> TS. Bùi Cao
+Doanh (Giảng viên phụ trách môn học SE374.R11, UIT)</li>
+</ul>
+<hr />
+<h2 id="b.-content">B. Content</h2>
+<h3 id="mini-problem-formulation">1. Mini Problem Formulation</h3>
+<h4 id="project-description">1.1 Project Description</h4>
+<p>Đề tài tập trung nghiên cứu, tái lập và hoàn thiện giải pháp phân
+vùng ngữ nghĩa giám sát yếu (Weakly-Supervised Semantic Segmentation -
+WSSS) cho ảnh mô bệnh học ung thư dựa trên kiến trúc hai giai đoạn tách
+rời: Bộ sinh nhãn giả chú ý lũy tiến (Progressive Dropout Attention -
+PDA) và Mạng phân vùng giám sát giả đa tầng kết hợp Cổng phân loại
+(Multi-Layer Pseudo-Supervision and Classification Gate Mechanism - MLPS
+&amp; CGM). Trong thực hành giải phẫu bệnh, việc gán nhãn thủ công từng
+điểm ảnh (pixel-level mask) trên các tiêu bản mô học đòi hỏi hàng trăm
+giờ làm việc của bác sĩ và gây tốn kém chi phí y tế rất lớn [Bejnordi et
+al., 2017; Han et al., 2022]. Để giải quyết bài toán này một cách vừa
+sức, chắc chắn và khả thi trong khuôn khổ 10 tuần, nhóm kế thừa trực
+tiếp mã nguồn mở đã kiểm chứng từ công trình của Han et al. (<em>Medical
+Image Analysis 2022</em>), tập trung vào bộ dữ liệu chuẩn BCSS-WSSS (Ung
+thư vú). Nhóm đề xuất cải tiến nhẹ ở khâu điều hòa ranh giới nhãn giả
+bằng cơ chế trộn mẫu mô (Tissue Data Mixing) và đóng gói thành một ứng
+dụng phần mềm phân tích mô học trực quan, hỗ trợ bác sĩ chẩn đoán nhanh
+tỷ lệ mô u sống và diện tích tổn thương.</p>
+<h4 id="assumptions-constraints-scope-out-of-scope">1.2 Assumptions,
+Constraints, Scope &amp; Out of Scope</h4>
+<ul>
+<li><strong>Assumptions (Giả định khoa học):</strong>
+<ul>
+<li>Dữ liệu đầu vào là các mảng ảnh mô bệnh học cắt lát <span
+class="math inline">\(224 \times 224\)</span> pixels từ tiêu bản nhuộm
+H&amp;E ở độ phóng đại chuẩn hóa <span
+class="math inline">\(20\times\)</span> (<span
+class="math inline">\(0.5\,\mu\text{m/pixel}\)</span>) [Amgad et al.,
+2019].</li>
+<li>Trong quá trình huấn luyện, mô hình chỉ được cung cấp nhãn phân loại
+nhị phân đa lớp ở cấp độ mảng ảnh (<span class="math inline">\(y \in
+\{0, 1\}^C\)</span>), tuyệt đối không sử dụng mặt nạ vẽ tay cấp điểm ảnh
+[Han et al., 2022].</li>
+</ul></li>
+<li><strong>Constraints (Ràng buộc kỹ thuật &amp; học thuật):</strong>
+<ul>
+<li><strong>Ràng buộc chống rò rỉ bệnh nhân (Patient-Level
+Anti-Leakage):</strong> Quá trình chia tách tập dữ liệu huấn luyện, kiểm
+định và kiểm thử (<code>train / val / test</code>) bắt buộc phân chia
+triệt để theo Mã định danh bệnh nhân (Patient ID). Không trộn lẫn các
+mảng ảnh của cùng một bệnh nhân giữa các tập dữ liệu.</li>
+<li><strong>Ràng buộc phần cứng vừa sức:</strong> Toàn bộ pipeline huấn
+luyện và đánh giá được thiết kế để vận hành trơn tru trên 1 GPU đơn phổ
+thông (NVIDIA RTX 3060/4060 từ 8GB đến 12GB VRAM), hoàn toàn không đòi
+hỏi cụm máy chủ đa GPU hay các mô hình nền tảng tỷ tham số.</li>
+</ul></li>
+<li><strong>Scope (Phạm vi đồ án):</strong>
+<ul>
+<li>Kế thừa và tái hiện mã nguồn thực nghiệm của WSSS-Tissue trên bộ dữ
+liệu chuẩn quốc tế BCSS-WSSS (151 vùng mô u, 5 phân lớp: Biểu mô u, Mô
+đệm, Lympho bào, Hoại tử, và Khác).</li>
+<li>Nghiên cứu và thử nghiệm cải tiến ở khâu sinh mặt nạ giả (thử nghiệm
+cơ chế lọc ngưỡng thích ứng và trộn mẫu biên).</li>
+<li>Xây dựng phần mềm giao diện Web ứng dụng (Web-based Clinical Demo)
+cho phép bác sĩ tải ảnh mảng, hiển thị bản đồ nhiệt CAM, dự đoán mặt nạ
+phân tầng đa lớp và tự động tính tỷ lệ diện tích các thành phần mô.</li>
+</ul></li>
+<li><strong>Out of Scope (Ngoài phạm vi):</strong>
+<ul>
+<li>Không huấn luyện lại các mô hình nền tảng (Foundation Models) quy mô
+gigapixel hàng trăm triệu tham số (như UNI, CONCH) do vượt quá năng lực
+tính toán và thời gian của đồ án môn học.</li>
+<li>Không can thiệp vào phần cứng máy quét tiêu bản kính hiển vi quang
+học.</li>
+</ul></li>
+</ul>
+<h4 id="existing-approaches-research-gap">1.3 Existing Approaches &amp;
+Research Gap</h4>
+<ul>
+<li><strong>Hạn chế của phương pháp Class Activation Maps (CAM) truyền
+thống:</strong> Các giải pháp phân loại yếu kinh điển (CAM, Grad-CAM,
+HistoSegNet) thường chỉ kích hoạt được vùng trung tâm tế bào có tính
+phân biệt cao nhất (discriminative regions), dẫn đến mặt nạ giả bị co
+ngót và bỏ sót các dải ranh giới mô đệm và lympho xâm lấn [Chan et al.,
+2019; Han et al., 2022].</li>
+<li><strong>Thách thức của các mô hình SOTA phức tạp:</strong> Các công
+trình gần đây (HisynSeg 2025, ConStruct 2026, PathMamba 2024) tuy đạt
+chỉ số mIoU cao hơn nhưng đòi hỏi khối lượng tài nguyên tính toán lớn,
+thời gian huấn luyện dài ngày và phụ thuộc vào các trọng số Foundation
+Model khó cấu hình trên máy trạm sinh viên.</li>
+<li><strong>Khoảng trống thực tiễn:</strong> Thiếu một phiên bản phần
+mềm gọn nhẹ, dễ triển khai cục bộ, trực quan hóa rõ ràng cơ chế hoạt
+động của từng tầng mạng nơ-ron (từ bản đồ đặc trưng CAM đến cổng phân
+loại CGM) phục vụ học tập và ứng dụng thực hành.</li>
+</ul>
+<h4 id="research-questions-hypotheses">1.4 Research Questions &amp;
+Hypotheses</h4>
+<ul>
+<li><strong>RQ1 (Nghiên cứu Giải thuật AI):</strong> Liệu việc áp dụng
+mạng ResNet-38 kết hợp cơ chế Progressive Dropout Attention (PDA) và
+Cổng phân loại CGM có bảo đảm khả năng tái lập chỉ số mIoU <span
+class="math inline">\(\ge 64.0\%\)</span> trên bộ dữ liệu BCSS-WSSS khi
+chỉ sử dụng 1 GPU máy trạm đơn hay không?
+<ul>
+<li><em>Giả thuyết H1:</em> Cơ chế PDA buộc mạng phải chú ý đến các vùng
+đặc trưng thứ cấp ngoài vùng lõi, kết hợp cùng CGM triệt tiêu hoàn toàn
+bóng mờ dương tính giả, giúp mô hình đạt mIoU <span
+class="math inline">\(\ge 64.2\%\)</span> tương đương công bố của Han et
+al. (<em>MedIA 2022</em>).</li>
+</ul></li>
+<li><strong>RQ2 (Ứng dụng Kỹ thuật Phần mềm):</strong> Làm thế nào để
+đóng gói toàn bộ pipeline 2 giai đoạn phức tạp thành một công cụ phần
+mềm dễ dùng, hỗ trợ bác sĩ xem nhanh kết quả phân vùng trong thời gian
+<span class="math inline">\(&lt;2\)</span> giây/mảng ảnh?
+<ul>
+<li><em>Giả thuyết H2:</em> Việc xuất mô hình sang TorchScript và xây
+dựng giao diện tương tác bằng FastAPI kết hợp Web UI gọn nhẹ sẽ tối ưu
+hóa thời gian suy luận xuống dưới <span
+class="math inline">\(1.5\)</span> giây/ảnh, đáp ứng tốt nhu cầu thử
+nghiệm lâm sàng.</li>
+</ul></li>
+</ul>
+<h4 id="objectives-potential-contributions">1.5 Objectives &amp;
+Potential Contributions</h4>
+<ul>
+<li><strong>Mục tiêu 1:</strong> Tái lập thành công 100% pipeline mã
+nguồn mở WSSS-Tissue trên BCSS-WSSS, đạt mIoU <span
+class="math inline">\(\ge 64.20\%\)</span> và mDice <span
+class="math inline">\(\ge 77.10\%\)</span>, bảo đảm tính ổn định qua 5
+random seeds.</li>
+<li><strong>Mục tiêu 2:</strong> Thử nghiệm cải tiến khâu tiền xử lý
+hoặc điều hòa ranh giới nhãn giả, hướng tới cải thiện thêm <span
+class="math inline">\(+1.0\%\)</span> đến <span
+class="math inline">\(+1.5\%\)</span> mIoU so với bản gốc.</li>
+<li><strong>Mục tiêu 3:</strong> Phát triển ứng dụng Web hoàn chỉnh hỗ
+trợ bác sĩ tải ảnh, xem phân tầng mô học và tự động tính toán tỷ lệ tải
+lượng u (Viable Tumor Percentage).</li>
+</ul>
+<hr />
+<h3 id="related-work">2. Related Work</h3>
+<table>
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Phương Pháp / Công Trình</th>
+<th style="text-align: left;">Xuất Bản / Tác Giả</th>
+<th style="text-align: left;">Bản Chất Kỹ Thuật</th>
+<th style="text-align: left;">Điểm Mạnh</th>
+<th style="text-align: left;">Hạn Chế</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>HistoSegNet</strong></td>
+<td style="text-align: left;">Chan et al., <em>ICCV 2019</em></td>
+<td style="text-align: left;">Phân loại patch ảnh kết hợp Grad-CAM để
+sinh mặt nạ giả phân tầng mô.</td>
+<td style="text-align: left;">Đơn giản, tốc độ suy luận nhanh.</td>
+<td style="text-align: left;">Mặt nạ CAM bị co ngót nghiêm trọng; mIoU
+chỉ đạt <span class="math inline">\(51.20\%\)</span>.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>WSSS-Tissue (Nền tảng chọn
+lọc)</strong></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em></td>
+<td style="text-align: left;">Pipeline 2 giai đoạn: Giai đoạn 1 huấn
+luyện ResNet-38 với Progressive Dropout (PDA); Giai đoạn 2 huấn luyện
+DeepLabV3+ bằng Giám sát giả đa tầng (MLPS) kết hợp Cổng phân loại
+(CGM).</td>
+<td style="text-align: left;"><strong>Mã nguồn hoàn chỉnh, cấu hình tối
+ưu:</strong> Giảm <span class="math inline">\(32.7\times\)</span> thời
+gian gán nhãn; mIoU đạt <strong><span
+class="math inline">\(64.20\%\)</span></strong>, mDice <strong><span
+class="math inline">\(77.10\%\)</span></strong> trên BCSS.</td>
+<td style="text-align: left;">Chưa tích hợp bộ trộn dữ liệu biên mô
+học.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PistoSeg / HisynSeg</strong></td>
+<td style="text-align: left;">Fang et al., <em>AAAI 2023 / IEEE TMI
+2025</em></td>
+<td style="text-align: left;">Tổng hợp ảnh mô học ghép (Mosaic / Bézier
+curves) từ các patch thuần nhất để tạo ranh giới giả định.</td>
+<td style="text-align: left;">Ranh giới cong tự nhiên, nâng mIoU lên
+<span class="math inline">\(70.8\%\)</span>.</td>
+<td style="text-align: left;">Thuật toán tổng hợp ảnh tương đối phức
+tạp, thời gian huấn luyện dài.</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>ConStruct</strong></td>
+<td style="text-align: left;">Le et al., <em>MIDL 2026</em></td>
+<td style="text-align: left;">Chưng cất cấu trúc từ Foundation Model
+CONCH sang SegFormer qua Adapters.</td>
+<td style="text-align: left;">SOTA kỷ lục <span
+class="math inline">\(70.96\%\)</span> mIoU.</td>
+<td style="text-align: left;">Phụ thuộc hoàn toàn vào trọng số CONCH
+thương mại/hạn chế truy cập.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="data">3. Data</h3>
+<p>Đồ án tập trung toàn diện vào bộ dữ liệu chuẩn mực được sử dụng rộng
+rãi nhất trong lĩnh vực:</p>
+<ul>
+<li><strong>Tên bộ dữ liệu:</strong> <strong>BCSS-WSSS (Breast Cancer
+Semantic Segmentation - Weakly Supervised)</strong>.</li>
+<li><strong>Nguồn gốc:</strong> Trích xuất từ kho dữ liệu quốc tế
+TCGA-BRCA, chuẩn hóa bởi Amgad et al. (<em>Bioinformatics 2019</em>) và
+Han et al. (<em>MedIA 2022</em>).</li>
+<li><strong>Quy mô:</strong> 151 vùng mô quan tâm (ROIs) cắt từ các tiêu
+bản giải phẫu bệnh ung thư vú ở độ phóng đại <span
+class="math inline">\(20\times\)</span>. Tổng cộng <span
+class="math inline">\(17.286\)</span> mảng ảnh kích thước <span
+class="math inline">\(224 \times 224\)</span> pixels.</li>
+<li><strong>Danh mục 5 phân lớp mô học:</strong>
+<ol type="1">
+<li><em>Biểu mô u (Tumor Epithelium - TUM):</em> Vùng tế bào ác tính xâm
+lấn.</li>
+<li><em>Mô đệm (Stroma - STR):</em> Vùng mô liên kết nâng đỡ vi môi
+trường u.</li>
+<li><em>Lympho bào (Inflammatory / Lymphocytic Infiltrate - LYM):</em>
+Tế bào miễn dịch thâm nhiễm.</li>
+<li><em>Hoại tử (Necrosis - NEC):</em> Mô tế bào chết do thiếu máu nuôi
+dưỡng.</li>
+<li><em>Khác (Other normal / background - OTR):</em> Mô mỡ, mạch máu và
+chất nền bình thường.</li>
+</ol></li>
+<li><strong>Phân chia dữ liệu chống rò rỉ bệnh nhân (Patient-Level
+Split):</strong>
+<ul>
+<li><strong>Tập Huấn luyện (Train):</strong> 106 ca bệnh (<span
+class="math inline">\(23.422\)</span> patches với nhãn phân loại nhị
+phân đa lớp cấp patch).</li>
+<li><strong>Tập Kiểm định (Val):</strong> 20 ca bệnh (<span
+class="math inline">\(3.418\)</span> patches có mặt nạ chuẩn pixel
+ground truth).</li>
+<li><strong>Tập Kiểm thử (Test):</strong> 25 ca bệnh (<span
+class="math inline">\(4.986\)</span> patches có mặt nạ chuẩn pixel
+ground truth của bác sĩ).</li>
+<li><em>Nguyên tắc bất biến:</em> Không có bất kỳ mảng ảnh nào của cùng
+một bệnh nhân xuất hiện ở nhiều tập khác nhau.</li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="evaluation">4. Evaluation</h3>
+<h4 id="tiêu-chí-đo-lường-lâm-sàng-kỹ-thuật">4.1 Tiêu chí Đo lường Lâm
+sàng &amp; Kỹ thuật</h4>
+<ul>
+<li><strong>Đo lường giá trị thực tế lâm sàng:</strong>
+<ul>
+<li><strong>Tiết kiệm thời gian đọc ca bệnh:</strong> Giảm thời gian
+khoanh vùng tiêu bản từ <span class="math inline">\(\sim 180\)</span>
+phút xuống <span class="math inline">\(\le 6\)</span> phút cho mỗi 100
+mảng ảnh (<span class="math inline">\(&gt;30\times\)</span>
+speedup).</li>
+<li><strong>Độ trễ suy luận ứng dụng:</strong> Thời gian phản hồi suy
+luận trên giao diện Web <span class="math inline">\(&lt;1.5\)</span>
+giây cho mỗi mảng ảnh <span class="math inline">\(224 \times
+224\)</span> px.</li>
+<li><strong>Tự động định lượng tải lượng u:</strong> Tự động tính toán
+diện tích u (<span class="math inline">\(mm^2\)</span>) và tỷ lệ phần
+trăm mô u sống (Viable Tumor Score).</li>
+</ul></li>
+<li><strong>Đo lường định lượng trong phòng thí nghiệm:</strong>
+<ul>
+<li><strong>Mean Intersection over Union (mIoU):</strong> <span
+class="math display">\[\text{mIoU} = \frac{1}{C} \sum_{c=1}^C \frac{|P_c
+\cap G_c|}{|P_c \cup G_c|}\]</span></li>
+<li><strong>Mean Dice Similarity Coefficient (mDice):</strong> <span
+class="math display">\[\text{mDice} = \frac{1}{C} \sum_{c=1}^C \frac{2
+|P_c \cap G_c|}{|P_c| + |G_c|}\]</span></li>
+<li>Đánh giá trên từng phân lớp cụ thể: IoU_TUM, IoU_STR, IoU_LYM,
+IoU_NEC.</li>
+</ul></li>
+</ul>
+<h4 id="giao-thức-thực-nghiệm-khách-quan">4.2 Giao thức Thực nghiệm
+Khách quan</h4>
+<ul>
+<li>Cố định <strong>5 Random Seeds</strong>
+(<code>seeds = [42, 100, 2024, 2025, 2026]</code>), báo cáo kết quả
+trung bình và độ lệch chuẩn (<span class="math inline">\(\mu \pm
+\sigma\)</span>).</li>
+<li>100% số liệu thực nghiệm được lưu vết trong thư mục
+<code>experiments/logs/</code>.</li>
+</ul>
+<hr />
+<h3 id="baselines-benchmark-evidence">5. Baselines &amp; Benchmark
+Evidence</h3>
+<p>Bảng số liệu đối chuẩn thực nghiệm trên tập kiểm thử BCSS-WSSS (trích
+dẫn nguyên bản từ bài báo Han et al., <em>MedIA 2022</em>):</p>
+<table>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 15%" />
+<col style="width: 15%" />
+<col style="width: 19%" />
+<col style="width: 19%" />
+<col style="width: 15%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: left;">Phương Pháp Thực Nghiệm</th>
+<th style="text-align: left;">Dạng Giám Sát</th>
+<th style="text-align: left;">Kiến Trúc Mô Hình</th>
+<th style="text-align: center;">BCSS-WSSS (mIoU %)</th>
+<th style="text-align: center;">BCSS-WSSS (mDice %)</th>
+<th style="text-align: left;">Nguồn Kiểm Chứng</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Fully Supervised
+Baseline</strong></td>
+<td style="text-align: left;">Giám sát đầy đủ (Pixel masks)</td>
+<td style="text-align: left;">DeepLabV3+</td>
+<td style="text-align: center;"><span
+class="math inline">\(72.80\)</span></td>
+<td style="text-align: center;"><span
+class="math inline">\(84.10\)</span></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>HistoSegNet</strong></td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: left;">CNN + Grad-CAM</td>
+<td style="text-align: center;"><span
+class="math inline">\(51.20\)</span></td>
+<td style="text-align: center;"><span
+class="math inline">\(64.30\)</span></td>
+<td style="text-align: left;">Chan et al., <em>ICCV 2019</em></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>CAM Baseline (bn7)</strong></td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: left;">ResNet-38</td>
+<td style="text-align: center;"><span
+class="math inline">\(58.40\)</span></td>
+<td style="text-align: center;"><span
+class="math inline">\(71.20\)</span></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>WSSS-Tissue (MLPS Full -
+Core)</strong></td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: left;">ResNet-38 + DeepLabV3+</td>
+<td style="text-align: center;"><strong><span
+class="math inline">\(64.20\)</span></strong></td>
+<td style="text-align: center;"><strong><span
+class="math inline">\(77.10\)</span></strong></td>
+<td style="text-align: left;">Han et al., <em>MedIA 2022</em></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Mục tiêu đồ án vừa
+sức</strong></td>
+<td style="text-align: left;">Giám sát yếu (Patch labels)</td>
+<td style="text-align: left;">WSSS-Tissue + Tissue Mixing</td>
+<td style="text-align: center;"><strong><span class="math inline">\(\ge
+65.50\)</span></strong></td>
+<td style="text-align: center;"><strong><span class="math inline">\(\ge
+78.50\)</span></strong></td>
+<td style="text-align: left;">Đề xuất nhóm SE374</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="proposed-method">6. Proposed Method</h3>
+<p>Nhóm đề xuất giải pháp trọng tâm, khả thi và bám sát mã nguồn mở
+chính thức: <strong>Mô hình Phân vùng Ngữ nghĩa Giám sát Yếu Hai Giai
+đoạn (WSSS-Tissue Pipeline)</strong> kết hợp <strong>Giao diện Web Hỗ
+trợ Chẩn đoán Phân tầng Mô học (Pathology Assistant Web
+App)</strong>.</p>
+<h4 id="sơ-đồ-kiến-trúc-quy-trình-hai-giai-đoạn">6.1 Sơ Đồ Kiến Trúc Quy
+Trình Hai Giai Đoạn</h4>
+<figure>
+<img src="product/proposal/fig1_wsss_tissue_workflow.png"
+alt="Hình 1: Sơ đồ kiến trúc phương pháp phân vùng ngữ nghĩa giám sát yếu WSSS-Tissue (Trích nguồn chính thức: Chu Han et al., Medical Image Analysis 2022, DOI: 10.1016/j.media.2022.102487)" />
+<figcaption aria-hidden="true">Hình 1: Sơ đồ kiến trúc phương pháp phân
+vùng ngữ nghĩa giám sát yếu WSSS-Tissue (Trích nguồn chính thức: Chu Han
+et al., Medical Image Analysis 2022, DOI:
+10.1016/j.media.2022.102487)</figcaption>
+</figure>
+<p>Kiến trúc phương pháp (Hình 1) được tổ chức thành 2 giai đoạn tách
+rời rõ ràng:</p>
+<ol type="1">
+<li><strong>Giai đoạn 1: Sinh Mặt Nạ Giả Bằng Chú Ý Lũy Tiến
+(Weakly-supervised Pseudo Mask Generation - Hình 1a):</strong>
+<ul>
+<li>Mạng trích xuất đặc trưng là ResNet-38 tiếp nhận mảng ảnh <span
+class="math inline">\(x\)</span>.</li>
+<li>Áp dụng cơ chế <strong>Progressive Dropout Attention (PDA - ký hiệu
+D)</strong>: thay vì chỉ kích hoạt một vài nốt tế bào nổi trội, mạng
+loại bỏ có chủ đích các vùng kích hoạt cực đại ở các bước lặp trước để
+buộc mô hình mở rộng trường chú ý sang toàn bộ diện tích mô liên
+quan.</li>
+<li>Trích xuất nhãn giả đa tầng ở 3 mức phân giải khác nhau: tầng <span
+class="math inline">\(b4\_5\)</span>, tầng <span
+class="math inline">\(b5\_2\)</span>, và tầng chuẩn hóa <span
+class="math inline">\(bn7\)</span>.</li>
+</ul></li>
+<li><strong>Giai đoạn 2: Huấn Luyện Mạng Phân Vùng Đa Tầng Và Cổng Phân
+Loại (Pseudo-supervised Tissue Semantic Segmentation - Hình
+1b):</strong>
+<ul>
+<li>Mạng phân vùng ngữ nghĩa DeepLabV3+ tiếp nhận mảng ảnh đầu vào và dự
+đoán bản đồ xác suất cho từng phân lớp.</li>
+<li>Tích hợp <strong>Cổng Phân Loại (Classification Gate Mechanism - CGM
+- ký hiệu G)</strong>: lấy vector xác suất nhãn cấp mảng <span
+class="math inline">\(\hat{y}_k\)</span> từ Giai đoạn 1 làm ngưỡng điều
+kiện. Nếu một loại mô (ví dụ: hoại tử) không xuất hiện trong mảng ảnh
+(<span class="math inline">\(y_k = 0\)</span>), CGM sẽ ép xác suất vùng
+tương ứng về 0, loại bỏ hoàn toàn hiện tượng dương tính giả.</li>
+<li>Hàm mất mát giám sát giả đa tầng kết hợp: <span
+class="math inline">\(\mathcal{L}_{total} = \mathcal{L}_{bn7} + \alpha
+\mathcal{L}_{b5\_2} + \beta \mathcal{L}_{b4\_5}\)</span>.</li>
+</ul></li>
+<li><strong>Cải tiến Trọng tâm Vừa sức của Nhóm:</strong>
+<ul>
+<li>Bổ sung kỹ thuật trộn mẫu mô học (Tissue Patch Mixing) nhẹ nhàng
+trong khâu nạp dữ liệu của Giai đoạn 2 để làm mượt các đường biên tiếp
+giáp giữa mô u và mô đệm.</li>
+</ul></li>
+</ol>
+<h4 id="kiến-trúc-phần-mềm-ứng-dụng-software-deliverable">6.2 Kiến Trúc
+Phần Mềm Ứng Dụng (Software Deliverable)</h4>
+<ul>
+<li><strong>Tầng Backend:</strong> Dịch vụ API viết bằng FastAPI, nạp
+trọng số mô hình đã huấn luyện (TorchScript), cung cấp 2 endpoint chính:
+<code>/api/predict_cam</code> và
+<code>/api/predict_segmentation</code>.</li>
+<li><strong>Tầng Frontend:</strong> Giao diện Web HTML5/CSS/JavaScript
+thuần, cho phép kéo thả ảnh mảng mô học, hiển thị song song ảnh gốc
+H&amp;E, bản đồ nhiệt chú ý CAM, và mặt nạ phân tầng đa màu sắc.</li>
+<li><strong>Module Báo cáo:</strong> Tự động tính toán diện tích u
+(<span class="math inline">\(mm^2\)</span>) và tỷ lệ mô u sống, hiển thị
+biểu đồ tròn phân bố mô học.</li>
+</ul>
+<hr />
+<h3 id="expected-results">7. Expected Results</h3>
+<h4 id="kết-quả-định-lượng-kỳ-vọng">7.1 Kết Quả Định Lượng Kỳ Vọng</h4>
+<ul>
+<li>Tái lập thành công Baseline WSSS-Tissue trên BCSS-WSSS với mIoU
+<span class="math inline">\(\ge 64.20\%\)</span>, mDice <span
+class="math inline">\(\ge 77.10\%\)</span>.</li>
+<li>Cải tiến nhẹ đạt mIoU <span class="math inline">\(\ge
+65.50\%\)</span> (<span class="math inline">\(+1.3\%\)</span> cải thiện
+so với baseline).</li>
+<li>Thời gian suy luận <span class="math inline">\(&lt;1.5\)</span>
+giây/ảnh trên GPU NVIDIA đơn.</li>
+</ul>
+<h4 id="sản-phẩm-bàn-giao">7.2 Sản Phẩm Bàn Giao</h4>
+<ol type="1">
+<li>Mã nguồn huấn luyện và kiểm thử sạch sẽ, có tài liệu hướng dẫn chạy
+lệnh trong <code>experiments/</code>.</li>
+<li>Ứng dụng Web tương tác chạy cục bộ cho phép bác sĩ thử nghiệm phân
+vùng mô bệnh học.</li>
+<li>Báo cáo kỹ thuật cuối kỳ đầy đủ số liệu thực nghiệm và slide thuyết
+trình 16:9.</li>
+</ol>
+<h4 id="kế-hoạch-dự-phòng">7.3 Kế Hoạch Dự Phòng</h4>
+<ul>
+<li>Nếu phần mở rộng trộn dữ liệu không tăng hiệu năng như kỳ vọng, nhóm
+sẽ dùng 100% pipeline gốc của WSSS-Tissue (đã kiểm chứng <span
+class="math inline">\(64.2\%\)</span> mIoU) làm sản phẩm bảo vệ chính,
+tập trung hoàn thiện giao diện phần mềm và phân tích lỗi y khoa chuyên
+sâu. Đồ án bảo đảm an toàn tuyệt đối về mặt tiến độ.</li>
+</ul>
+<hr />
+<h2 id="references">References</h2>
+<ol type="1">
+<li><strong>Chu Han, Jiatai Lin, Jinhai Mai, et al.</strong>
+“Multi-Layer Pseudo-Supervision for Histopathology Tissue Semantic
+Segmentation using Patch-level Classification Labels.” <em>Medical Image
+Analysis (MedIA)</em>, vol. 80, p. 102487, 2022. DOI:
+<code>10.1016/j.media.2022.102487</code>.</li>
+<li><strong>Mohamed Amgad, Habiba Elfandy, et al.</strong> “Structured
+crowdsourcing enables pan-cancer analysis of data quality and usability
+in image segmentation.” <em>Bioinformatics</em>, vol. 35, no. 18,
+pp. 3468-3477, 2019. DOI:
+<code>10.1093/bioinformatics/btz083</code>.</li>
+<li><strong>Loris Nanni, et al.</strong> “HistoSegNet: Semantic
+Segmentation of Histological Images using Deep Learning.” <em>ICCV
+Workshops</em>, 2019. DOI: <code>10.1109/ICCVW.2019.00100</code>.</li>
+<li><strong>Zijie Fang, Yifeng Wang, et al.</strong> “HisynSeg:
+Weakly-Supervised Histopathological Image Segmentation via Image-Mixing
+Synthesis and Consistency Regularization.” <em>IEEE Transactions on
+Medical Imaging (TMI)</em>, vol. 44, no. 4, pp. 1765-1782, 2025. DOI:
+<code>10.1109/TMI.2024.3520129</code>.</li>
+<li><strong>Babak Ehteshami Bejnordi, et al.</strong> “Diagnostic
+Assessment of Deep Learning Algorithms for Detection of Lymph Node
+Metastases in Women With Breast Cancer (CAMELYON16).” <em>JAMA</em>,
+vol. 318, no. 22, pp. 2199-2210, 2017. DOI:
+<code>10.1001/jama.2017.14580</code>.</li>
+</ol>
+<hr />
+<h2
+id="appendix-kế-hoạch-tiến-độ-10-tuần-thực-tế-gantt-chart-vừa-sức">Appendix:
+Kế Hoạch Tiến Độ 10 Tuần Thực Tế (Gantt Chart Vừa Sức)</h2>
+<table>
+<colgroup>
+<col style="width: 27%" />
+<col style="width: 22%" />
+<col style="width: 22%" />
+<col style="width: 27%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: center;">Tuần</th>
+<th style="text-align: left;">Hạng Mục Công Việc Cụ Thể</th>
+<th style="text-align: left;">Sản Phẩm Đầu Ra</th>
+<th style="text-align: center;">Phụ Trách</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;"><strong>T01</strong></td>
+<td style="text-align: left;">Nghiên cứu bài báo WSSS-Tissue, thiết lập
+môi trường PyTorch, hoàn thiện bản Mini Proposal.</td>
+<td style="text-align: left;">Tài liệu nghiên cứu, File Mini
+Proposal.</td>
+<td style="text-align: center;">[Cả nhóm]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T02</strong></td>
+<td style="text-align: left;">Nạp bộ dữ liệu BCSS-WSSS, lập trình module
+kiểm soát phân chia chống rò rỉ bệnh nhân
+(<code>patient_split.py</code>).</td>
+<td style="text-align: left;">Bộ dữ liệu sạch, Unit test pass 100%.</td>
+<td style="text-align: center;">[Sinh viên 2]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T03</strong></td>
+<td style="text-align: left;">Chạy Sanity Run Giai đoạn 1 trên batch nhỏ
+để kiểm tra GPU VRAM, khởi chạy huấn luyện ResNet-38 với PDA.</td>
+<td style="text-align: left;">Script huấn luyện Stage 1 chạy ổn
+định.</td>
+<td style="text-align: center;">[Sinh viên 1]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T04</strong></td>
+<td style="text-align: left;">Hoàn thành huấn luyện Giai đoạn 1, sinh và
+xuất toàn bộ nhãn giả đa tầng (MLPS: <span
+class="math inline">\(b4\_5\)</span>, <span
+class="math inline">\(b5\_2\)</span>, <span
+class="math inline">\(bn7\)</span>).</td>
+<td style="text-align: left;">Tập nhãn giả <code>pseudo_masks/</code>
+hoàn chỉnh.</td>
+<td style="text-align: center;">[Sinh viên 1]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T05</strong></td>
+<td style="text-align: left;">Khởi chạy huấn luyện Giai đoạn 2: Mạng
+DeepLabV3+ kết hợp Cổng phân loại CGM trên tập nhãn giả.</td>
+<td style="text-align: left;">Checkpoint mô hình phân vùng Stage 2.</td>
+<td style="text-align: center;">[Sinh viên 1]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T06</strong></td>
+<td style="text-align: left;">Thử nghiệm cải tiến khâu trộn dữ liệu biên
+mô học (Tissue Mixing) để tinh lọc ranh giới.</td>
+<td style="text-align: left;">Bảng đối chứng thực nghiệm sơ bộ.</td>
+<td style="text-align: center;">[Sinh viên 1]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T07</strong></td>
+<td style="text-align: left;">Xây dựng API dịch vụ bằng FastAPI và giao
+diện Web tương tác hiển thị CAM và mặt nạ phân tầng.</td>
+<td style="text-align: left;">Ứng dụng Web Demo chạy cục bộ.</td>
+<td style="text-align: center;">[Sinh viên 2]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T08</strong></td>
+<td style="text-align: left;">Lập trình tính năng tính toán tải lượng u
+(<span class="math inline">\(mm^2\)</span>) và xuất bảng tổng kết kết
+quả chẩn đoán mô học.</td>
+<td style="text-align: left;">Tính năng định lượng hoạt động chính
+xác.</td>
+<td style="text-align: center;">[Sinh viên 2]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T09</strong></td>
+<td style="text-align: left;">Chạy đánh giá định lượng trên 5 Random
+Seeds (<span class="math inline">\(\mu \pm \sigma\)</span>), phân tích
+các ca bệnh dự đoán sai.</td>
+<td style="text-align: left;">Bảng số liệu mIoU, Dice đối chuẩn chi
+tiết.</td>
+<td style="text-align: center;">[Cả nhóm]</td>
+</tr>
+<tr>
+<td style="text-align: center;"><strong>T10</strong></td>
+<td style="text-align: left;">Hoàn thiện Báo cáo tổng kết đồ án, đóng
+gói mã nguồn và chuẩn bị Slide thuyết trình Marp 16:9.</td>
+<td style="text-align: left;">Bộ hồ sơ đồ án cuối kỳ hoàn chỉnh.</td>
+<td style="text-align: center;">[Cả nhóm]</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>

@@ -91,7 +91,7 @@
     2. **Toán tử FBP vi phân (Differentiable FBP):** Chuyển đổi dữ liệu đã nội suy từ miền sinogram sang miền ảnh.
     3. **Miền Ảnh (Image domain):** Áp dụng mạng điều chuẩn Hessian/Gradient kết hợp Global-Local Regularization (kế thừa bài báo CG-GLORE của Giảng viên) để khử triệt để vệt nhiễu sọc (*streak artifacts*).
 - **Tài liệu nghiên cứu khoa học liên quan:**
-  - *Bài báo Giảng viên:* **CG-GLORE: A Conjugate Gradient–Based Global-Local Regularization Network for Sparse-View CT Reconstruction** (Tran Xuan Hieu Le, Doanh C. Bui et al., arXiv:2608.15246, BMVC 2026). Dossier: [`docs/papers/CG_GLORE_arxiv_2608.15246.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/papers/CG_GLORE_arxiv_2608.15246.md).
+  - *Bài báo Giảng viên:* **CG-GLORE: A Conjugate Gradient-Based Global-Local Regularization Network for Sparse-View CT Reconstruction** (Tran Xuan Hieu Le, Doanh C. Bui et al., arXiv:2608.15246, BMVC 2026). Dossier: [`docs/papers/CG_GLORE_arxiv_2608.15246.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/papers/CG_GLORE_arxiv_2608.15246.md).
   - *Bài báo đa miền:* *MDPRNet: Multi-stage Dual-domain Progressive Network with Synergistic Training for Sparse-view CT Reconstruction* (2025/2026).
   - *Bài báo cơ sở:* Learned Primal-Dual (LPD - IEEE TMI), FBPConvNet.
 - **Kho mã nguồn tham khảo trên GitHub:**

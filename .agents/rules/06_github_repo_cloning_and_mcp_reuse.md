@@ -57,8 +57,18 @@ Sau khi trích xuất component hoặc chạy xong, dọn dẹp thư mục tạm
 
 ---
 
-## 5. Lệnh Kiểm Tra Đối Kháng
+## 5. Giao Thuc Tim Kiem Thong Tin Sieu Toc Tu Repositories (`repos/` & `repos/meta_tools/`)
+
+Khi can tim bat ky cong cu, thu vien hoac ma nguon tham khao nao:
+1. **Buoc 1 - Tra cuu Index trung tam (`repos/INDEX.md`):** Doc bang ma tran dieu huong de xac dinh ngay repo muc tieu va file can mo.
+2. **Buoc 2 - Ripgrep chinh xac (`grep_search`):** Gioi han `SearchPath` vao file `README.md` cua repo can tra (vi du `SearchPath: "repos/meta_tools/awesome-python/README.md"`). Thoi gian tra cuu < 20ms, khong scan toan bo thu muc tranh tran bo nho va lang phi token.
+3. **Buoc 3 - Ke thua truc tiep (`view_file`):** Mo dong code mau de tai su dung, tuyet doi khong viet script Python nhap (`INVARIANT-15`).
+
+---
+
+## 6. Lenh Kiem Tra Doi Khang
 ```bash
-# Kiểm tra sự tồn tại của thư mục công cụ tham chiếu hoặc vendor
-cmd /c "dir /b temp_tools || echo Clean"
+# Kiem tra su ton tai cua thu muc cong cu tham chieu hoac vendor
+cmd /c "dir /b repos || echo Clean"
 ```
+
