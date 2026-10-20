@@ -1,0 +1,564 @@
+{
+  "raw_runs": {
+    "baseline": [
+      {
+        "mIoU": 6.3929966517857135,
+        "mDice": 10.18220197755805,
+        "IoU_TUM": 25.571986607142854,
+        "Dice_TUM": 40.7288079102322,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 21.359733150001272,
+        "elapsed_seconds": 0.09363412857055664
+      },
+      {
+        "mIoU": 0.0,
+        "mDice": 0.0,
+        "IoU_TUM": 0.0,
+        "Dice_TUM": 0.0,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 35.48960942259527,
+        "elapsed_seconds": 0.056354522705078125
+      },
+      {
+        "mIoU": 11.696827168367347,
+        "mDice": 14.76088077363212,
+        "IoU_TUM": 58.48413584183674,
+        "Dice_TUM": 73.8044038681606,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 36.06235222299603,
+        "elapsed_seconds": 0.05545949935913086
+      },
+      {
+        "mIoU": 1.5660873724489797,
+        "mDice": 2.904722299232973,
+        "IoU_TUM": 7.830436862244898,
+        "Dice_TUM": 14.523611496164865,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 34.04370817387493,
+        "elapsed_seconds": 0.05874800682067871
+      },
+      {
+        "mIoU": 11.93797831632653,
+        "mDice": 16.15949066580339,
+        "IoU_TUM": 47.75191326530612,
+        "Dice_TUM": 64.63796266321356,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 32.98394174360265,
+        "elapsed_seconds": 0.06063556671142578
+      }
+    ],
+    "classmix": [
+      {
+        "mIoU": 6.3929966517857135,
+        "mDice": 10.18220197755805,
+        "IoU_TUM": 25.571986607142854,
+        "Dice_TUM": 40.7288079102322,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 31.846927153725836,
+        "elapsed_seconds": 0.06280040740966797
+      },
+      {
+        "mIoU": 0.0,
+        "mDice": 0.0,
+        "IoU_TUM": 0.0,
+        "Dice_TUM": 0.0,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 35.29236944073979,
+        "elapsed_seconds": 0.05666947364807129
+      },
+      {
+        "mIoU": 11.696827168367347,
+        "mDice": 14.76088077363212,
+        "IoU_TUM": 58.48413584183674,
+        "Dice_TUM": 73.8044038681606,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 32.65536450446312,
+        "elapsed_seconds": 0.06124567985534668
+      },
+      {
+        "mIoU": 1.5660873724489797,
+        "mDice": 2.904722299232973,
+        "IoU_TUM": 7.830436862244898,
+        "Dice_TUM": 14.523611496164865,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 33.88186635646892,
+        "elapsed_seconds": 0.05902862548828125
+      },
+      {
+        "mIoU": 11.93797831632653,
+        "mDice": 16.15949066580339,
+        "IoU_TUM": 47.75191326530612,
+        "Dice_TUM": 64.63796266321356,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 33.40797145314939,
+        "elapsed_seconds": 0.05986595153808594
+      }
+    ],
+    "relocalization": [
+      {
+        "mIoU": 6.110989317602041,
+        "mDice": 9.821271280088403,
+        "IoU_TUM": 24.443957270408163,
+        "Dice_TUM": 39.285085120353614,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 33.569068113697575,
+        "elapsed_seconds": 0.059578657150268555
+      },
+      {
+        "mIoU": 0.0,
+        "mDice": 0.0,
+        "IoU_TUM": 0.0,
+        "Dice_TUM": 0.0,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 37.05150085687532,
+        "elapsed_seconds": 0.053978919982910156
+      },
+      {
+        "mIoU": 10.192920918367347,
+        "mDice": 13.503722870570838,
+        "IoU_TUM": 50.96460459183674,
+        "Dice_TUM": 67.5186143528542,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 37.47390239979987,
+        "elapsed_seconds": 0.05337047576904297
+      },
+      {
+        "mIoU": 1.5254304846938775,
+        "mDice": 2.8346573338518235,
+        "IoU_TUM": 7.627152423469388,
+        "Dice_TUM": 14.173286669259117,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 34.279372162492386,
+        "elapsed_seconds": 0.058344125747680664
+      },
+      {
+        "mIoU": 5.8110451211734695,
+        "mDice": 9.430133087533758,
+        "IoU_TUM": 23.244180484693878,
+        "Dice_TUM": 37.72053235013503,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 33.109441111461955,
+        "elapsed_seconds": 0.060405731201171875
+      }
+    ],
+    "proposed": [
+      {
+        "mIoU": 6.065150669642857,
+        "mDice": 9.761984955652856,
+        "IoU_TUM": 24.260602678571427,
+        "Dice_TUM": 39.047939822611426,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 37.36374002280502,
+        "elapsed_seconds": 0.05352783203125
+      },
+      {
+        "mIoU": 0.0,
+        "mDice": 0.0,
+        "IoU_TUM": 0.0,
+        "Dice_TUM": 0.0,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 35.432346356916575,
+        "elapsed_seconds": 0.05644559860229492
+      },
+      {
+        "mIoU": 9.314014668367347,
+        "mDice": 12.709299321485389,
+        "IoU_TUM": 46.57007334183674,
+        "Dice_TUM": 63.54649660742695,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 36.57573392515337,
+        "elapsed_seconds": 0.05468106269836426
+      },
+      {
+        "mIoU": 1.40625,
+        "mDice": 2.627737226277372,
+        "IoU_TUM": 7.03125,
+        "Dice_TUM": 13.138686131386862,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 34.14347523474991,
+        "elapsed_seconds": 0.058576345443725586
+      },
+      {
+        "mIoU": 4.790636957908164,
+        "mDice": 8.040507768727736,
+        "IoU_TUM": 19.162547831632654,
+        "Dice_TUM": 32.16203107491094,
+        "IoU_STR": 0.0,
+        "Dice_STR": 0.0,
+        "IoU_LYM": 0.0,
+        "Dice_LYM": 0.0,
+        "IoU_NEC": 0.0,
+        "Dice_NEC": 0.0,
+        "IoU_BACK": 0.0,
+        "Dice_BACK": 0.0,
+        "fps": 38.23204641475209,
+        "elapsed_seconds": 0.05231213569641113
+      }
+    ]
+  },
+  "aggregated": {
+    "baseline": {
+      "mIoU": {
+        "mean": 6.3187779017857135,
+        "std": 4.960228968004381
+      },
+      "mDice": {
+        "mean": 8.801459143245307,
+        "std": 6.384339798098713
+      },
+      "IoU_TUM": {
+        "mean": 27.927694515306122,
+        "std": 22.43257007768807
+      },
+      "IoU_STR": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_LYM": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_NEC": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_BACK": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_TUM": {
+        "mean": 38.73895718755425,
+        "std": 28.25382562546131
+      },
+      "Dice_STR": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_LYM": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_NEC": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_BACK": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "fps": {
+        "mean": 31.987868942614035,
+        "std": 5.422905250640636
+      }
+    },
+    "classmix": {
+      "mIoU": {
+        "mean": 6.3187779017857135,
+        "std": 4.960228968004381
+      },
+      "mDice": {
+        "mean": 8.801459143245307,
+        "std": 6.384339798098713
+      },
+      "IoU_TUM": {
+        "mean": 27.927694515306122,
+        "std": 22.43257007768807
+      },
+      "IoU_STR": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_LYM": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_NEC": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_BACK": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_TUM": {
+        "mean": 38.73895718755425,
+        "std": 28.25382562546131
+      },
+      "Dice_STR": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_LYM": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_NEC": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_BACK": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "fps": {
+        "mean": 33.41689978170941,
+        "std": 1.164337588824326
+      }
+    },
+    "relocalization": {
+      "mIoU": {
+        "mean": 4.7280771683673475,
+        "std": 3.621089402423015
+      },
+      "mDice": {
+        "mean": 7.117956914408964,
+        "std": 4.948616776318695
+      },
+      "IoU_TUM": {
+        "mean": 21.255978954081634,
+        "std": 17.517306540983167
+      },
+      "IoU_STR": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_LYM": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_NEC": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_BACK": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_TUM": {
+        "mean": 31.739503698520387,
+        "std": 23.18974487866355
+      },
+      "Dice_STR": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_LYM": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_NEC": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_BACK": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "fps": {
+        "mean": 35.09665692886542,
+        "std": 1.8123586562524194
+      }
+    },
+    "proposed": {
+      "mIoU": {
+        "mean": 4.315210459183673,
+        "std": 3.327445172433831
+      },
+      "mDice": {
+        "mean": 6.62790585442867,
+        "std": 4.663297707652545
+      },
+      "IoU_TUM": {
+        "mean": 19.404894770408163,
+        "std": 16.070100087433172
+      },
+      "IoU_STR": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_LYM": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_NEC": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "IoU_BACK": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_TUM": {
+        "mean": 29.579030727267234,
+        "std": 21.887552890935737
+      },
+      "Dice_STR": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_LYM": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_NEC": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "Dice_BACK": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "fps": {
+        "mean": 36.349468390875394,
+        "std": 1.4374673339848818
+      }
+    }
+  },
+  "seeds": [
+    42,
+    100,
+    2024,
+    2025,
+    2026
+  ],
+  "configurations": [
+    "baseline",
+    "classmix",
+    "relocalization",
+    "proposed"
+  ],
+  "evaluated_samples": null
+}

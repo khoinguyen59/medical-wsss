@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SE374.R11 WSSS Clinical Pathology Workstation</title>
+  <!-- OpenSeadragon Viewer CDN with fallback -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js"></script>
+  <style>
+    :root {
+      --bg-dark: #121824;
+      --panel-bg: #1c2438;
+      --card-bg: #25304c;
+      --border-color: #334155;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --color-tum: #E41A1C;
+      --color-str: #4DAF4A;
+      --color-lym: #377EB8;
+      --color-nec: #FF7F00;
+      --color-back: #999999;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      background-color: var(--panel-bg);
+      border-bottom: 1px solid var(--border-color);
+      padding: 12px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    header .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header .brand h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    header .brand .badge {
+      background: #1e3a8a;
+      color: #bfdbfe;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .health-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: #4ade80;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      background-color: #22c55e;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #22c55e;
+    }
+
+    .main-workspace {
+      display: grid;
+      grid-template-columns: 320px 1fr 340px;
+      flex: 1;
+      height: calc(100vh - 60px);
+      overflow: hidden;
+    }
+
+    /* Left Sidebar: Control & Ingestion */
+    .sidebar-left {
+      background-color: var(--panel-bg);
+      border-right: 1px solid var(--border-color);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    .panel-section {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .panel-section h3 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .form-group select, .form-group input[type="file"] {
+      width: 100%;
+      padding: 8px;
+      background: #182032;
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      border-radius: 6px;
+      font-size: 0.85rem;
+    }
+
+    .slider-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--primary);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .btn-primary {
+      background-color: var(--primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background-color: var(--primary-hover);
+    }
+
+    .btn-secondary {
+      background-color: #334155;
+      color: white;
+      margin-top: 8px;
+    }
+
+    .btn-secondary:hover {
+      background-color: #475569;
+    }
+
+    /* Center Viewport: OpenSeadragon */
+    .viewport-center {
+      position: relative;
+      background-color: #0b0f17;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #openseadragon-viewer {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    .viewport-toolbar {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 10;
+      background: rgba(28, 36, 56, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 6px 12px;
+      display: flex;
+      gap: 12px;
+      font-size: 0.8rem;
+    }
+
+    /* Right Sidebar: Biomarkers & Legend */
+    .sidebar-right {
+      background-color: var(--panel-bg);
+      border-left: 1px solid var(--border-color);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    .legend-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.85rem;
+    }
+
+    .legend-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .color-swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+    }
+
+    .biomarker-card {
+      background: #182032;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .biomarker-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .biomarker-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin: 4px 0;
+      color: #60a5fa;
+    }
+
+    .biomarker-subtext {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .progress-bar-bg {
+      background: #334155;
+      height: 6px;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+
+    .status-alert {
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      line-height: 1.4;
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #93c5fd;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="brand">
+      <h1>SE374.R11 Clinical Pathology Workstation</h1>
+      <span class="badge">WSSS DeepZoom v1.0</span>
+    </div>
+    <div class="health-pill" id="systemHealth">
+      <span class="status-dot"></span>
+      <span id="healthText">System Healthy (Inference Ready)</span>
+    </div>
+  </header>
+
+  <!-- Main Workstation Layout -->
+  <main class="main-workspace">
+
+    <!-- Left Controls Panel -->
+    <aside class="sidebar-left">
+      <div class="panel-section">
+        <h3>Patch & Slide Ingestion</h3>
+        <div class="form-group">
+          <label for="sampleSelect">Preset Clinical Samples</label>
+          <select id="sampleSelect">
+            <option value="breast_tumor">BCSS Sample 1: Invasive Breast Carcinoma (TUM+STR)</option>
+            <option value="lymph_stroma">BCSS Sample 2: Immune Stroma Interface (STR+LYM)</option>
+            <option value="glass_control">Negative Control: Glass Slide Background</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="patchUpload">Or Upload H&E Patch (PNG/JPG)</label>
+          <input type="file" id="patchUpload" accept="image/png, image/jpeg">
+        </div>
+        <button class="btn btn-primary" id="btnRunInference">Run WSSS Analysis</button>
+      </div>
+
+      <div class="panel-section">
+        <h3>Overlay Opacity Control</h3>
+        <div class="slider-container">
+          <div class="slider-header">
+            <span>Segmentation Mask Opacity</span>
+            <span id="opacityLabel">50%</span>
+          </div>
+          <input type="range" id="opacitySlider" min="0" max="100" value="50">
+        </div>
+        <button class="btn btn-secondary" id="btnToggleOverlay">Toggle Mask On/Off</button>
+      </div>
+
+      <div class="panel-section">
+        <h3>Model Configuration</h3>
+        <div class="form-group">
+          <label>Algorithm Pipeline</label>
+          <select id="configSelect">
+            <option value="proposed" selected>Config 4: Proposed Adaptive + Otsu Gating</option>
+            <option value="relocalization">Config 3: Spatial Affinity (ARML)</option>
+            <option value="classmix">Config 2: Data-Centric ClassMix</option>
+            <option value="baseline">Config 1: Vanilla CAM Baseline</option>
+          </select>
+        </div>
+        <div class="status-alert">
+          Otsu Gating Active: Background glass and adipose artifacts are filtered in HSV space prior to CAM argmax.
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center Viewport: DeepZoom OpenSeadragon -->
+    <section class="viewport-center">
+      <div class="viewport-toolbar">
+        <span>Slide: <strong id="slideNameLabel">BCSS-TCGA-Sample</strong></span>
+        <span>|</span>
+        <span>Resolution: <strong id="resLabel">224 x 224</strong></span>
+        <span>|</span>
+        <span>Viewer: <strong>OpenSeadragon Interactive</strong></span>
+      </div>
+      <div id="openseadragon-viewer"></div>
+    </section>
+
+    <!-- Right Clinical Biomarkers & Legend Panel -->
+    <aside class="sidebar-right">
+      <div class="panel-section">
+        <h3>5 Tissue Classes</h3>
+        <div class="legend-list">
+          <div class="legend-item">
+            <div class="legend-badge">
+              <div class="color-swatch" style="background-color: var(--color-tum);"></div>
+              <span>Tumor (TUM)</span>
+            </div>
+            <strong id="pct-TUM">0.0%</strong>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="bar-TUM" style="width: 0%; background-color: var(--color-tum);"></div>
+          </div>
+
+          <div class="legend-item" style="margin-top: 8px;">
+            <div class="legend-badge">
+              <div class="color-swatch" style="background-color: var(--color-str);"></div>
+              <span>Stroma (STR)</span>
+            </div>
+            <strong id="pct-STR">0.0%</strong>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="bar-STR" style="width: 0%; background-color: var(--color-str);"></div>
+          </div>
+
+          <div class="legend-item" style="margin-top: 8px;">
+            <div class="legend-badge">
+              <div class="color-swatch" style="background-color: var(--color-lym);"></div>
+              <span>Lymphocyte (LYM)</span>
+            </div>
+            <strong id="pct-LYM">0.0%</strong>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="bar-LYM" style="width: 0%; background-color: var(--color-lym);"></div>
+          </div>
+
+          <div class="legend-item" style="margin-top: 8px;">
+            <div class="legend-badge">
+              <div class="color-swatch" style="background-color: var(--color-nec);"></div>
+              <span>Necrosis (NEC)</span>
+            </div>
+            <strong id="pct-NEC">0.0%</strong>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="bar-NEC" style="width: 0%; background-color: var(--color-nec);"></div>
+          </div>
+
+          <div class="legend-item" style="margin-top: 8px;">
+            <div class="legend-badge">
+              <div class="color-swatch" style="background-color: var(--color-back);"></div>
+              <span>Background (BACK)</span>
+            </div>
+            <strong id="pct-BACK">100.0%</strong>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="bar-BACK" style="width: 100%; background-color: var(--color-back);"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>Clinical Biomarkers</h3>
+        
+        <div class="biomarker-card">
+          <div class="biomarker-title">Viable Tumor Percentage (VTP)</div>
+          <div class="biomarker-value" id="valVTP">0.0%</div>
+          <div class="biomarker-subtext">N_tumor / (N_tissue) * 100%</div>
+        </div>
+
+        <div class="biomarker-card">
+          <div class="biomarker-title">Tumor-Stroma Ratio (TSR)</div>
+          <div class="biomarker-value" id="valTSR">0.0%</div>
+          <div class="biomarker-subtext">N_tumor / (N_tumor + N_stroma) * 100%</div>
+        </div>
+
+        <div class="status-alert" id="biomarkerAssessment">
+          Awaiting patch segmentation inference.
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <script>
+    // State management
+    let viewer = null;
+    let overlayCanvas = null;
+    let currentMaskBase64 = null;
+    let currentRawBase64 = null;
+    let overlayVisible = true;
+
+    // Initialize OpenSeadragon Viewer
+    function initViewer() {
+      if (typeof OpenSeadragon === "undefined") {
+        console.warn("OpenSeadragon not loaded from CDN, initializing canvas fallback.");
+        return;
+      }
+
+      viewer = OpenSeadragon({
+        id: "openseadragon-viewer",
+        prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/images/",
+        showNavigationControl: true,
+        showNavigator: true,
+        navigatorPosition: "BOTTOM_RIGHT",
+        minZoomLevel: 0.5,
+        maxZoomLevel: 20,
+        defaultZoomLevel: 1.0,
+      });
+    }
+
+    // Generate synthetic sample H&E pattern for instant clinical testing
+    function createSyntheticHnEDataURL(type) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 224;
+      canvas.height = 224;
+      const ctx = canvas.getContext("2d");
+
+      if (type === "glass_control") {
+        // Bright white glass background
+        ctx.fillStyle = "#fafafa";
+        ctx.fillRect(0, 0, 224, 224);
+      } else if (type === "lymph_stroma") {
+        // Pinkish stroma and blue lymphocytic aggregates
+        ctx.fillStyle = "#e8b4cb";
+        ctx.fillRect(0, 0, 224, 224);
+        ctx.fillStyle = "#377EB8";
+        ctx.beginPath();
+        ctx.arc(112, 112, 60, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Breast carcinoma: deep purple tumor cluster with pink stroma margin
+        ctx.fillStyle = "#deb0cd";
+        ctx.fillRect(0, 0, 224, 224);
+        ctx.fillStyle = "#8a1c5d";
+        ctx.beginPath();
+        ctx.ellipse(112, 112, 80, 50, Math.PI / 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      return canvas.toDataURL("image/png");
+    }
+
+    // Update OpenSeadragon view with base image and overlay
+    function updateViewerImage(imageURL, overlayURL) {
+      currentRawBase64 = imageURL;
+      currentMaskBase64 = overlayURL;
+
+      if (!viewer) return;
+
+      viewer.open({
+        type: "image",
+        url: imageURL,
+      });
+
+      // Handle overlay when image loads
+      viewer.addOnceHandler("open", function() {
+        if (!overlayURL) return;
+        const opacityVal = parseFloat(document.getElementById("opacitySlider").value) / 100.0;
+        
+        // Remove existing overlay if any
+        const existingOverlay = document.getElementById("clinical-segmentation-overlay");
+        if (existingOverlay) {
+          viewer.removeOverlay(existingOverlay);
+        }
+
+        const overlayImg = document.createElement("img");
+        overlayImg.id = "clinical-segmentation-overlay";
+        overlayImg.src = overlayURL;
+        overlayImg.style.opacity = opacityVal;
+        overlayImg.style.pointerEvents = "none";
+        overlayImg.style.transition = "opacity 0.15s ease-out";
+
+        const tiledImage = viewer.world.getItemAt(0);
+        if (tiledImage) {
+          const bounds = tiledImage.getBounds();
+          viewer.addOverlay({
+            element: overlayImg,
+            location: bounds,
+          });
+        }
+      });
+    }
+
+    // Call API server for patch prediction
+    async function runInference() {
+      const runBtn = document.getElementById("btnRunInference");
+      runBtn.disabled = true;
+      runBtn.innerText = "Processing...";
+
+      try {
+        const fileInput = document.getElementById("patchUpload");
+        let imageData = null;
+
+        if (fileInput.files.length > 0) {
+          const file = fileInput.files[0];
+          imageData = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.readAsDataURL(file);
+          });
+        } else {
+          const sampleType = document.getElementById("sampleSelect").value;
+          imageData = createSyntheticHnEDataURL(sampleType);
+        }
+
+        const config = document.getElementById("configSelect").value;
+        const response = await fetch("/api/v1/predict/patch", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            image_base64: imageData,
+            mode: config,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("HTTP error: " + response.status);
+        }
+
+        const result = await response.json();
+        
+        // Update Biomarkers UI
+        document.getElementById("valVTP").innerText = result.biomarkers.viable_tumor_percentage.toFixed(1) + "%";
+        document.getElementById("valTSR").innerText = result.biomarkers.tumor_stroma_ratio.toFixed(1) + "%";
+
+        // Update Class Percentages
+        const dist = result.class_distribution;
+        for (const [cls, pct] of Object.entries(dist)) {
+          const pctEl = document.getElementById("pct-" + cls);
+          const barEl = document.getElementById("bar-" + cls);
+          if (pctEl) pctEl.innerText = pct.toFixed(1) + "%";
+          if (barEl) barEl.style.width = pct + "%";
+        }
+
+        // Assessment Note
+        const vtp = result.biomarkers.viable_tumor_percentage;
+        const tsr = result.biomarkers.tumor_stroma_ratio;
+        const assessEl = document.getElementById("biomarkerAssessment");
+        if (dist["BACK"] > 95.0) {
+          assessEl.innerText = "Negative Control: Slide verified as glass / non-tissue background. Otsu Gating active.";
+        } else if (vtp > 40.0) {
+          assessEl.innerText = "High Malignant Burden: VTP > 40%. Dense neoplastic cell infiltration.";
+        } else {
+          assessEl.innerText = "Moderate / Stroma-Rich Infiltrate: TSR = " + tsr.toFixed(1) + "%.";
+        }
+
+        // Update OpenSeadragon viewer
+        updateViewerImage(imageData, result.overlay_base64);
+
+      } catch (err) {
+        console.error("Inference failed:", err);
+        alert("Inference error: " + err.message);
+      } finally {
+        runBtn.disabled = false;
+        runBtn.innerText = "Run WSSS Analysis";
+      }
+    }
+
+    // Check system health endpoint
+    async function checkHealth() {
+      try {
+        const res = await fetch("/api/v1/health");
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById("healthText").innerText = "System " + data.status + " (Torch " + data.system.torch_version + ")";
+        }
+      } catch (e) {
+        console.warn("Health check failed:", e);
+      }
+    }
+
+    // Setup event listeners
+    window.addEventListener("DOMContentLoaded", () => {
+      initViewer();
+      checkHealth();
+
+      // Opacity slider
+      const opacitySlider = document.getElementById("opacitySlider");
+      const opacityLabel = document.getElementById("opacityLabel");
+      opacitySlider.addEventListener("input", (e) => {
+        const val = e.target.value;
+        opacityLabel.innerText = val + "%";
+        const overlay = document.getElementById("clinical-segmentation-overlay");
+        if (overlay) {
+          overlay.style.opacity = parseFloat(val) / 100.0;
+        }
+      });
+
+      // Toggle overlay visibility
+      document.getElementById("btnToggleOverlay").addEventListener("click", () => {
+        overlayVisible = !overlayVisible;
+        const overlay = document.getElementById("clinical-segmentation-overlay");
+        if (overlay) {
+          overlay.style.display = overlayVisible ? "block" : "none";
+        }
+      });
+
+      // Run inference
+      document.getElementById("btnRunInference").addEventListener("click", runInference);
+
+      // Load initial default sample
+      setTimeout(() => {
+        runInference();
+      }, 500);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+{
+  "project": "SE374.R11 - Weakly-Supervised Semantic Segmentation on BCSS",
+  "run_id": "SE374_Colab_Results_DeepLabV3Plus_Sanity150_20261020_100806",
+  "timestamp_utc": "2026-10-20T10:08:09.244204+00:00",
+  "device": "cuda",
+  "gpu_name": "Tesla T4",
+  "sanity_mode": true,
+  "total_test_patches_in_dataset": 4986,
+  "evaluated_patches": 150,
+  "metrics": {
+    "mIoU": 72.39071159707376,
+    "mDice": 83.22744337926058,
+    "mIoU_4cls": 72.39071159707376,
+    "mDice_4cls": 83.22744337926058,
+    "Accuracy": 83.58861376957111,
+    "VTP": 57.52982614321353,
+    "TSR": 69.01870842121775,
+    "fps": 16.643097307712416,
+    "latency_ms": 60.08496985333371,
+    "per_class_iou": {
+      "TUM": 82.11732809421473,
+      "STR": 51.970789694127326,
+      "LYM": 68.45488048754144,
+      "NEC": 87.0198481124115,
+      "BACK": 60.4722463804411
+    },
+    "per_class_dice": {
+      "TUM": 90.18068621315703,
+      "STR": 68.39576184177143,
+      "LYM": 81.27384649161795,
+      "NEC": 93.05947897049592,
+      "BACK": 75.3678567408796
+    },
+    "confusion_matrix": [
+      [
+        3616212,
+        371681,
+        12169,
+        1460,
+        68056
+      ],
+      [
+        301966,
+        1119567,
+        70605,
+        0,
+        166041
+      ],
+      [
+        8978,
+        278925,
+        820864,
+        1711,
+        20618
+      ],
+      [
+        23733,
+        3312,
+        0,
+        236366,
+        5714
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        398422
+      ]
+    ]
+  },
+  "class_names": [
+    "TUM",
+    "STR",
+    "LYM",
+    "NEC",
+    "BACK"
+  ],
+  "class_descriptions": [
+    "Khối u (TUM)",
+    "Mô đệm (STR)",
+    "Bạch huyết bào (LYM)",
+    "Hoại tử (NEC)",
+    "Kính trắng / Ngoài ROI (BACK)"
+  ]
+}
