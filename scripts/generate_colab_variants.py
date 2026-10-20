@@ -317,6 +317,19 @@ def build_variants() -> None:
         ]
 
         out_path = MASTER_NOTEBOOK.parent / cfg["filename"]
+        if out_path.is_file():
+            try:
+                existing_nb = json.loads(out_path.read_text(encoding="utf-8"))
+                existing_cells = existing_nb.get("cells", [])
+                if len(existing_cells) == len(nb["cells"]):
+                    for c_idx, cell_obj in enumerate(nb["cells"]):
+                        if cell_obj.get("cell_type") == "code" and existing_cells[c_idx].get("cell_type") == "code":
+                            if existing_cells[c_idx].get("outputs"):
+                                cell_obj["outputs"] = existing_cells[c_idx]["outputs"]
+                            if existing_cells[c_idx].get("execution_count") is not None:
+                                cell_obj["execution_count"] = existing_cells[c_idx]["execution_count"]
+            except Exception:
+                pass
         out_path.write_text(json.dumps(nb, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
         # Post-generation programmatic verification

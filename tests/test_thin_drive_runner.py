@@ -563,3 +563,69 @@ def test_8_amp_autocast_and_orchestrator_v2_defaults():
         assert "use_amp=USE_AMP" in nb_raw, f"Missing use_amp=USE_AMP wiring in {nb_p.name}"
         assert "amp_dtype=AMP_DTYPE" in nb_raw, f"Missing amp_dtype=AMP_DTYPE wiring in {nb_p.name}"
 
+
+def test_9_historical_5_runs_notebooks_and_verification_artifacts_preserved():
+    """Verify that all historical notebooks (Run 1 through Run 5), root executed notebook,
+    legacy standalone notebooks, and step-by-step evaluation reports are preserved intact
+    and never hidden by .gitignore.
+    """
+    # 1. Verify .gitignore does not hide root executed notebook or Colab result zips
+    gitignore_text = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "SE374_Colab_WSSS_T4_Full4986.ipynb" not in gitignore_text
+    assert "SE374_Colab_Results*.zip" not in gitignore_text
+
+    # 2. Verify root executed notebook exists with all 9 code cells executed
+    root_nb_path = PROJECT_ROOT / "SE374_Colab_WSSS_T4_Full4986.ipynb"
+    assert root_nb_path.is_file(), "Root executed SE374_Colab_WSSS_T4_Full4986.ipynb missing!"
+    assert root_nb_path.stat().st_size >= 3000000
+    root_nb = json.loads(root_nb_path.read_text(encoding="utf-8"))
+    code_cells_with_out = [c for c in root_nb["cells"] if c["cell_type"] == "code" and c.get("outputs")]
+    assert len(code_cells_with_out) == 9, f"Expected 9 executed code cells in root notebook, got {len(code_cells_with_out)}"
+
+    # 3. Verify all 5 historical step-by-step notebooks in notebooks/history_runs/
+    history_dir = NOTEBOOKS_DIR / "history_runs"
+    expected_history_nbs = [
+        "Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb",
+        "Run2_20261020_0656UTC_DeepLabV3Plus_ImageNetNorm_OtsuAggressive_Sanity150.ipynb",
+        "Run3_20261020_1008UTC_DeepLabV3Plus_UnitRangeNorm_Fixed_Sanity150.ipynb",
+        "Run4_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb",
+        "Run5_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb",
+    ]
+    assert (history_dir / "README_5_RUNS_HISTORY.md").is_file()
+    for h_name in expected_history_nbs:
+        h_path = history_dir / h_name
+        assert h_path.is_file(), f"Missing historical research notebook: {h_path}"
+        assert h_path.stat().st_size >= 1000000, f"Historical notebook {h_name} missing embedded outputs/figures"
+        h_text = h_path.read_text(encoding="utf-8")
+        for char, name in FORBIDDEN_DASHES:
+            assert char not in h_text, f"Forbidden {name} in {h_name}"
+        h_nb = json.loads(h_text)
+        assert h_nb["nbformat"] == 4
+        assert len(h_nb["cells"]) == 19
+        assert len(h_nb["cells"][14].get("outputs", [])) >= 1
+        assert len(h_nb["cells"][16].get("outputs", [])) >= 1
+        assert len(h_nb["cells"][18].get("outputs", [])) >= 1
+
+    # 4. Verify all 5 experiment verification directories have both .md and .json reports
+    exp_dirs = [
+        PROJECT_ROOT / "experiments" / "colab_run_1_heuristic" / "content" / "SE374_Colab_Results",
+        PROJECT_ROOT / "experiments" / "colab_run_2_imagenet_norm" / "content" / "SE374_Colab_Results",
+        PROJECT_ROOT / "experiments" / "colab_run_3_fixed" / "content" / "SE374_Colab_Results_DeepLabV3Plus_Sanity150_20261020_100806",
+        PROJECT_ROOT / "experiments" / "colab_run_4_full" / "content" / "SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_102247",
+        PROJECT_ROOT / "experiments" / "colab_run_5_sota_full4986" / "content" / "SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_164144",
+    ]
+    for ed in exp_dirs:
+        assert (ed / "COLAB_EVALUATION_REPORT.md").is_file(), f"Missing MD report in {ed}"
+        assert (ed / "COLAB_EVALUATION_REPORT.json").is_file(), f"Missing JSON report in {ed}"
+
+    # 5. Verify Drive bundle includes legacy_standalone_v1, history_runs, and experiments
+    summary = packager.build_drive_package()
+    assert len(summary["history_runs_notebooks"]) == 5
+    assert len(summary["experiment_verification_reports"]) >= 12
+    for leg_name, _, _ in LEGACY_SPECS:
+        assert (BUNDLE_DIR / "notebooks" / "legacy_standalone_v1" / leg_name).is_file()
+    for h_name in expected_history_nbs:
+        assert (BUNDLE_DIR / "notebooks" / "history_runs" / h_name).is_file()
+    assert (BUNDLE_DIR / "experiments" / "benchmarks" / "COLAB_5_RUNS_EVOLUTION_COMPARISON.md").is_file()
+
+
