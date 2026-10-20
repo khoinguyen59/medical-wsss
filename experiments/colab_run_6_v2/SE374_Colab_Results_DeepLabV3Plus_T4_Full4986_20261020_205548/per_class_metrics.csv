@@ -1,0 +1,6 @@
+Class_Index,Class_Code,Class_Label_VI,Baseline_M1_IoU_pct,Baseline_M1_Dice_pct,Best_Proposed_IoU_pct,Best_Proposed_Dice_pct,Delta_IoU_pct
+0,TUM,Khối u (TUM),78.4622,87.9315,79.3731,88.5006,+0.9109
+1,STR,Mô đệm (STR),73.3231,84.6085,73.8207,84.9389,+0.4976
+2,LYM,Bạch huyết bào (LYM),59.9957,74.9966,61.3276,76.0286,+1.3319
+3,NEC,Hoại tử (NEC),65.6173,79.2397,67.6132,80.6776,+1.9959
+4,BACK,Kính trắng / Ngoài ROI (BACK),99.9333,99.9667,99.9333,99.9667,+0.0000

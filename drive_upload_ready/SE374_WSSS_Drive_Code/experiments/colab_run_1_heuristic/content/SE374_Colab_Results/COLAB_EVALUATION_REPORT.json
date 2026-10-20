@@ -8,14 +8,21 @@
   "metrics": {
     "mIoU_4cls": 9.13,
     "mIoU_5cls": 9.78,
-    "mDice_4cls": 16.5,
-    "mDice_5cls": 17.2,
+    "mDice_4cls": 15.41,
+    "mDice_5cls": 16.73,
     "per_class_iou": {
       "TUM": 16.17,
       "STR": 20.35,
       "LYM": 0.0,
       "NEC": 0.0,
       "BACK": 12.37
+    },
+    "per_class_dice": {
+      "TUM": 27.84,
+      "STR": 33.82,
+      "LYM": 0.0,
+      "NEC": 0.0,
+      "BACK": 22.02
     }
   }
 }

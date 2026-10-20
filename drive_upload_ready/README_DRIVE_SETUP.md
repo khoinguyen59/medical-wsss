@@ -65,18 +65,19 @@ Thay vì đặt toàn bộ kiến trúc mạng nơ-ron sâu và thuật toán x�
 
 ---
 
-### 5. Bảo Toàn 100% Các Notebook Cũ, Lịch Sử 5 Phiên Thực Nghiệm (Run 1 -> Run 5) & Lịch Sử Git
+### 5. Bảo Toàn 100% Các Notebook Cũ, Lịch Sử 6 Phiên Thực Nghiệm (Run 1 -> Run 6) & Lịch Sử Git
 
 - **5 Notebook Standalone Gốc (`notebooks/` & `SE374_WSSS_Drive_Code/notebooks/legacy_standalone_v1/`):**
   - `SE374_Colab_WSSS_Pipeline.ipynb`, `SE374_Colab_WSSS_T4_Sanity150.ipynb`, `SE374_Colab_WSSS_T4_Full4986.ipynb`, `SE374_Colab_WSSS_L4_Full4986.ipynb`, `SE374_Colab_WSSS_A100_Full4986.ipynb` được bảo toàn nguyên vẹn 100%, không bị xóa hay ghi đè.
-- **5 Notebook Lịch Sử Đối Chứng Từng Bước Nghiên Cứu (`notebooks/history_runs/` & `SE374_WSSS_Drive_Code/notebooks/history_runs/`):**
-  - `Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb` (`mIoU_4cls = 9.13%`, `mIoU_5cls = 9.78%`)
+- **6 Notebook Lịch Sử Đối Chứng Từng Bước Nghiên Cứu (`notebooks/history_runs/` & `SE374_WSSS_Drive_Code/notebooks/history_runs/`):**
+  - `Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb` (`mIoU_4cls = 9.13%`, `mIoU_5cls = 9.78%`, `mDice_4cls = 15.41%`, `mDice_5cls = 16.73%`)
   - `Run2_20261020_0656UTC_DeepLabV3Plus_ImageNetNorm_OtsuAggressive_Sanity150.ipynb` (`mIoU_4cls = 5.74%`, `mIoU_5cls = 7.59%`)
   - `Run3_20261020_1008UTC_DeepLabV3Plus_UnitRangeNorm_Fixed_Sanity150.ipynb` (`mIoU_4cls = 72.39%`, `mIoU_5cls = 69.99%`)
   - `Run4_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb` (`mIoU_4cls = 68.71%`, `mIoU_5cls = 67.36%`)
   - `Run5_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb` (`M1 = 69.34% -> M5 = 70.49%` 4 lớp / `76.38%` 5 lớp)
-- **Báo Cáo Số Liệu Đối Chứng Qua 5 Phiên Thực Nghiệm (`experiments/` & `SE374_WSSS_Drive_Code/experiments/`):**
-  - `experiments/benchmarks/COLAB_5_RUNS_EVOLUTION_COMPARISON.md` cùng đầy đủ các báo cáo `COLAB_EVALUATION_REPORT.md` và `COLAB_EVALUATION_REPORT.json` của cả 5 phiên chạy.
+  - `Run6_20261020_2055UTC_MultiScale_Pyramid_D4_M1_to_M7_T4_Full4986.ipynb` (`M1 = 69.35% -> M5 = 70.51% -> M6 = 70.53%` 4 lớp / `76.41%` 5 lớp)
+- **Báo Cáo Số Liệu Đối Chứng Qua 6 Phiên Thực Nghiệm (`experiments/` & `SE374_WSSS_Drive_Code/experiments/`):**
+  - `experiments/benchmarks/COLAB_5_RUNS_EVOLUTION_COMPARISON.md` và `COLAB_6_RUNS_EVOLUTION_COMPARISON.md` cùng đầy đủ các báo cáo `COLAB_EVALUATION_REPORT.md`, `COLAB_EVALUATION_REPORT.json` và `.csv` của cả 6 phiên chạy.
 - Để cập nhật lại gói `drive_upload_ready/` sau khi chỉnh sửa code trong `src/`, chỉ cần chạy lệnh:
   ```bash
   cmd /c "python scripts/build_drive_package.py"
