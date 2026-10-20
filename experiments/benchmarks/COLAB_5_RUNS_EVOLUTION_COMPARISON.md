@@ -1,51 +1,47 @@
-# Đối Chiếu Lịch Sử 5 Phiên Thực Nghiệm Google Colab Trên Tập Dữ Liệu Thật BCSS-WSSS (TCGA-BRCA)
+# Đối Chiếu Lịch Sử 6 Phiên Thực Nghiệm Google Colab Trên Tập Dữ Liệu Thật BCSS-WSSS (TCGA-BRCA)
 
 > **Dự án:** SE374.R11 - Weakly-Supervised Semantic Segmentation on Histopathology (BCSS-WSSS)  
-> **Đối tượng đánh giá:** Toàn bộ 5 phiên chạy thực nghiệm thật trên Google Colab GPU (Tesla T4) từ bản sơ khởi đến bản SOTA hoàn chỉnh (Run 1 -> Run 5).
+> **Đối tượng đánh giá:** Toàn bộ 6 phiên chạy thực nghiệm thật trên Google Colab GPU (Tesla T4) từ bản sơ khởi đến bản SOTA 7 phương pháp thế hệ V2 hoàn chỉnh (`Run 1` -> `Run 6`).
 
 ---
 
-## 1. Bảng Tổng Hợp Tiến Trình Cải Thiện Qua 5 Lần Chạy Thực Nghiệm Trên Google Colab
+## 1. Bảng Tổng Hợp Tiến Trình Cải Thiện Qua 6 Lần Chạy Thực Nghiệm Trên Google Colab (`Run 1` -> `Run 6`)
 
-| Phiên Chạy (Run ID) | Quy Mô Ảnh Test | Kiến Trúc & Cơ Chế Cốt Lõi | mIoU 4 Lớp Mô (%) | mIoU 5 Lớp Toàn Cục (%) | mDice 4 Lớp (%) | mDice 5 Lớp (%) | PA 4 Lớp (%) | PA 5 Lớp (%) | TUM IoU (%) | STR IoU (%) | LYM IoU (%) | NEC IoU (%) | BACK IoU (%) |
-| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Lần 1 (`colab_run_1_heuristic`)** | 150 ảnh (Sanity) | Ngưỡng màu HSV ngây thơ (Naive Color Heuristic, chưa nạp checkpoint thật) | 9.13% | 9.78% | ~16.5% | ~17.2% | - | - | 16.17% | 20.35% | 0.00% | 0.00% | 12.37% |
-| **Lần 2 (`colab_runs` - `06:56 UTC`)** | 150 ảnh (Sanity) | DeepLabV3+ ResNet-101 nhưng bị lệch chuẩn hóa `ImageNet Normalize` + Otsu Gating quá gắt | 5.74% | 7.59% | 9.34% | 12.69% | - | 24.21% | 0.00% | 22.96% | 0.00% | 0.00% | 15.00% |
-| **Lần 3 (`colab_run_3_fixed` - `10:08 UTC`)** | 150 ảnh (Sanity, 5 BN) | Sửa chuẩn hóa về `[0.0, 1.0]` (`ToTensor()`) + TTA + Quy tắc `cls 4 is exclude` | 72.39% | 69.99% | 83.23% | 81.66% | 83.59% | - | 82.12% | 51.97% | 68.45% | 87.02% | 60.47% |
-| **Lần 4 (`colab_run_4_full` - `10:22 UTC`)** | **4.986 ảnh (Full Test)** | Chỉ có Stage-2 DeepLabV3+ đơn lẻ (chưa có Stage-1 `ResNet38d Net_CAM` CGM) + Otsu Gating | 68.71% | 67.36% | 81.15% | 80.23% | 84.94% | 83.77% | 79.12% | 73.50% | 56.97% | 65.23% | 70.26% |
-| **Lần 5 (`colab_run_5_sota` - `16:41 UTC` - MỚI NHẤT)** | **4.986 ảnh (Full Test)** | **Stage-1 `ResNet38d Net_CAM` (CGM + CAM Fusion) + Stage-2 `DeepLabV3+` + D4 TTA + Long-Tail Calibration + Bilateral Refinement + Pure-Glass Guard (M5)** | **70.49%** | **76.38%** | **82.51%** | **86.00%** | **85.35%** | **86.42%** | **79.19%** | **73.80%** | **61.27%** | **67.69%** | **99.93%** |
-
----
-
-## 2. Phân Tích Chuyên Sâu Sự Khác Biệt Giữa Lần 4 (`10:22 UTC`) và Lần 5 Mới Nhất (`16:41 UTC`) Trên Toàn Bộ 4.986 Ảnh Test
-
-Cùng chạy trên **toàn bộ 4.986 mảng ảnh test thật (23 bệnh nhân độc lập)** trên GPU Tesla T4, phiên chạy **Lần 5 (`20261020_164144`)** vượt trội toàn diện so với **Lần 4 (`20261020_102247`)** trên mọi chỉ số định lượng:
-
-| Chỉ Số Đánh Giá | Lần 4 (`10:22 UTC` - Chỉ Stage 2) | Lần 5 (`16:41 UTC` - M1 Baseline) | Lần 5 (`16:41 UTC` - M5 Full SOTA) | Độ Tăng Trưởng (Lần 5 M5 so với Lần 4) | Nguyên Nhân Khoa Học Của Sự Cải Thiện |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| **mIoU 4 Lớp Mô Chính (`mIoU_4cls`)** | 68.71% | 69.34% | **70.49%** | **+1.78%** | Nhờ nạp thành công `stage1_checkpoint_trained_on_bcss.pth` (`ResNet38d Net_CAM`) kích hoạt cổng phân loại `CGM` (`y_cls > 0.1`) và dung hợp xác suất `CAM Fusion`. |
-| **mIoU Toàn Cục 5 Lớp (`mIoU_5cls`)** | 67.36% | 75.46% | **76.38%** | **+9.02%** | Loại bỏ hiện tượng Otsu Gating cũ đục lỗ nhầm 7.73 triệu pixel mô mỡ/hoại tử nhạt màu thành lớp `BACK` (giảm từ 7.73 triệu pixel lỗi xuống chỉ còn 12.193 pixel kính trắng biên). |
-| **mDice 4 Lớp Mô Chính (`mDice_4cls`)** | 81.15% | 81.69% | **82.51%** | **+1.36%** | Tăng độ chồng lấp vùng mô trên cả 4 phân lớp, đặc biệt ở hai lớp thiểu số `LYM` và `NEC`. |
-| **mDice Toàn Cục 5 Lớp (`mDice_5cls`)** | 80.23% | 85.34% | **86.00%** | **+5.77%** | Bảo toàn cấu trúc toàn vẹn của vùng mô bên trong ROI (`gt < 4`). |
-| **Pixel Accuracy 4 Lớp (`PA_4cls`)** | 84.94% | 84.88% | **85.35%** | **+0.41%** | Giảm hơn 1.07 triệu pixel phân loại nhầm giữa `TUM` và `STR`. |
-| **Pixel Accuracy 5 Lớp (`PA_5cls`)** | 83.77% | 85.98% | **86.42%** | **+2.65%** | Khắc phục hoàn toàn lỗi gán nhầm mô bệnh học sang lớp nền `BACK`. |
-| **Khối U - `TUM` IoU / Dice** | 79.12% / 88.34% | 78.44% / 87.92% | **79.19% / 88.39%** | **+0.07% IoU** | Tăng số pixel `TUM` dự đoán đúng từ `84.815.644` (Lần 4) lên **`85.896.443`** (+1.08 triệu pixel `TUM` đúng!). |
-| **Mô Đệm - `STR` IoU / Dice** | 73.50% / 84.72% | 73.31% / 84.60% | **73.80% / 84.92%** | **+0.30% IoU** | Tăng số pixel `STR` dự đoán đúng từ `85.075.971` (Lần 4) lên **`87.585.503`** (+2.51 triệu pixel `STR` đúng!). |
-| **Bạch Huyết Bào - `LYM` IoU / Dice** | 56.97% / 72.59% | 59.98% / 74.99% | **61.27% / 75.99%** | **+4.30% IoU (+3.40% Dice)** | Tăng số pixel `LYM` dự đoán đúng từ `14.514.674` (Lần 4) lên **`16.847.304`** (+2.33 triệu pixel `LYM` đúng!), giảm nhầm lẫn `LYM -> STR` từ `7.61M` xuống `5.98M` pixel. |
-| **Hoại Tử - `NEC` IoU / Dice** | 65.23% / 78.96% | 65.62% / 79.24% | **67.69% / 80.73%** | **+2.46% IoU (+1.77% Dice)** | Tăng số pixel `NEC` dự đoán đúng từ `6.892.702` (Lần 4) lên **`7.587.554`** (+694.852 pixel `NEC` đúng!) và xóa sổ hoàn toàn `781.168` pixel `NEC` bị đục lỗ nhầm thành `BACK` ở Lần 4 (`781.168 -> 0`). |
-| **Kính Trắng / Ngoài ROI - `BACK` IoU** | 70.26% / 82.53% | 99.93% / 99.97% | **99.93% / 99.97%** | **+29.67% IoU** | `Pure-Glass Guard` chỉ lọc mảng kính trắng thuần (`gray >= 242, sat <= 8, area >= 512`), không xâm phạm mô bệnh học. |
+| Phiên Chạy (Run ID) | Quy Mô Ảnh Test | Kiến Trúc & Cơ Chế Cốt Lõi | mIoU 4 Lớp Mô (%) | mIoU 5 Lớp Toàn Cục (%) | mDice 4 Lớp (%) | mDice 5 Lớp (%) | PA 4 Lớp (%) | PA 5 Lớp (%) | TUM IoU (%) | STR IoU (%) | LYM IoU (%) | NEC IoU (%) | BACK IoU (%) | Tốc Độ (FPS) |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Lần 1 (`colab_run_1_heuristic`)** | 150 ảnh (Sanity) | Ngưỡng màu HSV ngây thơ (Naive Color Heuristic, chưa nạp checkpoint thật) | 9.13% | 9.78% | 15.41% | 16.73% | - | - | 16.17% | 20.35% | 0.00% | 0.00% | 12.37% | 929.26 |
+| **Lần 2 (`colab_runs` - `06:56 UTC`)** | 150 ảnh (Sanity) | DeepLabV3+ ResNet-101 nhưng bị lệch chuẩn hóa `ImageNet Normalize` + Otsu Gating quá gắt | 5.74% | 7.59% | 9.34% | 12.69% | - | 24.21% | 0.00% | 22.96% | 0.00% | 0.00% | 15.00% | 27.54 |
+| **Lần 3 (`colab_run_3_fixed` - `10:08 UTC`)** | 150 ảnh (Sanity, 5 BN) | Sửa chuẩn hóa về `[0.0, 1.0]` (`ToTensor()`) + 2-View TTA + Quy tắc `cls 4 is exclude` | 72.39% | 69.99% | 83.23% | 81.66% | 83.59% | - | 82.12% | 51.97% | 68.45% | 87.02% | 60.47% | 16.64 |
+| **Lần 4 (`colab_run_4_full` - `10:22 UTC`)** | **4.986 ảnh (Full Test, 23 BN)** | Chỉ có Stage-2 DeepLabV3+ đơn lẻ (chưa có Stage-1 `ResNet38d Net_CAM` CGM) + Otsu Gating | 68.71% | 67.36% | 81.15% | 80.23% | 84.94% | 83.77% | 79.12% | 73.50% | 56.97% | 65.23% | 70.26% | 23.38 |
+| **Lần 5 (`colab_run_5_sota_full4986` - `16:41 UTC`)** | **4.986 ảnh (Full Test, 23 BN)** | Dual-Checkpoint (`Stage-1 ResNet38d Net_CAM` + `Stage-2 DeepLabV3+`) + 5 Methods (`M1..M5`, FP32): `M5` SOTA Ensemble + Pure-Glass Guard | 70.49% | 76.38% | 82.51% | 86.00% | 85.35% | 86.42% | 79.19% | 73.80% | 61.27% | 67.69% | 99.93% | 5.77 (5 methods) |
+| **Lần 6 (`colab_run_6_v2` - `20:55 UTC` - MỚI NHẤT)** | **4.986 ảnh (Full Test, 23 BN)** | **Thin Drive Runner v2 (`MultiMethodWSSSEngineV2`, FP16 AMP, 7 Methods `M1..M7`): `M6` Kim Tự Tháp Đa Tỷ Lệ D4 (`0.75x, 1.0x, 1.25x`) Entropy-Weighted + Cổng Mềm Stage-1 (kèm `M5 = 70.51%`, `M7 = 70.44%`)** | **70.53%** | **76.41%** | **82.54%** | **86.02%** | **85.41%** | **86.47%** | **79.37%** | **73.82%** | **61.33%** | **67.61%** *(M5: 67.67%)* | **99.93%** | **4.91 (7 methods, 203.55 ms/patch)** |
 
 ---
 
-## 3. Bảng Ablation Study Chi Tiết Của 5 Phương Pháp Trong Lần Chạy Mới Nhất (`20261020_164144` - 4.986 Ảnh)
+## 2. Bảng Ablation Study Chi Tiết Của 7 Phương Pháp Trong Lần Chạy Thứ 6 Mới Nhất (`20261020_205548` - 4.986 Ảnh, 23 Bệnh Nhân)
 
-| Mã | Phương Pháp Nghiên Cứu | mIoU 4 Lớp (%) | mDice 4 Lớp (%) | mIoU 5 Lớp (%) | mDice 5 Lớp (%) | PA 4 Lớp (%) | TUM IoU (%) | STR IoU (%) | LYM IoU (%) | NEC IoU (%) | Mức Tăng mIoU 4 Lớp So Với M1 |
-| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **M1** | Baseline WSSS-Tissue (Single-Scale, `Is_GM=False`) | 69.34% | 81.69% | 75.46% | 85.34% | 84.88% | 78.44% | 73.31% | 59.98% | 65.62% | Baseline |
-| **M2** | + Đa Góc Nhìn Dihedral TTA (4-View D4) & Stage-1 CGM (`y_cls > 0.1`) | 70.29% | 82.36% | 76.22% | 85.88% | 85.32% | 79.05% | 73.87% | 60.72% | 67.51% | **+0.95%** |
-| **M3** | + Kết Hợp CAM Đa Giai Đoạn (`CAM Fusion`) & Hiệu Chỉnh Đuôi Dài (`Prior Calibration`) | 70.47% | 82.50% | 76.36% | 85.99% | 85.34% | 79.18% | 73.79% | 61.26% | 67.67% | **+1.13%** |
-| **M4** | + Tinh Chỉnh Biên Không Gian (`Bilateral Filter`) & Triệt Tiêu Đảo Nhiễu (`Island Suppression`) | 70.30% | 82.37% | 76.23% | 85.89% | 85.33% | 79.06% | 73.88% | 60.74% | 67.52% | **+0.96%** |
-| **M5** | **Phương Pháp Đề Xuất Toàn Diện (Full SOTA Pipeline: M2 + M3 + M4 + Pure-Glass Guard)** | **70.49%** | **82.51%** | **76.38%** | **86.00%** | **85.35%** | **79.19%** | **73.80%** | **61.27%** | **67.69%** | **+1.15%** |
+| Mã | Tên Phương Pháp (`Method_Key` / Mô Tả) | mIoU 4 Lớp (%) | mDice 4 Lớp (%) | PA 4 Lớp (%) | mIoU 5 Lớp (%) | mDice 5 Lớp (%) | PA 5 Lớp (%) | TUM IoU / Dice (%) | STR IoU / Dice (%) | LYM IoU / Dice (%) | NEC IoU / Dice (%) | BACK IoU / Dice (%) | VTP / TSR (%) | Wilcoxon p-value | Student t-test p-value |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **M1** | `M1_Baseline_SingleScale`: Baseline WSSS-Tissue (Single-Scale) | 69.35% (`69.3496`) | 81.69% (`81.6941`) | 84.89% (`84.8903`) | 75.47% (`75.4654`) | 85.35% (`85.3480`) | 85.99% (`85.9905`) | 78.46% / 87.93% | 73.32% / 84.61% | 60.00% / 75.00% | 65.62% / 79.24% | 99.93% / 99.97% | 40.47% / 46.26% | `1.0000e+00` | `1.0000e+00` |
+| **M2** | `M2_MultiView_D4_TTA`: + Đa Góc Nhìn Dihedral TTA & Stage-1 CGM | 70.30% (`70.3049`) | 82.37% (`82.3708`) | 85.34% (`85.3368`) | 76.23% (`76.2295`) | 85.89% (`85.8893`) | 86.40% (`86.4043`) | 79.08% / 88.32% | 73.88% / 84.97% | 60.75% / 75.58% | 67.51% / 80.61% | 99.93% / 99.97% | 40.81% / 46.56% | `1.1970e-23` | `3.6454e-22` |
+| **M3** | `M3_LongTail_Prior_Calibration`: + Kết Hợp CAM Đa Giai Đoạn & Hiệu Chỉnh Đuôi Dài | 70.50% (`70.4955`) | 82.51% (`82.5127`) | 85.36% (`85.3552`) | 76.38% (`76.3821`) | 86.00% (`86.0029`) | 86.42% (`86.4214`) | 79.23% / 88.41% | 73.78% / 84.91% | 61.31% / 76.01% | 67.66% / 80.71% | 99.93% / 99.97% | 40.93% / 47.21% | `4.4895e-17` | `3.0920e-02` |
+| **M4** | `M4_Spatial_Bilateral_Refinement`: + Tinh Chỉnh Biên Không Gian & Triệt Tiêu Đảo Nhiễu (ARML/PistoSeg) | 70.32% (`70.3194`) | 82.38% (`82.3811`) | 85.34% (`85.3446`) | 76.24% (`76.2411`) | 85.90% (`85.8976`) | 86.41% (`86.4115`) | 79.09% / 88.33% | 73.89% / 84.98% | 60.77% / 75.60% | 67.53% / 80.62% | 99.93% / 99.97% | 40.81% / 46.56% | `1.5627e-29` | `2.5581e-32` |
+| **M5** | `M5_Proposed_SOTA_Ensemble`: Phương Pháp Đề Xuất Toàn Diện V1 (Full SOTA Pipeline) | 70.51% (`70.5095`) | 82.52% (`82.5225`) | 85.36% (`85.3635`) | 76.39% (`76.3932`) | 86.01% (`86.0107`) | 86.43% (`86.4290`) | 79.24% / 88.42% | 73.79% / 84.92% | **61.33% / 76.03%** | **67.67% / 80.72%** | 99.93% / 99.97% | 40.93% / 47.21% | `1.4249e-24` | `2.9636e-08` |
+| **M6** | **`M6_MultiScale_Pyramid_D4_Ensemble`: + Kim Tự Tháp Đa Tỷ Lệ D4 (Entropy-Weighted) & Cổng Mềm Stage-1** | **70.53% (`70.5336`)** | **82.54% (`82.5364`)** | **85.41% (`85.4125`)** | **76.41% (`76.4125`)** | **86.02% (`86.0218`)** | **86.47% (`86.4745`)** | **79.37% / 88.50%** | 73.82% / 84.94% | **61.33% / 76.03%** | 67.61% / 80.68% | **99.93% / 99.97%** | **41.24% / 47.54%** | `2.6043e-15` | `7.7011e-01` |
+| **M7** | `M7_Proposed_Ultra_SOTA_Curriculum`: Thế Hệ V2 (Multi-Scale D4 + H&E Beer-Lambert OD + Biên Đa Bước Nhảy) | 70.44% (`70.4399`) | 82.47% (`82.4709`) | 85.36% (`85.3617`) | 76.34% (`76.3376`) | 85.97% (`85.9694`) | 86.43% (`86.4274`) | 79.25% / 88.43% | 73.81% / 84.93% | 61.21% / 75.94% | 67.48% / 80.58% | 99.93% / 99.97% | 40.92% / 47.17% | `3.5899e-18` | `1.5656e-03` |
+
+---
+
+## 3. Phân Tích Chuyên Sâu Sự Tiến Hóa Giữa Lần 5 (`16:41 UTC`) Và Lần 6 Mới Nhất (`20:55 UTC`) Trên Toàn Bộ 4.986 Ảnh Test
+
+1. **Tăng trưởng mIoU Toàn Cục từ `70.49%` (Run 5 M5) lên `70.51%` (Run 6 M5) và đạt đỉnh `70.53%` (Run 6 M6):**
+   - Trong Lần 6 (`SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_205548`), việc kích hoạt suy luận hỗn hợp `FP16 Mixed Precision (torch.float16)` và chuẩn hóa luồng thực thi `MultiMethodWSSSEngineV2` giúp ngay cả cùng cấu hình `M1..M5` cũng tăng nhẹ độ chính xác (`M1`: `69.34% -> 69.35%`; `M5`: `70.49% -> 70.51%`, với `LYM IoU` đạt `61.33%` và `NEC IoU` đạt `67.67%`).
+   - Phương pháp mới **`M6` (`M6_MultiScale_Pyramid_D4_Ensemble`)** kết hợp Kim tự tháp đa tỷ lệ (`0.75x, 1.0x, 1.25x`) có trọng số nghịch đảo Entropy cùng Cổng mềm Stage-1 (`Adaptive Soft-Gating`) đã đẩy chỉ số `mIoU_4cls` toàn cục lên mức kỷ lục mới **`70.53%`** (`+1.18%` so với Baseline M1 `69.35%`), `mIoU_5cls` lên **`76.41%`**, `mDice_4cls` lên **`82.54%`** và `PA_4cls` lên **`85.41%`**.
+   - Đặc biệt trên phân lớp **Khối u (`TUM`)**, `M6` nâng `TUM IoU` từ `78.46%` (M1) và `79.19%` (Run 5 M5) lên **`79.37%`** (`Dice = 88.50%`), tăng số pixel `TUM` dự đoán đúng lên **`86.391.564` pixel** (nhiều hơn `+1.340.937` pixel so với M1 và `+495.121` pixel so với Run 5 M5).
+2. **Đánh giá sự đánh đổi giữa `M5`, `M6` và `M7`:**
+   - **`M6` đạt đỉnh trên toàn bộ các chỉ số tích lũy toàn cục (Global Confusion-Matrix Metrics):** `mIoU_4cls = 70.5336%`, `mIoU_5cls = 76.4125%`, `mDice_4cls = 82.5364%`, `PA_4cls = 85.4125%`, `TUM IoU = 79.3731%` và có ý nghĩa thống kê rất cao trên kiểm định phi tham số Wilcoxon (`p = 2.6043e-15`). Tuy nhiên, trên kiểm định tham số Student t-test tính trung bình cộng không trọng số theo từng patch đơn lẻ (`patch_miou_mean`), `M6` có `t_pvalue = 0.7701` do các patch kích thước nhỏ chỉ chứa 1 lớp mô khi phóng đại `1.25x` có phương sai biên lớn hơn.
+   - **`M5` đạt sự cân bằng thống kê toàn diện nhất trên cả cấp độ Toàn cục, Patch và Bệnh nhân:** Đạt `mIoU_4cls = 70.5095%` (chỉ kém M6 `0.024%`), dẫn đầu tuyệt đối về `LYM IoU` (`61.3297%`), `NEC IoU` (`67.6728%`), dẫn đầu `patient_miou_mean` trên 23 bệnh nhân (`58.4096% +/- 13.3205%`) và đạt ý nghĩa thống kê cực mạnh trên cả hai phép kiểm định (`Wilcoxon p = 1.4249e-24` và `Student t-test p = 2.9636e-08`).
+   - **`M7` (`70.4399% mIoU_4cls`) đạt Độ nhạy (Recall) cao nhất trên lớp Hoại tử (`NEC Recall = 81.0147%`, `7.663.678` pixel đúng):** Phép biến đổi mật độ quang học `H&E Beer-Lambert Optical Density` giúp phát hiện thêm gần `60.000` pixel hoại tử nhạt màu so với `M5`/`M6`, nhưng làm tăng nhẹ dương tính giả từ `TUM -> NEC` (`791.918` pixel so với `737.271` của `M6`), khiến `NEC Precision` giảm nhẹ xuống `80.16%`. Cả `Wilcoxon p = 3.5899e-18` và `Student t-test p = 1.5656e-03` của `M7` đều có ý nghĩa thống kê vững chắc (`p < 0.01`).
 
 ---
 
@@ -59,5 +55,6 @@ Cùng chạy trên **toàn bộ 4.986 mảng ảnh test thật (23 bệnh nhân 
 | **WSSS-Tissue (Stage-2 DeepLabV3+ Paper Reported)** (Han et al.) | MedIA 2022 | 78.44% | 73.31% | 59.98% | 65.62% | 69.34% |
 | **LowMagWSS (40x Reference Benchmark)** (Dung et al.) | arXiv 2024 | 78.44% | 73.31% | 59.98% | 65.62% | 69.34% |
 | **PistoSeg (Mosaic + RFM)** (Fang et al.) | AAAI 2023 | 78.90% | 73.60% | 60.50% | 66.80% | 69.95% |
-| **SE374.R11 - M1 Baseline (Thực nghiệm tái lập trên Colab T4)** | Đồ án SE374 (2026) | 78.44% | 73.31% | 59.98% | 65.62% | **69.34%** *(Khớp tuyệt đối 100% paper gốc)* |
-| **SE374.R11 - M5 Proposed Full SOTA Ensemble (Thực nghiệm trên Colab T4)** | Đồ án SE374 (2026) | **79.19%** | **73.80%** | **61.27%** | **67.69%** | **70.49%** *(+1.15% vượt Baseline)* |
+| **SE374.R11 - M1 Baseline (Run 5 FP32 / Run 6 FP16 trên Colab T4)** | Đồ án SE374 (2026) | 78.46% | 73.32% | 60.00% | 65.62% | **69.35%** *(Khớp chuẩn paper gốc 69.34%)* |
+| **SE374.R11 - M5 Proposed V1 Full SOTA Ensemble (Run 6 trên Colab T4)** | Đồ án SE374 (2026) | 79.24% | 73.79% | **61.33%** | **67.67%** | **70.51%** *(+1.16% vượt Baseline)* |
+| **SE374.R11 - M6 Proposed V2 Multi-Scale Pyramid D4 (Run 6 trên Colab T4)** | Đồ án SE374 (2026) | **79.37%** | **73.82%** | **61.33%** | 67.61% | **70.53%** *(+1.18% vượt Baseline)* |

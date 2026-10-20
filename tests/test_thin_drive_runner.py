@@ -494,7 +494,7 @@ def test_7_invariant_12_strict_ascii_hyphens_across_all_packaged_files():
         PROJECT_ROOT / "tests" / "test_thin_drive_runner.py",
     ]
     for p in DRIVE_READY_DIR.rglob("*"):
-        if p.is_file() and p.suffix in {".py", ".md", ".json", ".ipynb", ".txt", ".html"}:
+        if p.is_file() and p.suffix in {".py", ".md", ".json", ".ipynb", ".txt", ".html", ".csv"}:
             files_to_check.append(p)
 
     for fpath in files_to_check:
@@ -565,10 +565,12 @@ def test_8_amp_autocast_and_orchestrator_v2_defaults():
 
 
 def test_9_historical_5_runs_notebooks_and_verification_artifacts_preserved():
-    """Verify that all historical notebooks (Run 1 through Run 5), root executed notebook,
-    legacy standalone notebooks, and step-by-step evaluation reports are preserved intact
-    and never hidden by .gitignore.
+    """Verify that all 6 historical notebooks (Run 1 through Run 6), root executed notebook,
+    legacy standalone notebooks, and step-by-step evaluation reports are preserved intact,
+    have 100% code-consistent cell outputs and embedded PNG figures, and are never hidden by .gitignore.
     """
+    summary = packager.build_drive_package()
+
     # 1. Verify .gitignore does not hide root executed notebook or Colab result zips
     gitignore_text = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "SE374_Colab_WSSS_T4_Full4986.ipynb" not in gitignore_text
@@ -582,17 +584,18 @@ def test_9_historical_5_runs_notebooks_and_verification_artifacts_preserved():
     code_cells_with_out = [c for c in root_nb["cells"] if c["cell_type"] == "code" and c.get("outputs")]
     assert len(code_cells_with_out) == 9, f"Expected 9 executed code cells in root notebook, got {len(code_cells_with_out)}"
 
-    # 3. Verify all 5 historical step-by-step notebooks in notebooks/history_runs/
+    # 3. Verify all 6 historical step-by-step notebooks in notebooks/history_runs/
     history_dir = NOTEBOOKS_DIR / "history_runs"
-    expected_history_nbs = [
-        "Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb",
-        "Run2_20261020_0656UTC_DeepLabV3Plus_ImageNetNorm_OtsuAggressive_Sanity150.ipynb",
-        "Run3_20261020_1008UTC_DeepLabV3Plus_UnitRangeNorm_Fixed_Sanity150.ipynb",
-        "Run4_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb",
-        "Run5_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb",
+    expected_history_specs = [
+        ("Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb", 19, True, False, 1),
+        ("Run2_20261020_0656UTC_DeepLabV3Plus_ImageNetNorm_OtsuAggressive_Sanity150.ipynb", 19, True, False, 2),
+        ("Run3_20261020_1008UTC_DeepLabV3Plus_UnitRangeNorm_Fixed_Sanity150.ipynb", 19, True, False, 2),
+        ("Run4_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb", 19, False, False, 2),
+        ("Run5_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb", 19, False, True, 2),
+        ("Run6_20261020_2055UTC_MultiScale_Pyramid_D4_M1_to_M7_T4_Full4986.ipynb", 17, False, True, 3),
     ]
     assert (history_dir / "README_5_RUNS_HISTORY.md").is_file()
-    for h_name in expected_history_nbs:
+    for h_name, expected_cells, is_sanity_150, has_stage1, expected_pngs in expected_history_specs:
         h_path = history_dir / h_name
         assert h_path.is_file(), f"Missing historical research notebook: {h_path}"
         assert h_path.stat().st_size >= 1000000, f"Historical notebook {h_name} missing embedded outputs/figures"
@@ -601,31 +604,105 @@ def test_9_historical_5_runs_notebooks_and_verification_artifacts_preserved():
             assert char not in h_text, f"Forbidden {name} in {h_name}"
         h_nb = json.loads(h_text)
         assert h_nb["nbformat"] == 4
-        assert len(h_nb["cells"]) == 19
-        assert len(h_nb["cells"][14].get("outputs", [])) >= 1
-        assert len(h_nb["cells"][16].get("outputs", [])) >= 1
-        assert len(h_nb["cells"][18].get("outputs", [])) >= 1
+        assert len(h_nb["cells"]) == expected_cells, f"Expected {expected_cells} cells in {h_name}"
 
-    # 4. Verify all 5 experiment verification directories have both .md and .json reports
+        # Verify every code cell has outputs and embedded PNG display_data exists
+        code_cells = [c for c in h_nb["cells"] if c.get("cell_type") == "code"]
+        for c_idx, c in enumerate(code_cells):
+            assert len(c.get("outputs", [])) >= 1, f"Missing output in {h_name} code cell {c_idx}"
+
+        png_outputs = [
+            out
+            for c in code_cells
+            for out in c.get("outputs", [])
+            if out.get("output_type") == "display_data" and "image/png" in out.get("data", {})
+        ]
+        assert len(png_outputs) == expected_pngs, (
+            f"Expected {expected_pngs} embedded PNG figures in {h_name}, got {len(png_outputs)}"
+        )
+
+        # Check code-vs-output consistency for Sanity150 vs Full4986 and SingleCkpt vs DualCkpt
+        if expected_cells == 19:
+            c8_out = "".join(h_nb["cells"][8]["outputs"][0].get("text", []))
+            c10_out = "".join(h_nb["cells"][10]["outputs"][0].get("text", []))
+            c12_out = "".join(h_nb["cells"][12]["outputs"][0].get("text", []))
+            c18_out = "".join(h_nb["cells"][18]["outputs"][0].get("text", []))
+            if is_sanity_150:
+                assert "150" in c8_out, f"{h_name} Cell 8 output must reflect 150 Sanity patches"
+                assert "Chạy toàn bộ 4986" not in c8_out, f"{h_name} Cell 8 output falsely claims Full 4986"
+            else:
+                assert "4986" in c8_out
+            if not has_stage1:
+                assert "stage1_checkpoint_trained_on_bcss.pth" not in c10_out
+                assert "stage1_checkpoint_trained_on_bcss.pth" not in c12_out
+            assert c18_out.startswith("[OK]") and ".zip" in c18_out and not c18_out.lstrip().startswith("{"), (
+                f"{h_name} Cell 18 must have authentic print log, not raw JSON dump"
+            )
+
+    # Also verify standalone Sanity150 notebook has consistent 150-patch outputs
+    sanity_nb = json.loads((NOTEBOOKS_DIR / "SE374_Colab_WSSS_T4_Sanity150.ipynb").read_text(encoding="utf-8"))
+    sanity_c8_out = "".join(sanity_nb["cells"][8]["outputs"][0].get("text", []))
+    sanity_c18_out = "".join(sanity_nb["cells"][18]["outputs"][0].get("text", []))
+    assert "150" in sanity_c8_out
+    assert "Chạy toàn bộ 4986" not in sanity_c8_out
+    assert "COLAB_EVALUATION_REPORT.json" in sanity_c18_out and not sanity_c18_out.lstrip().startswith("{")
+
+    # 4. Verify all 6 experiment verification directories have intact .md and .json reports
     exp_dirs = [
         PROJECT_ROOT / "experiments" / "colab_run_1_heuristic" / "content" / "SE374_Colab_Results",
         PROJECT_ROOT / "experiments" / "colab_run_2_imagenet_norm" / "content" / "SE374_Colab_Results",
         PROJECT_ROOT / "experiments" / "colab_run_3_fixed" / "content" / "SE374_Colab_Results_DeepLabV3Plus_Sanity150_20261020_100806",
         PROJECT_ROOT / "experiments" / "colab_run_4_full" / "content" / "SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_102247",
         PROJECT_ROOT / "experiments" / "colab_run_5_sota_full4986" / "content" / "SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_164144",
+        PROJECT_ROOT / "experiments" / "colab_run_6_v2" / "SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_205548",
     ]
     for ed in exp_dirs:
-        assert (ed / "COLAB_EVALUATION_REPORT.md").is_file(), f"Missing MD report in {ed}"
-        assert (ed / "COLAB_EVALUATION_REPORT.json").is_file(), f"Missing JSON report in {ed}"
+        md_file = ed / "COLAB_EVALUATION_REPORT.md"
+        json_file = ed / "COLAB_EVALUATION_REPORT.json"
+        assert md_file.is_file(), f"Missing MD report in {ed}"
+        assert json_file.is_file(), f"Missing JSON report in {ed}"
+        assert len(md_file.read_text(encoding="utf-8").splitlines()) >= 12, (
+            f"Truncated COLAB_EVALUATION_REPORT.md in {ed}"
+        )
+    assert len((exp_dirs[4] / "COLAB_EVALUATION_REPORT.md").read_text(encoding="utf-8").splitlines()) >= 50
+    assert len((exp_dirs[5] / "COLAB_EVALUATION_REPORT.md").read_text(encoding="utf-8").splitlines()) >= 50
 
-    # 5. Verify Drive bundle includes legacy_standalone_v1, history_runs, and experiments
-    summary = packager.build_drive_package()
-    assert len(summary["history_runs_notebooks"]) == 5
-    assert len(summary["experiment_verification_reports"]) >= 12
+    # Verify Run 1 exact algebraic mDice values (15.41% 4-cls, 16.73% 5-cls)
+    run1_json = json.loads((exp_dirs[0] / "COLAB_EVALUATION_REPORT.json").read_text(encoding="utf-8"))
+    assert run1_json["metrics"]["mDice_4cls"] == 15.41
+    assert run1_json["metrics"]["mDice_5cls"] == 16.73
+
+    # 5. Verify Drive bundle includes legacy_standalone_v1, all 6 history_runs, and preserved image/png attachments
+    assert len(summary["history_runs_notebooks"]) == 6
+    assert len(summary["experiment_verification_reports"]) >= 16
     for leg_name, _, _ in LEGACY_SPECS:
-        assert (BUNDLE_DIR / "notebooks" / "legacy_standalone_v1" / leg_name).is_file()
-    for h_name in expected_history_nbs:
-        assert (BUNDLE_DIR / "notebooks" / "history_runs" / h_name).is_file()
+        b_leg = BUNDLE_DIR / "notebooks" / "legacy_standalone_v1" / leg_name
+        assert b_leg.is_file()
+        b_leg_nb = json.loads(b_leg.read_text(encoding="utf-8"))
+        b_leg_pngs = [
+            out
+            for c in b_leg_nb["cells"]
+            if c.get("cell_type") == "code"
+            for out in c.get("outputs", [])
+            if out.get("output_type") == "display_data" and "image/png" in out.get("data", {})
+        ]
+        assert len(b_leg_pngs) >= 2, f"Stripped image/png in packaged {b_leg}"
+
+    for h_name, _, _, _, expected_pngs in expected_history_specs:
+        b_hist = BUNDLE_DIR / "notebooks" / "history_runs" / h_name
+        assert b_hist.is_file()
+        b_hist_nb = json.loads(b_hist.read_text(encoding="utf-8"))
+        b_hist_pngs = [
+            out
+            for c in b_hist_nb["cells"]
+            if c.get("cell_type") == "code"
+            for out in c.get("outputs", [])
+            if out.get("output_type") == "display_data" and "image/png" in out.get("data", {})
+        ]
+        assert len(b_hist_pngs) == expected_pngs, f"Stripped image/png in packaged {b_hist}"
+
     assert (BUNDLE_DIR / "experiments" / "benchmarks" / "COLAB_5_RUNS_EVOLUTION_COMPARISON.md").is_file()
+    assert (BUNDLE_DIR / "experiments" / "benchmarks" / "COLAB_6_RUNS_EVOLUTION_COMPARISON.md").is_file()
+
 
 
