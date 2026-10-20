@@ -44,12 +44,42 @@
     "SE374_Colab_WSSS_T4_Sanity150_ThinDriveRunner_v2.ipynb"
   ],
   "legacy_notebooks_preserved": {
-    "SE374_Colab_WSSS_A100_Full4986.ipynb": "0aa22df689c66e8cdc6d577c6f671bf8607512fa9e15f295ea07e711a69f5fba",
-    "SE374_Colab_WSSS_L4_Full4986.ipynb": "4162c95c31f8e853b0b86280bd20532ca13926efc687e956d31398a62d0b7dad",
-    "SE374_Colab_WSSS_Pipeline.ipynb": "871cb966b5602cf4ba32e989cb6d5c5b7f7ddffa947645dff2e00a665bf06a70",
-    "SE374_Colab_WSSS_T4_Full4986.ipynb": "751c47c9516e1c29856f8e91bc0caa1ec84b5d6f8ec94ca112be4fb111a37376",
-    "SE374_Colab_WSSS_T4_Sanity150.ipynb": "70f0a03f48328e7357675a6aa051db14c2c2713d051fd58a7e8c522894e22178"
+    "SE374_Colab_WSSS_A100_Full4986.ipynb": "35ec30fd8c76b0cebacf13bf11a72befec35933ac7a0e132d2e5595b57712f24",
+    "SE374_Colab_WSSS_L4_Full4986.ipynb": "c4d13f8e611aa9e2b6c5e1540c28408f13df5383c39df32e0cf5d0b6e5ede178",
+    "SE374_Colab_WSSS_Pipeline.ipynb": "f30ff75e85e2fa955766847b3edcc74dcebc3143a9c55b6d0fc235cf62d943f7",
+    "SE374_Colab_WSSS_T4_Full4986.ipynb": "b60d319b7c15a7d6dbd888fcafe36d960ecc7a0fcad37db289be469c2dbce3c2",
+    "SE374_Colab_WSSS_T4_Sanity150.ipynb": "48dea49bb87ca9fb05708a773e9f92e02d7bd9518c26c74b6b183cf31b999850"
   },
+  "history_runs_notebooks": [
+    "Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb",
+    "Run2_20261020_0656UTC_DeepLabV3Plus_ImageNetNorm_OtsuAggressive_Sanity150.ipynb",
+    "Run3_20261020_1008UTC_DeepLabV3Plus_UnitRangeNorm_Fixed_Sanity150.ipynb",
+    "Run4_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb",
+    "Run5_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb"
+  ],
+  "experiment_verification_reports": [
+    "experiments/benchmarks/BENCHMARK_REPORT.md",
+    "experiments/benchmarks/benchmark_results.json",
+    "experiments/benchmarks/COLAB_5_RUNS_EVOLUTION_COMPARISON.md",
+    "experiments/colab_run_1_heuristic/content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_run_1_heuristic/content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.md",
+    "experiments/colab_run_2_imagenet_norm/content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_run_2_imagenet_norm/content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.md",
+    "experiments/colab_run_3_fixed/content/SE374_Colab_Results_DeepLabV3Plus_Sanity150_20261020_100806/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_run_3_fixed/content/SE374_Colab_Results_DeepLabV3Plus_Sanity150_20261020_100806/COLAB_EVALUATION_REPORT.md",
+    "experiments/colab_run_4_full/content/SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_102247/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_run_4_full/content/SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_102247/COLAB_EVALUATION_REPORT.md",
+    "experiments/colab_run_5_sota_full4986/content/SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_162144/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_run_5_sota_full4986/content/SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_162144/COLAB_EVALUATION_REPORT.md",
+    "experiments/colab_run_5_sota_full4986/content/SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_164144/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_run_5_sota_full4986/content/SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_164144/COLAB_EVALUATION_REPORT.md",
+    "experiments/colab_runs/content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_runs/content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.md",
+    "experiments/colab_runs_latest/content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_runs_latest/content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.md",
+    "experiments/colab_runs_latest/content/SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_164144/COLAB_EVALUATION_REPORT.json",
+    "experiments/colab_runs_latest/content/SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_164144/COLAB_EVALUATION_REPORT.md"
+  ],
   "supported_wsss_methods": [
     "M1_Baseline_SingleScale",
     "M2_MultiView_D4_TTA",

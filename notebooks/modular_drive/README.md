@@ -34,3 +34,16 @@ Thu muc nay chua bo 4 Google Colab Notebooks the he moi (**Thin Drive Runner v2*
    Upload thu muc `SE374_WSSS_Drive_Code` (hoac file `SE374_WSSS_Drive_Code.zip`) len `/content/drive/MyDrive/SE374_WSSS_Project/` hoac `/content/drive/MyDrive/`.
 3. **Mo Notebook va bam `Runtime -> Run all`:**
    Chon 1 trong 4 file `*_ThinDriveRunner_v2.ipynb` phu hop voi GPU tren Colab va chay tu tren xuong duoi.
+
+## 4. Bao Toan Nguyen Ven 100% Cac Notebook Cu & Lich Su 5 Buoc Nghien Cuu (Run 1 -> Run 5)
+
+- **5 Notebook Standalone Goc (`notebooks/` & `SE374_WSSS_Drive_Code/notebooks/legacy_standalone_v1/`):**
+  - `SE374_Colab_WSSS_Pipeline.ipynb`, `SE374_Colab_WSSS_T4_Sanity150.ipynb`, `SE374_Colab_WSSS_T4_Full4986.ipynb`, `SE374_Colab_WSSS_L4_Full4986.ipynb`, `SE374_Colab_WSSS_A100_Full4986.ipynb` (va ban 3.24 MB tai thu muc goc `/SE374_Colab_WSSS_T4_Full4986.ipynb`) duoc giu nguyen 100% kem day du cell outputs va hinh anh 300 DPI.
+- **5 Notebook Lich Su Doi Chung Tung Buoc Nghien Cuu (`notebooks/history_runs/` & `SE374_WSSS_Drive_Code/notebooks/history_runs/`):**
+  1. `Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb` (`mIoU_4cls = 9.13%`, `mIoU_5cls = 9.78%`)
+  2. `Run2_20261020_0656UTC_DeepLabV3Plus_ImageNetNorm_OtsuAggressive_Sanity150.ipynb` (`mIoU_4cls = 5.74%`, `mIoU_5cls = 7.59%`)
+  3. `Run3_20261020_1008UTC_DeepLabV3Plus_UnitRangeNorm_Fixed_Sanity150.ipynb` (`mIoU_4cls = 72.39%`, `mIoU_5cls = 69.99%`)
+  4. `Run4_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb` (`mIoU_4cls = 68.71%`, `mIoU_5cls = 67.36%`)
+  5. `Run5_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb` (`M1 = 69.34% -> M5 = 70.49%` 4 lop / `76.38%` 5 lop)
+- **Bao Cao Doi Chung Chi Tiet (`experiments/benchmarks/COLAB_5_RUNS_EVOLUTION_COMPARISON.md`):** Luu day du bang doi sanh va ma tran nham lan cua ca 5 lan chay.
+

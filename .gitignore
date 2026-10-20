@@ -70,7 +70,3 @@ reports/*.log
 *.swo
 .DS_Store
 Thumbs.db
-
-# Temporary Colab Root Archives & Duplicates
-/SE374_Colab_Results*.zip
-/SE374_Colab_WSSS_T4_Full4986.ipynb
