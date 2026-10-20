@@ -504,3 +504,62 @@ def test_7_invariant_12_strict_ascii_hyphens_across_all_packaged_files():
             assert count == 0, (
                 f"Invariant 12 violation: Found {count} instance(s) of {name} ({hex(ord(char))}) in {fpath}"
             )
+
+
+def test_8_amp_autocast_and_orchestrator_v2_defaults():
+    """Verify CUDA mixed-precision autocast wiring (`use_amp`, `amp_dtype`), default `include_v2=True`
+    in `run_bcss_wsss_experiment`, and absence of monkey-patching in Thin Drive Runner v2 notebooks.
+    """
+    from src.colab_pkg import colab_runner, model_loader
+
+    sig = inspect.signature(colab_runner.run_bcss_wsss_experiment)
+    assert sig.parameters["include_v2"].default is True
+    assert "use_amp" in sig.parameters
+    assert "amp_dtype" in sig.parameters
+
+    sig_stream = inspect.signature(colab_runner.run_streaming_evaluation)
+    assert "use_amp" in sig_stream.parameters
+    assert "amp_dtype" in sig_stream.parameters
+
+    # Verify _get_autocast_context returns torch.amp.autocast on available cuda device and nullcontext on cpu
+    cuda_ctx = MultiMethodWSSSEngine._get_autocast_context(
+        torch.device("cuda"), use_amp=True, amp_dtype=torch.float16
+    )
+    if torch.cuda.is_available():
+        assert isinstance(cuda_ctx, torch.amp.autocast)
+    else:
+        assert not isinstance(cuda_ctx, torch.amp.autocast)
+    cpu_ctx = MultiMethodWSSSEngine._get_autocast_context(
+        torch.device("cpu"), use_amp=True, amp_dtype=torch.float16
+    )
+    assert not isinstance(cpu_ctx, torch.amp.autocast)
+
+    # Verify CPU bit-level parity when use_amp=True vs use_amp=False
+    m2 = Stage2DeepLabV3Plus(num_classes=4, output_stride=16).eval()
+    m1 = WSSSTissueStage1NetCAM(n_class=4).eval()
+    eng_fp32 = MultiMethodWSSSEngineV2(model_stage1=m1, use_amp=False)
+    eng_amp = MultiMethodWSSSEngineV2(model_stage1=m1, use_amp=True, amp_dtype=torch.float16)
+    pkg_eng_amp = model_loader.MultiMethodWSSSEngineV2(
+        model_stage1=m1, use_amp=True, amp_dtype=torch.bfloat16
+    )
+
+    inp = torch.rand(1, 3, 32, 32)
+    rgb = (inp.squeeze(0).permute(1, 2, 0).numpy() * 255.0).astype(np.uint8)
+    preds_fp32 = eng_fp32.predict_all_methods_v2(m2, inp, raw_rgb=rgb, model_stage1=m1)
+    preds_amp = eng_amp.predict_all_methods_v2(m2, inp, raw_rgb=rgb, model_stage1=m1)
+    preds_pkg = pkg_eng_amp.predict_all_methods_v2(m2, inp, raw_rgb=rgb, model_stage1=m1)
+    for k in MultiMethodWSSSEngineV2.METHOD_KEYS:
+        assert np.array_equal(preds_fp32[k], preds_amp[k])
+        assert np.array_equal(preds_fp32[k], preds_pkg[k])
+
+    # Verify Thin Drive Runner v2 notebooks wire USE_AMP and AMP_DTYPE and have zero monkey-patches
+    thin_nbs = packager.discover_thin_runner_notebooks(NOTEBOOKS_DIR)
+    assert len(thin_nbs) >= 4
+    for nb_p in thin_nbs:
+        nb_raw = nb_p.read_text(encoding="utf-8")
+        assert "_cr.MultiMethodWSSSEngine =" not in nb_raw, (
+            f"Found deprecated monkey-patch in {nb_p.name}"
+        )
+        assert "use_amp=USE_AMP" in nb_raw, f"Missing use_amp=USE_AMP wiring in {nb_p.name}"
+        assert "amp_dtype=AMP_DTYPE" in nb_raw, f"Missing amp_dtype=AMP_DTYPE wiring in {nb_p.name}"
+

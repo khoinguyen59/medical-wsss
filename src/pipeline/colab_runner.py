@@ -162,7 +162,9 @@ if __name__ == "__main__":
         default=None,
         help="Execution mode: smoke (20 patches), quick/sanity (150 patches), or full (4986 patches)",
     )
-    parser.add_argument("--v2", action="store_true", help="Include V2 Ultra-SOTA methods M6 and M7")
+    parser.add_argument("--v2", action="store_true", default=True, help="Include V2 Ultra-SOTA methods M6 and M7 (default: True)")
+    parser.add_argument("--no-v2", action="store_true", help="Evaluate only V1 methods M1..M5")
+    parser.add_argument("--amp", action="store_true", help="Enable CUDA mixed-precision autocast on GPU")
     parser.add_argument("--mode-tag", type=str, default=None, help="Mode tag for output folder")
     parser.add_argument("--data-root", type=str, default="/content/BCSS-WSSS")
     parser.add_argument("--checkpoint-dir", type=str, default="/content/checkpoints")
@@ -183,7 +185,8 @@ if __name__ == "__main__":
             checkpoint_dir=args.checkpoint_dir,
             output_base_dir=args.output_dir,
             device=args.device,
-            include_v2=args.v2,
+            include_v2=(not args.no_v2),
+            use_amp=args.amp,
             show_plots=not args.no_plots,
             trigger_download=not args.no_download,
         )
