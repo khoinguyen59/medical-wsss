@@ -14,6 +14,7 @@ Provides:
 All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
+import contextlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import cv2
@@ -799,6 +800,8 @@ class MultiMethodWSSSEngine:
         soft_cls_high_thresholds: Tuple[float, float, float, float] = DEFAULT_SOFT_CLS_HIGH_THRESHOLDS,
         v2_prior_weights: Tuple[float, float, float, float] = DEFAULT_V2_PRIOR_WEIGHTS,
         v2_min_island_area: int = 96,
+        use_amp: bool = False,
+        amp_dtype: Optional[torch.dtype] = None,
     ) -> None:
         self.model_stage1 = model_stage1
         self.prior_weights = np.array(prior_weights, dtype=np.float32).reshape(4, 1, 1)
@@ -818,7 +821,21 @@ class MultiMethodWSSSEngine:
         self.soft_cls_high_thresholds = np.array(soft_cls_high_thresholds, dtype=np.float32)
         self.v2_prior_weights = np.array(v2_prior_weights, dtype=np.float32).reshape(4, 1, 1)
         self.v2_min_island_area = int(v2_min_island_area)
+        self.use_amp = bool(use_amp)
+        self.amp_dtype = amp_dtype
         self._last_raw_4cls_preds: Dict[str, np.ndarray] = {}
+
+    @staticmethod
+    def _get_autocast_context(
+        dev: torch.device,
+        use_amp: bool = False,
+        amp_dtype: Optional[torch.dtype] = None,
+    ) -> Any:
+        """Returns CUDA mixed-precision autocast context when use_amp=True on available CUDA, else nullcontext."""
+        if use_amp and dev.type == "cuda" and torch.cuda.is_available():
+            target_dtype = amp_dtype if amp_dtype is not None else torch.float16
+            return torch.amp.autocast(device_type="cuda", dtype=target_dtype, enabled=True)
+        return contextlib.nullcontext()
 
     @classmethod
     def forward_all_tta_views(
@@ -826,6 +843,8 @@ class MultiMethodWSSSEngine:
         model: torch.nn.Module,
         img_tensor: torch.Tensor,
         full_d8: bool = False,
+        use_amp: bool = False,
+        amp_dtype: Optional[torch.dtype] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Computes (probs_orig, probs_d4, probs_d8) without redundant forward calls.
 
@@ -847,56 +866,57 @@ class MultiMethodWSSSEngine:
             x_vflip = torch.flip(img_tensor, dims=[2])
             x_hvflip = torch.flip(img_tensor, dims=[2, 3])
 
-            if full_d8:
-                x_r90 = torch.rot90(img_tensor, k=1, dims=[2, 3])
-                x_r90_h = torch.flip(x_r90, dims=[3])
-                x_r90_v = torch.flip(x_r90, dims=[2])
-                x_r270 = torch.flip(x_r90, dims=[2, 3])
+            with cls._get_autocast_context(dev, use_amp=use_amp, amp_dtype=amp_dtype):
+                if full_d8:
+                    x_r90 = torch.rot90(img_tensor, k=1, dims=[2, 3])
+                    x_r90_h = torch.flip(x_r90, dims=[3])
+                    x_r90_v = torch.flip(x_r90, dims=[2])
+                    x_r270 = torch.flip(x_r90, dims=[2, 3])
 
-                if h == w:
-                    batch_x = torch.cat(
-                        [x_orig, x_hflip, x_vflip, x_hvflip, x_r90, x_r90_h, x_r90_v, x_r270],
-                        dim=0,
-                    )
-                    batch_probs = torch.softmax(model(batch_x), dim=1)
+                    if h == w:
+                        batch_x = torch.cat(
+                            [x_orig, x_hflip, x_vflip, x_hvflip, x_r90, x_r90_h, x_r90_v, x_r270],
+                            dim=0,
+                        )
+                        batch_probs = torch.softmax(model(batch_x).float(), dim=1)
+
+                        p0 = batch_probs[0]
+                        p1 = torch.flip(batch_probs[1], dims=[2])
+                        p2 = torch.flip(batch_probs[2], dims=[1])
+                        p3 = torch.flip(batch_probs[3], dims=[1, 2])
+                        p4 = torch.rot90(batch_probs[4], k=-1, dims=[1, 2])
+                        p5 = torch.rot90(torch.flip(batch_probs[5], dims=[2]), k=-1, dims=[1, 2])
+                        p6 = torch.rot90(torch.flip(batch_probs[6], dims=[1]), k=-1, dims=[1, 2])
+                        p7 = torch.rot90(torch.flip(batch_probs[7], dims=[1, 2]), k=-1, dims=[1, 2])
+                    else:
+                        batch_reg = torch.cat([x_orig, x_hflip, x_vflip, x_hvflip], dim=0)
+                        batch_rot = torch.cat([x_r90, x_r90_h, x_r90_v, x_r270], dim=0)
+                        probs_reg = torch.softmax(model(batch_reg).float(), dim=1)
+                        probs_rot = torch.softmax(model(batch_rot).float(), dim=1)
+
+                        p0 = probs_reg[0]
+                        p1 = torch.flip(probs_reg[1], dims=[2])
+                        p2 = torch.flip(probs_reg[2], dims=[1])
+                        p3 = torch.flip(probs_reg[3], dims=[1, 2])
+                        p4 = torch.rot90(probs_rot[0], k=-1, dims=[1, 2])
+                        p5 = torch.rot90(torch.flip(probs_rot[1], dims=[2]), k=-1, dims=[1, 2])
+                        p6 = torch.rot90(torch.flip(probs_rot[2], dims=[1]), k=-1, dims=[1, 2])
+                        p7 = torch.rot90(torch.flip(probs_rot[3], dims=[1, 2]), k=-1, dims=[1, 2])
+
+                    sum_d4 = p0 + p1 + p2 + p3
+                    probs_d4 = 0.25 * sum_d4
+                    probs_d8 = 0.125 * (sum_d4 + p4 + p5 + p6 + p7)
+                else:
+                    batch_x = torch.cat([x_orig, x_hflip, x_vflip, x_hvflip], dim=0)
+                    batch_probs = torch.softmax(model(batch_x).float(), dim=1)
 
                     p0 = batch_probs[0]
                     p1 = torch.flip(batch_probs[1], dims=[2])
                     p2 = torch.flip(batch_probs[2], dims=[1])
                     p3 = torch.flip(batch_probs[3], dims=[1, 2])
-                    p4 = torch.rot90(batch_probs[4], k=-1, dims=[1, 2])
-                    p5 = torch.rot90(torch.flip(batch_probs[5], dims=[2]), k=-1, dims=[1, 2])
-                    p6 = torch.rot90(torch.flip(batch_probs[6], dims=[1]), k=-1, dims=[1, 2])
-                    p7 = torch.rot90(torch.flip(batch_probs[7], dims=[1, 2]), k=-1, dims=[1, 2])
-                else:
-                    batch_reg = torch.cat([x_orig, x_hflip, x_vflip, x_hvflip], dim=0)
-                    batch_rot = torch.cat([x_r90, x_r90_h, x_r90_v, x_r270], dim=0)
-                    probs_reg = torch.softmax(model(batch_reg), dim=1)
-                    probs_rot = torch.softmax(model(batch_rot), dim=1)
 
-                    p0 = probs_reg[0]
-                    p1 = torch.flip(probs_reg[1], dims=[2])
-                    p2 = torch.flip(probs_reg[2], dims=[1])
-                    p3 = torch.flip(probs_reg[3], dims=[1, 2])
-                    p4 = torch.rot90(probs_rot[0], k=-1, dims=[1, 2])
-                    p5 = torch.rot90(torch.flip(probs_rot[1], dims=[2]), k=-1, dims=[1, 2])
-                    p6 = torch.rot90(torch.flip(probs_rot[2], dims=[1]), k=-1, dims=[1, 2])
-                    p7 = torch.rot90(torch.flip(probs_rot[3], dims=[1, 2]), k=-1, dims=[1, 2])
-
-                sum_d4 = p0 + p1 + p2 + p3
-                probs_d4 = 0.25 * sum_d4
-                probs_d8 = 0.125 * (sum_d4 + p4 + p5 + p6 + p7)
-            else:
-                batch_x = torch.cat([x_orig, x_hflip, x_vflip, x_hvflip], dim=0)
-                batch_probs = torch.softmax(model(batch_x), dim=1)
-
-                p0 = batch_probs[0]
-                p1 = torch.flip(batch_probs[1], dims=[2])
-                p2 = torch.flip(batch_probs[2], dims=[1])
-                p3 = torch.flip(batch_probs[3], dims=[1, 2])
-
-                probs_d4 = 0.25 * (p0 + p1 + p2 + p3)
-                probs_d8 = probs_d4
+                    probs_d4 = 0.25 * (p0 + p1 + p2 + p3)
+                    probs_d8 = probs_d4
 
             probs_orig_np = p0.detach().cpu().numpy().astype(np.float32)
             probs_d4_np = probs_d4.detach().cpu().numpy().astype(np.float32)
@@ -910,10 +930,12 @@ class MultiMethodWSSSEngine:
         model: torch.nn.Module,
         img_tensor: torch.Tensor,
         full_d8: bool = False,
+        use_amp: bool = False,
+        amp_dtype: Optional[torch.dtype] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Runs 4-view (or 8-view when full_d8=True) dihedral forward pass on GPU/CPU and returns (probs_orig, probs_tta) as (4, H, W) numpy arrays."""
         probs_orig_np, probs_d4_np, probs_d8_np = cls.forward_all_tta_views(
-            model, img_tensor, full_d8=full_d8
+            model, img_tensor, full_d8=full_d8, use_amp=use_amp, amp_dtype=amp_dtype
         )
         return probs_orig_np, (probs_d8_np if full_d8 else probs_d4_np)
 
@@ -958,7 +980,9 @@ class MultiMethodWSSSEngine:
             if precomputed_s1_d4 is not None:
                 probs_orig_s1, probs_d4_s1 = precomputed_s1_d4
             else:
-                probs_orig_s1, probs_d4_s1 = self.forward_d4_tta(model, x_base)
+                probs_orig_s1, probs_d4_s1 = self.forward_d4_tta(
+                    model, x_base, use_amp=self.use_amp, amp_dtype=self.amp_dtype
+                )
 
             p_s1_safe = np.clip(probs_d4_s1.astype(np.float32), 1e-8, 1.0)
             p_s1_safe = p_s1_safe / np.maximum(np.sum(p_s1_safe, axis=0, keepdims=True), 1e-8)
@@ -978,7 +1002,8 @@ class MultiMethodWSSSEngine:
                     x_scaled = F.interpolate(
                         x_base, size=(sh, sw), mode="bilinear", align_corners=True
                     )
-                    logits_s = model(x_scaled)
+                    with self._get_autocast_context(dev, use_amp=self.use_amp, amp_dtype=self.amp_dtype):
+                        logits_s = model(x_scaled).float()
                     probs_batch_s = torch.softmax(logits_s, dim=1)
                     p_s_interp = F.interpolate(
                         probs_batch_s, size=(H, W), mode="bilinear", align_corners=True
@@ -1011,11 +1036,14 @@ class MultiMethodWSSSEngine:
             if x_in.dim() == 3:
                 x_in = x_in.unsqueeze(0)
 
-            if hasattr(model_stage1, "forward_cam"):
-                cam_raw, y_cls = model_stage1.forward_cam(x_in)
-            else:
-                y_cls = model_stage1(x_in)
-                cam_raw = None
+            with self._get_autocast_context(dev, use_amp=self.use_amp, amp_dtype=self.amp_dtype):
+                if hasattr(model_stage1, "forward_cam"):
+                    cam_raw_out, y_cls_out = model_stage1.forward_cam(x_in)
+                    cam_raw = cam_raw_out.float()
+                    y_cls = y_cls_out.float()
+                else:
+                    y_cls = model_stage1(x_in).float()
+                    cam_raw = None
 
             y_cls_np = y_cls.squeeze(0).detach().cpu().numpy().astype(np.float32)
             cgm_gate = (y_cls_np > self.cls_threshold).astype(np.float32)
@@ -1062,14 +1090,17 @@ class MultiMethodWSSSEngine:
             x_hvflip = torch.flip(x_in, dims=[2, 3])
             batch_s1 = torch.cat([x_in, x_hflip, x_vflip, x_hvflip], dim=0)
 
-            if hasattr(model_stage1, "forward_cam"):
-                cam_batch, y_batch = model_stage1.forward_cam(batch_s1)
-                cam_raw = cam_batch[0:1]
-                y_cls = 0.25 * (y_batch[0] + y_batch[1] + y_batch[2] + y_batch[3])
-            else:
-                y_batch = model_stage1(batch_s1)
-                y_cls = 0.25 * (y_batch[0] + y_batch[1] + y_batch[2] + y_batch[3])
-                cam_raw = None
+            with self._get_autocast_context(dev, use_amp=self.use_amp, amp_dtype=self.amp_dtype):
+                if hasattr(model_stage1, "forward_cam"):
+                    cam_batch_out, y_batch_out = model_stage1.forward_cam(batch_s1)
+                    cam_batch = cam_batch_out.float()
+                    y_batch = y_batch_out.float()
+                    cam_raw = cam_batch[0:1]
+                    y_cls = 0.25 * (y_batch[0] + y_batch[1] + y_batch[2] + y_batch[3])
+                else:
+                    y_batch = model_stage1(batch_s1).float()
+                    y_cls = 0.25 * (y_batch[0] + y_batch[1] + y_batch[2] + y_batch[3])
+                    cam_raw = None
 
             y_cls_np = y_cls.detach().cpu().numpy().astype(np.float32).reshape(-1)
             low_t = self.soft_cls_low_thresholds
@@ -1372,7 +1403,9 @@ class MultiMethodWSSSEngine:
 
     def predict_m1(self, model: torch.nn.Module, img_tensor: torch.Tensor) -> np.ndarray:
         """M1: Baseline WSSS-Tissue Single-Scale (Han et al., MedIA 2022)."""
-        probs_orig, _ = self.forward_d4_tta(model, img_tensor)
+        probs_orig, _ = self.forward_d4_tta(
+            model, img_tensor, use_amp=self.use_amp, amp_dtype=self.amp_dtype
+        )
         return np.argmax(probs_orig, axis=0).astype(np.uint8)
 
     def predict_m2(
@@ -1383,7 +1416,9 @@ class MultiMethodWSSSEngine:
     ) -> np.ndarray:
         """M2: Multi-View Dihedral TTA + Stage-1 Net_CAM CGM (y_cls > 0.1)."""
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
-        _, probs_d4 = self.forward_d4_tta(model, img_tensor)
+        _, probs_d4 = self.forward_d4_tta(
+            model, img_tensor, use_amp=self.use_amp, amp_dtype=self.amp_dtype
+        )
         H, W = img_tensor.shape[-2:]
         _, cgm_gate = self.extract_stage1_cam_and_gate(stage1, img_tensor, (H, W))
         probs_m2 = self.apply_cgm_gate(probs_d4, cgm_gate)
@@ -1397,7 +1432,9 @@ class MultiMethodWSSSEngine:
     ) -> np.ndarray:
         """M3: Multi-View TTA + CGM + Cross-Stage CAM Fusion + Long-Tail Prior Calibration."""
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
-        _, probs_d4 = self.forward_d4_tta(model, img_tensor)
+        _, probs_d4 = self.forward_d4_tta(
+            model, img_tensor, use_amp=self.use_amp, amp_dtype=self.amp_dtype
+        )
         H, W = img_tensor.shape[-2:]
         cam_probs, cgm_gate = self.extract_stage1_cam_and_gate(stage1, img_tensor, (H, W))
         probs_m2 = self.apply_cgm_gate(probs_d4, cgm_gate)
@@ -1414,7 +1451,9 @@ class MultiMethodWSSSEngine:
     ) -> np.ndarray:
         """M4: Multi-View TTA + CGM + Spatial Bilateral Refinement & Island Suppression."""
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
-        _, probs_d4 = self.forward_d4_tta(model, img_tensor)
+        _, probs_d4 = self.forward_d4_tta(
+            model, img_tensor, use_amp=self.use_amp, amp_dtype=self.amp_dtype
+        )
         H, W = img_tensor.shape[-2:]
         _, cgm_gate = self.extract_stage1_cam_and_gate(stage1, img_tensor, (H, W))
         probs_m2 = self.apply_cgm_gate(probs_d4, cgm_gate)
@@ -1429,7 +1468,13 @@ class MultiMethodWSSSEngine:
     ) -> np.ndarray:
         """M5: Proposed SOTA Ensemble V1 (CGM + CAM Fusion + Prior Calib + Spatial Refinement + Glass Guard)."""
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
-        _, probs_d4 = self.forward_d4_tta(model, img_tensor, full_d8=self.use_full_d8_in_m5)
+        _, probs_d4 = self.forward_d4_tta(
+            model,
+            img_tensor,
+            full_d8=self.use_full_d8_in_m5,
+            use_amp=self.use_amp,
+            amp_dtype=self.amp_dtype,
+        )
         H, W = img_tensor.shape[-2:]
         cam_probs, cgm_gate = self.extract_stage1_cam_and_gate(stage1, img_tensor, (H, W))
         probs_m2 = self.apply_cgm_gate(probs_d4, cgm_gate)
@@ -1511,7 +1556,11 @@ class MultiMethodWSSSEngine:
         )
 
         probs_orig, probs_d4, probs_d8 = self.forward_all_tta_views(
-            model, img_tensor, full_d8=self.use_full_d8_in_m5
+            model,
+            img_tensor,
+            full_d8=self.use_full_d8_in_m5,
+            use_amp=self.use_amp,
+            amp_dtype=self.amp_dtype,
         )
 
         H, W = img_tensor.shape[-2], img_tensor.shape[-1]

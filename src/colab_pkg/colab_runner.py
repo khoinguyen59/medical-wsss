@@ -147,6 +147,8 @@ def run_streaming_evaluation(
     wsss_engine: Optional[Any] = None,
     use_full_d8_in_m5: bool = False,
     include_v2: bool = False,
+    use_amp: bool = False,
+    amp_dtype: Optional[torch.dtype] = None,
     progress_interval: int = 25,
     verbose: bool = True,
 ) -> Dict[str, Any]:
@@ -159,15 +161,27 @@ def run_streaming_evaluation(
     else:
         dev = device
 
-    engine = wsss_engine or MultiMethodWSSSEngine(
-        model_stage1=model_stage1,
-        use_full_d8_in_m5=use_full_d8_in_m5,
-        include_v2=include_v2,
-    )
+    if wsss_engine is not None:
+        engine = wsss_engine
+        if use_amp and hasattr(engine, "use_amp"):
+            engine.use_amp = bool(use_amp)
+        if amp_dtype is not None and hasattr(engine, "amp_dtype"):
+            engine.amp_dtype = amp_dtype
+    else:
+        engine = MultiMethodWSSSEngine(
+            model_stage1=model_stage1,
+            use_full_d8_in_m5=use_full_d8_in_m5,
+            include_v2=include_v2,
+            use_amp=use_amp,
+            amp_dtype=amp_dtype,
+        )
     active_method_keys: List[str] = list(
         getattr(engine, "METHOD_KEYS", MultiMethodWSSSEngine.METHOD_KEYS)
     )
-    if (include_v2 or getattr(engine, "include_v2", False)) and len(active_method_keys) < 7:
+    run_v2_eval = bool(
+        include_v2 or getattr(engine, "include_v2", False) or len(active_method_keys) > 5
+    )
+    if run_v2_eval and len(active_method_keys) < 7:
         for k in MultiMethodWSSSEngine.METHOD_KEYS_V2:
             if k not in active_method_keys:
                 active_method_keys.append(k)
@@ -338,7 +352,9 @@ def run_bcss_wsss_experiment(
     seed: int = 42,
     device: Optional[Union[str, torch.device]] = None,
     use_full_d8_in_m5: bool = False,
-    include_v2: bool = False,
+    include_v2: bool = True,
+    use_amp: bool = False,
+    amp_dtype: Optional[torch.dtype] = None,
     wsss_engine: Optional[Any] = None,
     vis_sample_count: int = 4,
     show_plots: bool = True,
@@ -418,6 +434,8 @@ def run_bcss_wsss_experiment(
         wsss_engine=wsss_engine,
         use_full_d8_in_m5=use_full_d8_in_m5,
         include_v2=include_v2,
+        use_amp=use_amp,
+        amp_dtype=amp_dtype,
         progress_interval=progress_interval,
         verbose=True,
     )

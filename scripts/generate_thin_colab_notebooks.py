@@ -321,8 +321,10 @@ MODEL_STAGE2, MODEL_STAGE1, DEVICE = load_wsss_models(
     stage1_ckpt=CKPT_PATHS["stage1"],
     device=ENV_INFO["device"],
 )
-WSSS_ENGINE = MultiMethodWSSSEngineV2(model_stage1=MODEL_STAGE1)
-print(f"[ENGINE] Initialized {len(WSSS_ENGINE.METHOD_KEYS)} WSSS methods on {DEVICE}:")
+WSSS_ENGINE = MultiMethodWSSSEngineV2(
+    model_stage1=MODEL_STAGE1, use_amp=USE_AMP, amp_dtype=AMP_DTYPE,
+)
+print(f"[ENGINE] Initialized {len(WSSS_ENGINE.METHOD_KEYS)} WSSS methods on {DEVICE} (AMP={USE_AMP}, dtype={AMP_DTYPE}):")
 for m_key in WSSS_ENGINE.METHOD_KEYS:
     print(f"  - {m_key}: {WSSS_ENGINE.METHOD_NAMES_VI[m_key]}")""",
         )
@@ -344,19 +346,14 @@ Ham `run_streaming_evaluation()` tich luy ma tran nham lan toan cuc tren toan bo
             "cell-10-eval-code",
             """import pandas as pd
 from IPython.display import display
-import src.colab_pkg.colab_runner as _cr
 from src.pipeline.colab_runner import run_streaming_evaluation
 
-_orig_cls = _cr.MultiMethodWSSSEngine
-try:
-    _cr.MultiMethodWSSSEngine = WSSS_ENGINE
-    EVAL_OUT = run_streaming_evaluation(
-        active_test_files=ACTIVE_TEST_FILES, test_mask_dir=TEST_MASK_DIR, model=MODEL_STAGE2,
-        model_stage1=MODEL_STAGE1, device=DEVICE, wsss_engine=WSSS_ENGINE,
-        use_full_d8_in_m5=True, progress_interval=PROGRESS_INTERVAL, verbose=True,
-    )
-finally:
-    _cr.MultiMethodWSSSEngine = _orig_cls
+EVAL_OUT = run_streaming_evaluation(
+    active_test_files=ACTIVE_TEST_FILES, test_mask_dir=TEST_MASK_DIR, model=MODEL_STAGE2,
+    model_stage1=MODEL_STAGE1, device=DEVICE, wsss_engine=WSSS_ENGINE,
+    include_v2=True, use_amp=USE_AMP, amp_dtype=AMP_DTYPE,
+    progress_interval=PROGRESS_INTERVAL, verbose=True,
+)
 SUMMARY_ROWS = [
     {"Method": k, "mIoU_4cls (%)": round(v["mIoU_4cls"], 2), "mDice_4cls (%)": round(v["mDice_4cls"], 2),
      "mIoU_5cls (%)": round(v["mIoU_5cls"], 2), "TUM_IoU (%)": round(v["per_class_iou"]["TUM"], 2),

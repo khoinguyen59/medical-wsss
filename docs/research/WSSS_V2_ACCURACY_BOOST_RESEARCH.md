@@ -119,17 +119,17 @@ Từ phát hiện này, với tensor ảnh đầu vào $X \in [0, 1]^{1 \times 3
    - Vì bản đồ đặc trưng `ResNet38d` có kích thước chẵn $28 \times 28$ (`stride = 8`), phép lật ngang/dọc trên lưới đặc trưng gây lệch pha nửa bước nhảy ($4$ pixels) khi nội suy lên $224 \times 224$.
    - Do đó, hệ thống ghép 4 góc nhìn Dihedral $[X, \text{flip}_H(X), \text{flip}_V(X), \text{rot}_{90}(X)] \in \mathbb{R}^{4 \times 3 \times H \times W}$ để ước lượng xác suất hiện diện lớp bất biến $\bar{y}_{\text{cls}} \in [0, 1]^4$, nhưng trích xuất bản đồ không gian $M_{\text{cam}} \in \mathbb{R}_{\ge 0}^{4 \times H \times W}$ trực tiếp từ góc nhìn gốc không lệch pha.
 2. **Cổng mềm thích nghi kết hợp Khôi phục Cụm Biên Cực Đại (Peak-Aware Soft-Gating):**
-   Thiết lập ngưỡng cắt dưới $\tau_{\text{low}} = (0.08, 0.08, 0.045, 0.045)$, ngưỡng xác nhận chuẩn $\tau_{\text{high}} = (0.10, 0.10, 0.10, 0.10)$ và cường độ đỉnh kích hoạt $M_{\text{peak}}(c) = \max_{u,v} M_{\text{cam}}(c, u, v)$:
-   - Nếu $\bar{y}_{\text{cls}, c} > 0.10$ và $M_{\text{peak}}(c) \ge 2.5$: mở cổng hoàn toàn $G_{\text{soft}}(c) = 1.0$ (tương thích 100% với những ca lớp hiện diện rõ ràng của `M2`..`M5`).
-   - Nếu $\bar{y}_{\text{cls}, c} > 0.10$ nhưng $M_{\text{peak}}(c) < 2.5$ (kích hoạt nền yếu toàn cục): tiết chế cổng xuống $G_{\text{soft}}(c) = 0.25$ để chặn dương tính giả.
-   - Nếu $\tau_{\text{low}, c} < \bar{y}_{\text{cls}, c} \le 0.10$ nhưng tồn tại cụm tiêu điểm sắc nét ($M_{\text{peak}}(c) \ge 8.0$ và $M_{\text{peak}}(c) \ge 0.85 \max_{k} M_{\text{peak}}(k)$): mở cổng cứu hộ $G_{\text{soft}}(c) \in [0.45, 0.90]$ và lưu cờ `borderline_mask` để chỉ giải phóng lớp đó tại đúng vùng định vị CAM ($\hat{M}_c(u, v) > 0.35$).
+   Thiết lập ngưỡng cắt dưới $\tau_{\text{low}} = (0.065, 0.065, 0.055, 0.060)$, ngưỡng xác nhận chuẩn $\tau_{\text{high}} = (0.10, 0.10, 0.10, 0.10)$ và cường độ đỉnh kích hoạt $M_{\text{peak}}(c) = \max_{u,v} M_{\text{cam}}(c, u, v)$:
+   - Nếu $\bar{y}_{\text{cls}, c} \ge 0.10$ và $M_{\text{peak}}(c) \ge 2.5$: mở cổng hoàn toàn $G_{\text{soft}}(c) = 1.0$ (tương thích 100% với những ca lớp hiện diện rõ ràng của `M2`..`M5`).
+   - Nếu $\bar{y}_{\text{cls}, c} \ge 0.10$ nhưng $M_{\text{peak}}(c) < 2.5$ (kích hoạt nền yếu toàn cục): triệt tiêu cổng $G_{\text{soft}}(c) = 0.0$ để chặn dương tính giả từ CAM chết.
+   - Nếu $\tau_{\text{low}, c} < \bar{y}_{\text{cls}, c} < 0.10$ nhưng tồn tại cụm tiêu điểm sắc nét ($M_{\text{peak}}(c) \ge 0.85 \max_{k} M_{\text{peak}}(k)$): mở cổng cứu hộ $G_{\text{soft}}(c) \in [0.65, 1.00]$ và chỉ giải phóng lớp đó tại đúng vùng định vị CAM ($\hat{M}_c(u, v) > 0.35$).
 3. **Bản đồ xác suất CAM bảo toàn điểm không (Zero-Preserving Sharp CAM):**
    Với $\hat{M}_c(u, v) \in [0, 1]$ là CAM chuẩn hóa min-max từng kênh:
-   $$S_c(u, v) = G_{\text{soft}}(c) \cdot \hat{M}_c(u, v) \cdot \exp\left(2.0 \cdot \hat{M}_c(u, v)\right)$$
-   Khi $\hat{M}_c(u, v) = 0$, $S_c(u, v) = 0$ tuyệt đối (khắc phục triệt để lỗi $\exp(0) = 1.0$ của V1 mà không làm suy hao mẫu số chuẩn hóa như lũy thừa bậc cao).
+   $$S_c(u, v) = \begin{cases} \exp\left(2.1 \cdot \hat{M}_c(u, v)\right) & \text{nếu } G_{\text{soft}}(c) \ge 1.0 \\ G_{\text{soft}}(c) \cdot \exp\left(2.1 \cdot \hat{M}_c(u, v)\right) & \text{nếu } 0 < G_{\text{soft}}(c) < 1.0 \text{ và } \hat{M}_c(u, v) > 0.35 \\ 0 & \text{ngược lại} \end{cases}$$
+   Khi $G_{\text{soft}}(c) = 0$ hoặc nằm ngoài vùng tiêu điểm của lớp biên giới, $S_c(u, v) = 0$ tuyệt đối (khắc phục triệt để lỗi rò rỉ xác suất nền của V1).
 4. **Dung hợp CAM điều hướng bởi Entropy Stage-2 (`apply_entropy_guided_cam_fusion`):**
    Hệ số hòa trộn $\alpha_{\text{eff}}(u, v) \in [0.15, 0.32]$ tại mỗi pixel kết hợp nền tảng neo giải phẫu của Stage-1 với độ bất định $\mathcal{H}_{\text{seg}}(u, v)$ của Stage-2 và cường độ đỉnh $C_{\text{cam}}(u, v) = \max_c \hat{M}_c(u, v)$:
-   $$\alpha_{\text{eff}}(u, v) = \text{clip}\left(\alpha_{\text{base}} \cdot \left(0.75 + 0.50 \cdot \mathcal{H}_{\text{seg}}(u, v)\right) \cdot \left(0.80 + 0.35 \cdot C_{\text{cam}}(u, v)\right), 0.15, 0.32\right)$$
+   $$\alpha_{\text{eff}}(u, v) = \text{clip}\left(\alpha_{\text{base}} \cdot \left(1.10 + 0.35 \cdot \mathcal{H}_{\text{seg}}(u, v)\right) \cdot \left(0.85 + 0.15 \cdot C_{\text{cam}}(u, v)\right), 0.15, 0.32\right)$$
    $$P_{\text{fused}}(c, u, v) = \left(1 - \alpha_{\text{eff}}(u, v)\right) P_{\text{seg}}(c, u, v) + \alpha_{\text{eff}}(u, v) P_{\text{cam}}(c, u, v)$$
 
 ---
@@ -144,22 +144,22 @@ Dựa trên định luật hấp thụ quang học **Beer-Lambert** và ma trậ
    Sử dụng vector hấp thụ chuẩn hóa của Hematoxylin $\mathbf{h} = [0.650, 0.704, 0.286]^T$, Eosin $\mathbf{e} = [0.072, 0.990, 0.105]^T$, và vector trực giao $\mathbf{r} = \frac{\mathbf{h} \times \mathbf{e}}{\|\mathbf{h} \times \mathbf{e}\|_2}$, ma trận giải chập $D_{HE} = ([\mathbf{h}, \mathbf{e}, \mathbf{r}]^T)^{-1}$ tách mật độ quang học thành:
    $$[C_H(u, v), C_E(u, v), C_R(u, v)] = \max\left(0, OD(u, v) \cdot D_{HE}\right)$$
 3. **Tỷ số mật độ Nhân / Bào tương - Mô đệm cục bộ ($R_{H/E}$):**
-   Làm mịn $C_H, C_E$ bằng nhân Gauss kích thước tế bào ($\sigma = 2.0$) và chuẩn hóa phân vị bền vững về $[0, 1]$ thu được $\tilde{H}(u, v), \tilde{E}(u, v)$ cùng tỷ số nhân/bào tương:
+   Làm mịn $C_H, C_E$ bằng nhân Gauss kích thước tế bào ($5 \times 5, \sigma = 1.5$) và chuẩn hóa phân vị thứ 95 bền vững về $[0, 1]$ thu được $\tilde{H}(u, v), \tilde{E}(u, v)$ cùng tỷ số nhân/bào tương:
    $$R_{H/E}(u, v) = \frac{\tilde{H}(u, v)}{\tilde{H}(u, v) + \tilde{E}(u, v) + 0.08} \in [0, 1]$$
-4. **Điều biến trọng số tiên nghiệm cân bằng theo mật độ quang học mô học ($\lambda_{\text{OD}} = 0.08$):**
+4. **Điều biến trọng số tiên nghiệm cân bằng theo mật độ quang học mô học ($w_{\text{V2}} = (0.96, 0.925, 1.265, 1.22)$):**
    - **Đối với Bạch huyết bào (`LYM`, lớp 2) vs Mô đệm (`STR`, lớp 1):**
-     $$W_{\text{LYM}}(u, v) = w_{\text{LYM}, 0} \cdot \left(1 + \lambda_{\text{OD}} \cdot (1.20 R_{H/E}(u, v) - 0.50)\right)$$
-     $$W_{\text{STR}}(u, v) = w_{\text{STR}, 0} \cdot \left(1 + 0.45 \lambda_{\text{OD}} \cdot (0.55 - R_{H/E}(u, v))\right)$$
+     $$W_{\text{LYM}}(u, v) = w_{\text{LYM}, 0} \cdot \left(0.96 + 0.14 \cdot R_{H/E}(u, v) \cdot (0.50 + 0.50 \tilde{H}(u, v))\right)$$
+     $$W_{\text{STR}}(u, v) = w_{\text{STR}, 0} \cdot \left(1.0 + 0.08 \cdot (1 - R_{H/E}(u, v)) \cdot \tilde{E}(u, v)\right)$$
      Tại vùng nhân tím đậm ($R_{H/E} > 0.55$), $W_{\text{LYM}}$ tăng lên để cứu các điểm ảnh `LYM -> STR`. Ngược lại, tại vùng sợi collagen hồng nhạt không có nhân ($R_{H/E} < 0.30$), $W_{\text{LYM}}$ giảm nhẹ và $W_{\text{STR}}$ được củng cố, ngăn chặn dương tính giả `STR -> LYM`.
    - **Đối với Hoại tử (`NEC`, lớp 3) vs Khối u (`TUM`, lớp 0):**
-     Tại các vùng hoại tử đông có hiện tượng tiêu nhân ($\tilde{E}(u, v) > \tilde{H}(u, v)$) hoặc bất định phân vùng cao, hệ số tiên nghiệm $W_{\text{NEC}}(u, v)$ được củng cố để khắc phục lỗi `NEC -> TUM`.
+     Tại các vùng hoại tử đông có hiện tượng tiêu nhân ($\tilde{E}(u, v) > \tilde{H}(u, v)$), hệ số tiên nghiệm $W_{\text{NEC}}(u, v) = w_{\text{NEC}, 0} \cdot (1.0 + 0.12 \tilde{E}(u, v)(1 - 0.45 R_{H/E}(u, v)))$ được củng cố để khắc phục lỗi `NEC -> TUM`.
 
 ---
 
 ### 2.4. Trụ Cột 4: Tinh Chỉnh Biên Đa Bước Nhảy & Triệt Tiêu Đảo Nhiễu Phân Lớp Đặc Thù (`apply_advanced_spatial_refinement`)
 
-1. **Lọc song phương vượt bước nhảy nội suy Decoder (`d = 9, sigmaColor = 0.18, sigmaSpace = 6.0`):**
-   Mở rộng đường kính vùng lân cận lên $d = 9$ pixels (vượt qua kích thước khối nội suy $4 \times 4$ của nhánh Decoder DeepLabV3+), làm mịn đồng nhất bên trong vùng mô đồng thời giữ sắc nét biên chuyển tiếp xác suất.
+1. **Lọc song phương vượt bước nhảy nội suy Decoder (`d = 7, sigmaColor = 0.20, sigmaSpace = 5.0`):**
+   Mở rộng đường kính vùng lân cận lên $d = 7$ pixels (vượt qua kích thước khối nội suy $4 \times 4$ của nhánh Decoder DeepLabV3+), làm mịn đồng nhất bên trong vùng mô đồng thời giữ sắc nét biên chuyển tiếp xác suất.
 2. **Khuếch tán tương đồng cục bộ dẫn hướng bởi biên quang học H&E (OD-Guided Local Affinity Refinement):**
    Khi có ảnh gốc `raw_rgb`, ma trận độ tương đồng cục bộ $3 \times 3$ dựa trên gradient mật độ quang học $\nabla OD$ truyền xác suất dọc theo ranh giới mô học thực tế, xóa bỏ quầng mờ (bilinear halo) quanh các ổ u và cụm lympho.
 3. **Triệt tiêu đảo nhiễu phân lớp đặc thù (Class-Aware Confidence-Guided Island Suppression):**
