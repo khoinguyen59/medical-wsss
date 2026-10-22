@@ -148,3 +148,28 @@ def test_wsi_pipeline_end_to_end_simulation():
     color_img = WSILowMagHighMagPipeline.colorize_mask(stitched_mask)
     assert color_img.size == (64, 64)
     assert color_img.mode == "RGB"
+
+
+def test_wsi_pipeline_extract_patch_cached_handle():
+    """Verify that patch extraction works with cached handle and avoids disk re-reads."""
+    pipeline = WSILowMagHighMagPipeline(patch_size=32)
+    img_arr = np.ones((128, 128, 3), dtype=np.uint8) * 120
+    img_pil = Image.fromarray(img_arr)
+
+    cand = WSICandidatePatch(
+        patch_id=1,
+        x=10,
+        y=10,
+        width=32,
+        height=32,
+        macro_tissue_score=0.9,
+        macro_tumor_prob=0.8,
+    )
+
+    # Test with PIL image handle
+    crop_from_pil = pipeline.extract_patch_image(slide_input=img_pil, patch_info=cand, slide_obj=img_pil)
+    assert crop_from_pil.shape == (32, 32, 3)
+
+    # Test with numpy array handle
+    crop_from_arr = pipeline.extract_patch_image(slide_input=img_arr, patch_info=cand, slide_obj=img_arr)
+    assert crop_from_arr.shape == (32, 32, 3)

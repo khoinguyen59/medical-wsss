@@ -293,26 +293,72 @@ class WSILowMagHighMagPipeline:
 
     def extract_patch_image(
         self,
-        slide_input: Union[str, Path, np.ndarray, Image.Image],
+        slide_input: Union[str, Path, np.ndarray, Image.Image, Any],
         patch_info: WSICandidatePatch,
+        slide_obj: Optional[Any] = None,
     ) -> np.ndarray:
-        """Extract a high-resolution 40x patch crop at the given coordinates."""
+        """Extract a high-resolution 40x patch crop at the given coordinates.
+
+        Args:
+            slide_input: File path or image object.
+            patch_info: Metadata containing crop coordinates (x, y, width, height).
+            slide_obj: Optional pre-opened slide handle (OpenSlide or PIL.Image) to
+                prevent disk thrashing and avoid reopening files repeatedly.
+        """
+        # If pre-opened handle is provided, reuse it directly to eliminate disk thrashing
+        if slide_obj is not None:
+            if hasattr(slide_obj, "read_region"):
+                crop = slide_obj.read_region(
+                    (patch_info.x, patch_info.y), 0, (patch_info.width, patch_info.height)
+                ).convert("RGB")
+                crop_np = np.array(crop)
+                if crop_np.shape[0] != self.patch_size or crop_np.shape[1] != self.patch_size:
+                    crop_pil = Image.fromarray(crop_np).resize(
+                        (self.patch_size, self.patch_size), Image.Resampling.BILINEAR
+                    )
+                    crop_np = np.array(crop_pil)
+                return crop_np
+
+            elif isinstance(slide_obj, Image.Image):
+                box = (
+                    patch_info.x,
+                    patch_info.y,
+                    patch_info.x + patch_info.width,
+                    patch_info.y + patch_info.height,
+                )
+                crop = slide_obj.crop(box).convert("RGB")
+                if crop.size != (self.patch_size, self.patch_size):
+                    crop = crop.resize((self.patch_size, self.patch_size), Image.Resampling.BILINEAR)
+                return np.array(crop)
+
+            elif isinstance(slide_obj, np.ndarray):
+                box_y = slice(patch_info.y, patch_info.y + patch_info.height)
+                box_x = slice(patch_info.x, patch_info.x + patch_info.width)
+                crop_np = slide_obj[box_y, box_x]
+                if crop_np.shape[0] != self.patch_size or crop_np.shape[1] != self.patch_size:
+                    crop_pil = Image.fromarray(crop_np).resize(
+                        (self.patch_size, self.patch_size), Image.Resampling.BILINEAR
+                    )
+                    crop_np = np.array(crop_pil)
+                return crop_np
+
+        # Fallback if no pre-opened handle is provided
         if isinstance(slide_input, (str, Path)):
             p = Path(slide_input)
             if p.suffix.lower() in [".svs", ".ndpi", ".mrxs"]:
                 try:
                     import openslide
-                    slide = openslide.OpenSlide(str(p))
-                    crop = slide.read_region(
-                        (patch_info.x, patch_info.y), 0, (patch_info.width, patch_info.height)
-                    ).convert("RGB")
-                    crop_np = np.array(crop)
-                    if crop_np.shape[0] != self.patch_size or crop_np.shape[1] != self.patch_size:
-                        crop_pil = Image.fromarray(crop_np).resize(
-                            (self.patch_size, self.patch_size), Image.Resampling.BILINEAR
-                        )
-                        crop_np = np.array(crop_pil)
-                    return crop_np
+                    with openslide.OpenSlide(str(p)) as slide:
+                        crop = slide.read_region(
+                            (patch_info.x, patch_info.y), 0, (patch_info.width, patch_info.height)
+                        ).convert("RGB")
+                        crop_np = np.array(crop)
+                        if crop_np.shape[0] != self.patch_size or crop_np.shape[1] != self.patch_size:
+                            crop_pil = Image.fromarray(crop_np).resize(
+                                (self.patch_size, self.patch_size), Image.Resampling.BILINEAR
+                            )
+                            crop_np = np.array(crop_pil)
+                        return crop_np
                 except ImportError:
                     pass
 
@@ -386,50 +432,82 @@ class WSILowMagHighMagPipeline:
             candidates = candidates[:max_patches_to_infer]
 
         # Step 3: High-Mag Micro Dense Segmentation (40x) on Selected Candidates
+        # Open slide handle ONCE across all patches to avoid disk thrashing and descriptor leaks
+        slide_handle = None
+        should_close_handle = False
+        if isinstance(slide_input, (str, Path)):
+            p = Path(slide_input)
+            if p.suffix.lower() in [".svs", ".ndpi", ".mrxs"]:
+                try:
+                    import openslide
+                    slide_handle = openslide.OpenSlide(str(p))
+                    should_close_handle = True
+                except ImportError:
+                    slide_handle = Image.open(p)
+                    should_close_handle = True
+            else:
+                slide_handle = Image.open(p)
+                should_close_handle = True
+        elif isinstance(slide_input, (Image.Image, np.ndarray)):
+            slide_handle = slide_input
+
         t_highmag_start = time.time()
         model_stage2.eval()
         if model_stage1 is not None:
             model_stage1.eval()
 
         patch_stats = []
-        for cand in candidates:
-            patch_rgb = self.extract_patch_image(slide_input, cand)
-            img_tensor = (
-                torch.from_numpy(patch_rgb.transpose(2, 0, 1))
-                .float()
-                .div(255.0)
-                .unsqueeze(0)
-                .to(self.device)
-            )
+        try:
+            with torch.no_grad():
+                for idx, cand in enumerate(candidates):
+                    patch_rgb = self.extract_patch_image(slide_input, cand, slide_obj=slide_handle)
+                    img_tensor = (
+                        torch.from_numpy(patch_rgb.transpose(2, 0, 1))
+                        .float()
+                        .div(255.0)
+                        .unsqueeze(0)
+                        .to(self.device)
+                    )
 
-            # Run MultiMethodWSSSEngineV2 on high-resolution crop
-            if method == "M6_MultiScale_Pyramid_D4_Ensemble" and hasattr(self.engine, "predict_m6"):
-                pred_mask = self.engine.predict_m6(
-                    model_stage2, img_tensor, raw_rgb=patch_rgb, model_stage1=model_stage1
-                )
-            elif method == "M5_Proposed_SOTA_Ensemble" and hasattr(self.engine, "predict_m5"):
-                pred_mask = self.engine.predict_m5(
-                    model_stage2, img_tensor, raw_rgb=patch_rgb, model_stage1=model_stage1
-                )
-            else:
-                pred_mask = self.engine.predict_m1(
-                    model_stage2, img_tensor
-                )
+                    # Run MultiMethodWSSSEngineV2 on high-resolution crop
+                    if method == "M6_MultiScale_Pyramid_D4_Ensemble" and hasattr(self.engine, "predict_m6"):
+                        pred_mask = self.engine.predict_m6(
+                            model_stage2, img_tensor, raw_rgb=patch_rgb, model_stage1=model_stage1
+                        )
+                    elif method == "M5_Proposed_SOTA_Ensemble" and hasattr(self.engine, "predict_m5"):
+                        pred_mask = self.engine.predict_m5(
+                            model_stage2, img_tensor, raw_rgb=patch_rgb, model_stage1=model_stage1
+                        )
+                    else:
+                        pred_mask = self.engine.predict_m1(
+                            model_stage2, img_tensor
+                        )
 
-            cand.predicted_mask = pred_mask
-            cand.prediction_confidence = float(np.mean(pred_mask != 4))
+                    cand.predicted_mask = pred_mask
+                    cand.prediction_confidence = float(np.mean(pred_mask != 4))
 
-            patch_stats.append(
-                {
-                    "patch_id": cand.patch_id,
-                    "x": cand.x,
-                    "y": cand.y,
-                    "confidence": cand.prediction_confidence,
-                    "macro_tissue_score": cand.macro_tissue_score,
-                }
-            )
+                    patch_stats.append(
+                        {
+                            "patch_id": cand.patch_id,
+                            "x": cand.x,
+                            "y": cand.y,
+                            "confidence": cand.prediction_confidence,
+                            "macro_tissue_score": cand.macro_tissue_score,
+                        }
+                    )
 
-        highmag_elapsed = time.time() - t_highmag_start
+                    # Periodic VRAM flush every 50 patches to guarantee zero memory accumulation
+                    if self.device.type == "cuda" and (idx + 1) % 50 == 0:
+                        torch.cuda.empty_cache()
+
+            highmag_elapsed = time.time() - t_highmag_start
+        finally:
+            if should_close_handle and slide_handle is not None and hasattr(slide_handle, "close"):
+                try:
+                    slide_handle.close()
+                except Exception:
+                    pass
+
         total_elapsed = time.time() - t0
 
         # Step 4: Stitching Patch Predictions Back to Macro Coordinate Canvas
