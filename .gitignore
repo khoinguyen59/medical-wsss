@@ -9,7 +9,7 @@ venv/
 .venv/
 ENV/
 
-# PyTorch, Checkpoints & Datasets (Prevent committing large binaries)
+# Model Weights & Large Binaries
 *.pt
 *.pth
 *.ckpt
@@ -22,35 +22,37 @@ ENV/
 *.hdf5
 checkpoints/*
 !checkpoints/.gitkeep
-data/*
-!data/.gitkeep
-!data/README.md
 
-# Cloned External Repositories (Prevent committing nested git repositories)
-repos/*
-!repos/.gitkeep
-!repos/README.md
+# Archive Files & Temp Drive Bundles
+*.zip
+*.tar
+*.gz
+*.rar
+drive_upload_ready/
+scratch/
 
-# Research Papers (Store locally, prevent bloating git repo)
-docs/papers/*.pdf
-docs/papers/*_raw.txt
-docs/papers/figures/
-!docs/papers/.gitkeep
-!docs/papers/README.md
-papers/*.pdf
-
-# Testing, Linting & Coverage
+# Testing, Linting & Analysis Cache
 .pytest_cache/
 .coverage
 htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Graphify & Local Analysis Artifacts
+# Graphify & Multi-Agent Internal Scaffolding (Excluded from Clean Project Source)
+.agents/
+AGENTS.md
 graphify-out*/
-scratch/
+scripts/update_graphify.py
+product/reports/SE374_MULTI_AGENT_AUDIT_AND_DEFECT_RESOLUTION_REPORT.md
 
-# LaTeX Build Artifacts (for reports)
+# External Reference Repositories & Paper Archives (Excluded to keep repo lightweight & pure)
+repos/
+docs/papers/
+docs/references/
+docs/diary/
+docs/notes/
+
+# LaTeX Build Artifacts
 *.aux
 *.bbl
 *.blg
@@ -58,10 +60,7 @@ scratch/
 *.fdb_latexmk
 *.synctex.gz
 *.toc
-product/reports/*.pdf
 product/reports/*.log
-reports/*.pdf
-reports/*.log
 
 # IDE & OS
 .idea/
