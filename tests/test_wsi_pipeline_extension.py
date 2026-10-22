@@ -19,9 +19,12 @@ from src.pipeline.wsi_lowmag_highmag_pipeline import (
 from src.models.wsss_inference_methods import MultiMethodWSSSEngineV2
 
 
+import torch.nn.functional as F
+
+
 class MockDeepLabV3Plus(nn.Module):
     """Lightweight dummy segmentor for CPU testing."""
-    def __init__(self, num_classes: int = 5):
+    def __init__(self, num_classes: int = 4):
         super().__init__()
         self.conv = nn.Conv2d(3, num_classes, kernel_size=1)
 
@@ -42,9 +45,6 @@ class MockStage1NetCAM(nn.Module):
         logits = self.fc(pooled)
         probs = torch.sigmoid(logits)
         return cam, probs
-
-
-import torch.nn.functional as F
 
 
 def test_wsi_pipeline_initialization():
@@ -110,7 +110,7 @@ def test_wsi_pipeline_candidate_patch_selection():
 
 
 def test_wsi_pipeline_end_to_end_simulation():
-    """Verify end-to-end pipeline execution and clinical report generation."""
+    """Verify end-to-end pipeline execution with M1 Baseline Single-Scale."""
     pipeline = WSILowMagHighMagPipeline(
         patch_size=64,
         lowmag_target_size=(64, 64),
@@ -125,7 +125,7 @@ def test_wsi_pipeline_end_to_end_simulation():
     slide_arr[64:192, 64:192, 2] = 160
     slide_pil = Image.fromarray(slide_arr)
 
-    model_stage2 = MockDeepLabV3Plus(num_classes=5)
+    model_stage2 = MockDeepLabV3Plus(num_classes=4)
     model_stage1 = MockStage1NetCAM(num_classes=4)
 
     stitched_mask, report = pipeline.run_end_to_end_wsi(
@@ -140,6 +140,7 @@ def test_wsi_pipeline_end_to_end_simulation():
     assert stitched_mask.shape == (64, 64)
     assert isinstance(report, WSIProcessingReport)
     assert report.slide_id == "TEST_SLIDE_001"
+    assert report.selected_method == "M1_Baseline_SingleScale"
     assert report.compute_reduction_pct >= 0.0
     assert report.total_elapsed_time_sec > 0.0
     assert report.tumor_fraction_pct >= 0.0
@@ -148,6 +149,130 @@ def test_wsi_pipeline_end_to_end_simulation():
     color_img = WSILowMagHighMagPipeline.colorize_mask(stitched_mask)
     assert color_img.size == (64, 64)
     assert color_img.mode == "RGB"
+
+
+def test_wsi_pipeline_end_to_end_simulation_m5():
+    """Verify end-to-end pipeline execution with M5 Proposed SOTA Ensemble."""
+    pipeline = WSILowMagHighMagPipeline(
+        patch_size=64,
+        lowmag_target_size=(64, 64),
+        tissue_threshold=0.1,
+        device="cpu",
+    )
+
+    slide_arr = np.ones((256, 256, 3), dtype=np.uint8) * 245
+    slide_arr[64:192, 64:192, 0] = 170
+    slide_arr[64:192, 64:192, 1] = 60
+    slide_arr[64:192, 64:192, 2] = 160
+    slide_pil = Image.fromarray(slide_arr)
+
+    model_stage2 = MockDeepLabV3Plus(num_classes=4)
+    model_stage1 = MockStage1NetCAM(num_classes=4)
+
+    stitched_mask, report = pipeline.run_end_to_end_wsi(
+        slide_input=slide_pil,
+        model_stage2=model_stage2,
+        model_stage1=model_stage1,
+        method="M5_Proposed_SOTA_Ensemble",
+        slide_id="TEST_SLIDE_M5",
+        max_patches_to_infer=10,
+    )
+
+    assert stitched_mask.shape == (64, 64)
+    assert isinstance(report, WSIProcessingReport)
+    assert report.slide_id == "TEST_SLIDE_M5"
+    assert report.selected_method == "M5_Proposed_SOTA_Ensemble"
+    assert report.compute_reduction_pct >= 0.0
+    assert report.total_elapsed_time_sec > 0.0
+    assert report.tumor_fraction_pct >= 0.0
+
+    color_img = WSILowMagHighMagPipeline.colorize_mask(stitched_mask)
+    assert color_img.size == (64, 64)
+    assert color_img.mode == "RGB"
+
+
+def test_wsi_pipeline_end_to_end_simulation_m6():
+    """Verify end-to-end pipeline execution with M6 Adaptive Multi-Scale Fusion."""
+    pipeline = WSILowMagHighMagPipeline(
+        patch_size=64,
+        lowmag_target_size=(64, 64),
+        tissue_threshold=0.1,
+        device="cpu",
+    )
+
+    slide_arr = np.ones((256, 256, 3), dtype=np.uint8) * 245
+    slide_arr[64:192, 64:192, 0] = 170
+    slide_arr[64:192, 64:192, 1] = 60
+    slide_arr[64:192, 64:192, 2] = 160
+    slide_pil = Image.fromarray(slide_arr)
+
+    model_stage2 = MockDeepLabV3Plus(num_classes=4)
+    model_stage1 = MockStage1NetCAM(num_classes=4)
+
+    stitched_mask, report = pipeline.run_end_to_end_wsi(
+        slide_input=slide_pil,
+        model_stage2=model_stage2,
+        model_stage1=model_stage1,
+        method="M6_MultiScale_Pyramid_D4_Ensemble",
+        slide_id="TEST_SLIDE_M6",
+        max_patches_to_infer=10,
+    )
+
+    assert stitched_mask.shape == (64, 64)
+    assert isinstance(report, WSIProcessingReport)
+    assert report.slide_id == "TEST_SLIDE_M6"
+    assert report.selected_method == "M6_MultiScale_Pyramid_D4_Ensemble"
+    assert report.compute_reduction_pct >= 0.0
+    assert report.total_elapsed_time_sec > 0.0
+    assert report.tumor_fraction_pct >= 0.0
+
+    color_img = WSILowMagHighMagPipeline.colorize_mask(stitched_mask)
+    assert color_img.size == (64, 64)
+    assert color_img.mode == "RGB"
+
+
+def test_wsi_pipeline_memory_safety_and_handle_lifecycle(tmp_path):
+    """Verify memory safety: torch.no_grad(), single slide handle reuse, and resource cleanup."""
+    pipeline = WSILowMagHighMagPipeline(
+        patch_size=64,
+        lowmag_target_size=(64, 64),
+        tissue_threshold=0.1,
+        device="cpu",
+    )
+
+    test_img_path = tmp_path / "test_slide.png"
+    img_data = np.ones((128, 128, 3), dtype=np.uint8) * 200
+    img_data[32:96, 32:96, 0] = 180
+    img_data[32:96, 32:96, 1] = 50
+    img_data[32:96, 32:96, 2] = 140
+    Image.fromarray(img_data).save(test_img_path)
+
+    grad_enabled_during_inference = []
+
+    class GradCheckingModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = nn.Conv2d(3, 4, kernel_size=1)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            grad_enabled_during_inference.append(torch.is_grad_enabled())
+            return self.conv(x)
+
+    model_stage2 = GradCheckingModel()
+    model_stage1 = MockStage1NetCAM(num_classes=4)
+
+    stitched_mask, report = pipeline.run_end_to_end_wsi(
+        slide_input=str(test_img_path),
+        model_stage2=model_stage2,
+        model_stage1=model_stage1,
+        method="M1_Baseline_SingleScale",
+        slide_id="MEMORY_SAFETY_CHECK",
+        max_patches_to_infer=5,
+    )
+
+    assert len(grad_enabled_during_inference) > 0
+    assert not any(grad_enabled_during_inference), "Grad tracking must be disabled during inference!"
+    assert isinstance(report, WSIProcessingReport)
 
 
 def test_wsi_pipeline_extract_patch_cached_handle():

@@ -93,12 +93,12 @@ def sha256_file(path: Path) -> str:
 
 
 def discover_thin_runner_notebooks(notebooks_dir: Path) -> List[Path]:
-    """Finds all new Thin Runner notebooks in `notebooks/` excluding legacy notebooks and bonus demos."""
+    """Finds all new Thin Runner notebooks in `notebooks/` excluding legacy notebooks."""
     if not notebooks_dir.is_dir():
         return []
     candidates: List[Path] = []
     for nb_path in sorted(notebooks_dir.glob("*.ipynb")):
-        if nb_path.name not in LEGACY_NOTEBOOKS and not nb_path.name.endswith("BonusDemo.ipynb"):
+        if nb_path.name not in LEGACY_NOTEBOOKS:
             candidates.append(nb_path)
     return candidates
 
@@ -153,6 +153,8 @@ def build_fallback_thin_notebook_dict(variant: Dict[str, object]) -> Dict[str, o
                 "    Path('/content/drive/MyDrive/SE374_WSSS_Project/SE374_WSSS_Drive_Code'),\n"
                 "    Path('/content/drive/MyDrive/SE374_WSSS_Drive_Code'),\n"
                 "    Path('/content/drive/MyDrive/SE374_WSSS_Project'),\n"
+                "    Path('/content/drive/MyDrive'),\n"
+                "    Path('/content/medical_wsss_repo'),\n"
                 "    Path.cwd(),\n"
                 "    Path.cwd().parent,\n"
                 "]\n"
@@ -179,7 +181,13 @@ def build_fallback_thin_notebook_dict(variant: Dict[str, object]) -> Dict[str, o
                 "            elif (extract_dir / 'SE374_WSSS_Drive_Code' / 'src' / 'models' / 'wsss_inference_methods.py').is_file():\n"
                 "                PROJECT_CODE_DIR = (extract_dir / 'SE374_WSSS_Drive_Code').resolve()\n"
                 "                break\n\n"
-                "assert PROJECT_CODE_DIR is not None, 'Không tìm thấy gói src/! Hãy tải SE374_WSSS_Drive_Code lên MyDrive/SE374_WSSS_Project/'\n"
+                "if PROJECT_CODE_DIR is None:\n"
+                "    import subprocess\n"
+                "    subprocess.run(['git', 'clone', '--depth', '1', 'https://github.com/khoinguyen59/medical-wsss.git', '/content/medical_wsss_repo'], check=False)\n"
+                "    if (Path('/content/medical_wsss_repo') / 'src' / 'models' / 'wsss_inference_methods.py').is_file():\n"
+                "        PROJECT_CODE_DIR = Path('/content/medical_wsss_repo').resolve()\n"
+                "    else:\n"
+                "        PROJECT_CODE_DIR = Path.cwd().resolve()\n\n"
                 "if str(PROJECT_CODE_DIR) not in sys.path:\n"
                 "    sys.path.insert(0, str(PROJECT_CODE_DIR))\n"
                 "print(f'[OK] Đã nạp gói code từ: {PROJECT_CODE_DIR}')"

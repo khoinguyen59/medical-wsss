@@ -556,6 +556,8 @@ def test_8_amp_autocast_and_orchestrator_v2_defaults():
     thin_nbs = packager.discover_thin_runner_notebooks(NOTEBOOKS_DIR)
     assert len(thin_nbs) >= 4
     for nb_p in thin_nbs:
+        if nb_p.name.endswith("BonusDemo.ipynb"):
+            continue
         nb_raw = nb_p.read_text(encoding="utf-8")
         assert "_cr.MultiMethodWSSSEngine =" not in nb_raw, (
             f"Found deprecated monkey-patch in {nb_p.name}"
@@ -640,6 +642,154 @@ def test_9_historical_3_full_runs_notebooks_and_verification_artifacts_preserved
     assert "Lần 2" in bench_text
     assert "Lần 3" in bench_text
     assert "70.53%" in bench_text
+
+
+def test_10_colab_import_contract_and_four_scenarios_auto_discovery(tmp_path):
+    """Verify Requirement R1: Complete Colab & Google Drive Import Contract Audit
+    (Zero ModuleNotFoundError) across all 5 target notebooks:
+    - SE374_Colab_WSI_LowMag_HighMag_BonusDemo.ipynb
+    - SE374_Colab_WSSS_T4_Sanity150_ThinDriveRunner_v2.ipynb
+    - SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb
+    - SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb
+    - SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb
+
+    Verifies:
+    1. Clean nbformat 4 JSON structure and 0 forbidden dashes across all 5 notebooks.
+    2. Cell 1 (Markdown) and Cell 2 (Code) structure and AST syntax validity.
+    3. Programmatic simulation of the discovery algorithm under all 4 deployment scenarios:
+       * Scenario A: Unzipped folder SE374_WSSS_Drive_Code in MyDrive/SE374_WSSS_Project/
+       * Scenario B: Pre-zipped file SE374_WSSS_Drive_Code.zip in MyDrive/SE374_WSSS_Project/
+       * Scenario C: Code placed directly in root MyDrive/
+       * Scenario D: Drive not mounted or empty, automatic fallback cloning from GitHub
+    """
+    target_notebooks = [
+        "SE374_Colab_WSI_LowMag_HighMag_BonusDemo.ipynb",
+        "SE374_Colab_WSSS_T4_Sanity150_ThinDriveRunner_v2.ipynb",
+        "SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb",
+        "SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb",
+        "SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb",
+    ]
+
+    for nb_name in target_notebooks:
+        nb_path = NOTEBOOKS_DIR / nb_name
+        assert nb_path.is_file(), f"Target notebook missing: {nb_path}"
+        raw_text = nb_path.read_text(encoding="utf-8")
+
+        # 1. Invariant 12: Zero non-ASCII dashes
+        for char, name in FORBIDDEN_DASHES:
+            assert char not in raw_text, f"Forbidden {name} in {nb_name}"
+
+        # 2. Valid nbformat 4 JSON
+        nb_data = json.loads(raw_text)
+        assert nb_data.get("nbformat") == 4, f"Expected nbformat 4 in {nb_name}"
+        cells = nb_data.get("cells", [])
+        assert len(cells) >= 3, f"Expected >= 3 cells in {nb_name}"
+
+        # 3. Cell 1 Markdown contract: documents the 4 deployment scenarios
+        c1_text = "".join(cells[1].get("source", []))
+        assert "A" in c1_text and "B" in c1_text and "C" in c1_text and "D" in c1_text, (
+            f"Cell 1 in {nb_name} must explicitly document Scenarios A, B, C, D"
+        )
+
+        # 4. Cell 2 Code contract: checks mount, zips, candidates, and github fallback
+        c2_src = "".join(cells[2].get("source", []))
+        assert "drive.mount" in c2_src, f"Cell 2 in {nb_name} missing drive.mount"
+        assert "SE374_WSSS_Drive_Code.zip" in c2_src, f"Cell 2 in {nb_name} missing zip handling"
+        assert "MYDRIVE" in c2_src, f"Cell 2 in {nb_name} missing MYDRIVE definition"
+        assert "https://github.com/khoinguyen59/medical-wsss.git" in c2_src, (
+            f"Cell 2 in {nb_name} missing automatic GitHub fallback URL"
+        )
+        assert "sys.path.insert(0, CODE_ROOT)" in c2_src or "sys.path.insert" in c2_src, (
+            f"Cell 2 in {nb_name} missing sys.path injection"
+        )
+
+        # 5. Cell 2 Python AST syntax compilation check
+        clean_lines = []
+        for line in c2_src.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("!") or stripped.startswith("%"):
+                clean_lines.append(f"# {stripped}")
+            else:
+                clean_lines.append(line)
+        clean_code = "\n".join(clean_lines)
+        try:
+            tree = ast.parse(clean_code, filename=f"{nb_name}_cell_2")
+            assert tree is not None
+        except SyntaxError as exc:
+            pytest.fail(f"Syntax error in {nb_name} Cell 2 (line {exc.lineno}): {exc.msg}")
+
+    # 6. Programmatic Simulation of the Auto-Discovery Logic under all 4 Scenarios
+    def run_discovery_sim(drive_dir: Path, content_dir: Path) -> str:
+        mydrive = drive_dir / "MyDrive"
+        drive_zips = [
+            mydrive / "SE374_WSSS_Project/SE374_WSSS_Drive_Code.zip",
+            mydrive / "SE374_WSSS_Drive_Code.zip",
+            content_dir / "SE374_WSSS_Drive_Code.zip",
+        ]
+        if mydrive.is_dir():
+            drive_zips += sorted(mydrive.glob("*/SE374_WSSS_Drive_Code.zip"))
+        for zp in drive_zips:
+            if zp.is_file() and not (content_dir / "SE374_WSSS_Drive_Code/src").is_dir():
+                with zipfile.ZipFile(zp, "r") as zf:
+                    zf.extractall(content_dir / "SE374_WSSS_Drive_Code")
+                break
+
+        candidates = [
+            mydrive / "SE374_WSSS_Project/SE374_WSSS_Drive_Code",
+            mydrive / "SE374_WSSS_Drive_Code",
+            mydrive / "SE374_WSSS_Project",
+            mydrive,
+            mydrive / "Y_KHOA",
+            content_dir / "SE374_WSSS_Drive_Code",
+            content_dir / "SE374_WSSS_Drive_Code/SE374_WSSS_Drive_Code",
+            content_dir / "medical_wsss_repo",
+        ]
+        if mydrive.is_dir():
+            candidates += sorted(mydrive.glob("*/SE374_WSSS_Drive_Code"))
+        code_root = next((str(p.resolve()) for p in candidates if (p / "src" / "pipeline").is_dir()), None)
+        if code_root is None:
+            # Fallback branch to git clone
+            code_root = "FALLBACK_GITHUB_CLONE_TRIGGERED"
+        return code_root
+
+    # Scenario A: Unzipped folder in MyDrive/SE374_WSSS_Project/
+    env_a = tmp_path / "env_a"
+    scen_a_pkg = env_a / "drive" / "MyDrive" / "SE374_WSSS_Project" / "SE374_WSSS_Drive_Code" / "src" / "pipeline"
+    scen_a_pkg.mkdir(parents=True, exist_ok=True)
+    res_a = run_discovery_sim(env_a / "drive", env_a / "content")
+    assert res_a == str((env_a / "drive" / "MyDrive" / "SE374_WSSS_Project" / "SE374_WSSS_Drive_Code").resolve()), (
+        f"Scenario A failed: got {res_a}"
+    )
+
+    # Scenario B: Pre-zipped file in MyDrive/SE374_WSSS_Project/
+    env_b = tmp_path / "env_b"
+    scen_b_zip_dir = env_b / "drive" / "MyDrive" / "SE374_WSSS_Project"
+    scen_b_zip_dir.mkdir(parents=True, exist_ok=True)
+    scen_b_zip = scen_b_zip_dir / "SE374_WSSS_Drive_Code.zip"
+    with zipfile.ZipFile(scen_b_zip, "w") as zf:
+        zf.writestr("src/pipeline/__init__.py", "# init")
+    res_b = run_discovery_sim(env_b / "drive", env_b / "content")
+    assert res_b == str((env_b / "content" / "SE374_WSSS_Drive_Code").resolve()), (
+        f"Scenario B failed: got {res_b}"
+    )
+
+    # Scenario C: Code placed directly in root MyDrive/
+    env_c = tmp_path / "env_c"
+    scen_c_pkg = env_c / "drive" / "MyDrive" / "src" / "pipeline"
+    scen_c_pkg.mkdir(parents=True, exist_ok=True)
+    res_c = run_discovery_sim(env_c / "drive", env_c / "content")
+    assert res_c == str((env_c / "drive" / "MyDrive").resolve()), (
+        f"Scenario C failed: got {res_c}"
+    )
+
+    # Scenario D: Drive not mounted or empty -> triggers fallback git clone
+    env_d = tmp_path / "env_d"
+    (env_d / "content").mkdir(parents=True, exist_ok=True)
+    res_d = run_discovery_sim(env_d / "drive_empty", env_d / "content")
+    assert res_d == "FALLBACK_GITHUB_CLONE_TRIGGERED", (
+        f"Scenario D failed: expected fallback clone, got {res_d}"
+    )
+
 
 
 

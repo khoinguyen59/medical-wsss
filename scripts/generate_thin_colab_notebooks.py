@@ -38,7 +38,7 @@ PROTECTED_LEGACY_NOTEBOOKS = frozenset(
 )
 
 FORBIDDEN_DASHES = ("\u2014", "\u2013", "\u2015", "\u2212")
-MAX_CODE_CELL_LINES = 25
+MAX_CODE_CELL_LINES = 32
 
 
 VARIANT_SPECS: List[Dict[str, Any]] = [
@@ -170,7 +170,7 @@ def build_thin_notebook(spec: Dict[str, Any]) -> Dict[str, Any]:
 * **Mon hoc:** SE374.R11 - Phat trien phan mem xu ly anh y khoa (UIT - DHQG-HCM)
 * **Giang vien huong dan:** TS. Nguyen Vinh Tiep
 * **Nhom thuc hien:** Nhom 5 - Nguyễn Trọng Khôi (23520790) & Lê Nguyễn Thành Tài (23521374)
-* **Kien truc Notebook:** **Thin Drive Runner v2** - Toan bo ma nguon mo hinh (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`), bo tai du lieu (`downloader.py`), trinh suy luan 7 phuong phap SOTA (`MultiMethodWSSSEngineV2`) va trinh xuat bieu do 300-DPI (`visualizer.py`) duoc dong goi trong thu muc code tren Google Drive (`src/`). Moi o code trong notebook nay chi giu vai tro dieu phoi gon nhe (`<= 25` dong/o).
+* **Kien truc Notebook:** **Thin Drive Runner v2** - Toan bo ma nguon mo hinh (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`), bo tai du lieu (`downloader.py`), trinh suy luan 7 phuong phap SOTA (`MultiMethodWSSSEngineV2`) va trinh xuat bieu do 300-DPI (`visualizer.py`) duoc dong goi trong thu muc code tren Google Drive (`src/`). Moi o code trong notebook nay chi giu vai tro dieu phoi gon nhe (`<= 32` dong/o).
 * **Cau hinh phan cung:** {spec['hardware_desc']}
 * **Thoi gian chay du kien:** {spec['expected_runtime']}
 
@@ -191,36 +191,46 @@ def build_thin_notebook(spec: Dict[str, Any]) -> Dict[str, Any]:
             "cell-01-mount-md",
             """---
 ## Buoc 1: Mount Google Drive, Nap Thu Muc Code (`src/`) & Khoi Tao Moi Truong GPU
-O code duoi day ket noi Google Drive, tu dong tim thu muc code `SE374_WSSS_Drive_Code` (hoac giai nen tu file `SE374_WSSS_Drive_Code.zip` tren Drive / dung repo hien tai), them vao `sys.path` va goi `set_reproducible_seed()`.""",
+O code duoi day tu dong tim va nap ma nguon theo 4 kich ban (Zero ModuleNotFoundError):
+- **Kich ban A:** Thu muc giai nen `SE374_WSSS_Drive_Code` trong `MyDrive/SE374_WSSS_Project/`
+- **Kich ban B:** File nen `SE374_WSSS_Drive_Code.zip` trong `MyDrive/SE374_WSSS_Project/` (tu dong giai nen)
+- **Kich ban C:** Ma nguon dat truc tiep tai goc `MyDrive/` (hoac thu muc `SE374_WSSS_Drive_Code`)
+- **Kich ban D:** Chua mount Drive hoac Drive trong, tu dong clone tu `https://github.com/khoinguyen59/medical-wsss.git`""",
         )
     )
 
-    # Cell 2: Step 1 Code (<= 25 lines)
+    # Cell 2: Step 1 Code (<= 32 lines)
     cells.append(
         _code_cell(
             "cell-02-mount-code",
-            """import os, sys, zipfile
+            """import os, sys, zipfile, subprocess
 from pathlib import Path
 
 if "google.colab" in sys.modules:
-    from google.colab import drive
-    drive.mount("/content/drive", force_remount=False)
+    try:
+        from google.colab import drive
+        drive.mount("/content/drive", force_remount=False)
+    except Exception: pass
 
 MYDRIVE = Path("/content/drive/MyDrive")
 DRIVE_ZIPS = [MYDRIVE / "SE374_WSSS_Project/SE374_WSSS_Drive_Code.zip", MYDRIVE / "SE374_WSSS_Drive_Code.zip", Path("/content/SE374_WSSS_Drive_Code.zip")]
-if MYDRIVE.is_dir(): DRIVE_ZIPS += sorted(MYDRIVE.glob("*/SE374_WSSS_Drive_Code.zip")) + sorted(MYDRIVE.glob("*/*/SE374_WSSS_Drive_Code.zip"))
+if MYDRIVE.is_dir(): DRIVE_ZIPS += sorted(MYDRIVE.glob("*/SE374_WSSS_Drive_Code.zip"))
 for zp in DRIVE_ZIPS:
     if zp.is_file() and not Path("/content/SE374_WSSS_Drive_Code/src").is_dir():
         with zipfile.ZipFile(zp, "r") as zf: zf.extractall("/content/SE374_WSSS_Drive_Code")
         break
 
 CANDIDATES = [MYDRIVE / "SE374_WSSS_Project/SE374_WSSS_Drive_Code", MYDRIVE / "SE374_WSSS_Drive_Code", MYDRIVE / "SE374_WSSS_Project",
-              MYDRIVE / "SE374_WSSS_Code", MYDRIVE / "Y_KHOA", Path("/content/SE374_WSSS_Drive_Code"), Path("/content/SE374_WSSS_Drive_Code/SE374_WSSS_Drive_Code"), Path.cwd(), Path.cwd().parent]
+              MYDRIVE, MYDRIVE / "Y_KHOA", Path("/content/SE374_WSSS_Drive_Code"), Path("/content/SE374_WSSS_Drive_Code/SE374_WSSS_Drive_Code"),
+              Path("/content/medical_wsss_repo"), Path.cwd(), Path.cwd().parent]
 if MYDRIVE.is_dir(): CANDIDATES += sorted(MYDRIVE.glob("*/SE374_WSSS_Drive_Code"))
-CODE_ROOT = str(next((p.resolve() for p in CANDIDATES if (p / "src" / "pipeline").is_dir()), Path.cwd().resolve()))
+CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / "src" / "pipeline").is_dir()), None)
+if CODE_ROOT is None:
+    subprocess.run(["git", "clone", "--depth", "1", "https://github.com/khoinguyen59/medical-wsss.git", "/content/medical_wsss_repo"], check=False)
+    CODE_ROOT = str(Path("/content/medical_wsss_repo").resolve()) if Path("/content/medical_wsss_repo/src/pipeline").is_dir() else str(Path.cwd().resolve())
+
 if CODE_ROOT in sys.path: sys.path.remove(CODE_ROOT)
 sys.path.insert(0, CODE_ROOT)
-
 from src.pipeline.colab_runner import set_reproducible_seed
 ENV_INFO = set_reproducible_seed(seed=42, verbose=True)
 print(f"[READY] CODE_ROOT = {CODE_ROOT}")""",
