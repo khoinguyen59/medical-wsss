@@ -570,18 +570,26 @@ def safe_torch_load(
 
 
 def build_and_load_deeplabv3plus(
-    checkpoint_path: Union[str, Path],
-    device: Union[str, torch.device],
+    checkpoint_path: Optional[Union[str, Path]] = None,
+    device: Optional[Union[str, torch.device]] = None,
     strict: bool = False,
+    *,
+    ckpt_path: Optional[Union[str, Path]] = None,
 ) -> DeepLabV3Plus:
     """Builds DeepLabV3+ and loads pretrained weights from stage2_checkpoint_trained_on_bcss.pth."""
-    ckpt_path = Path(checkpoint_path)
-    if not ckpt_path.is_file():
-        raise FileNotFoundError(f"Checkpoint Stage 2 không tồn tại tại: {ckpt_path.resolve()}")
+    raw_path = checkpoint_path if checkpoint_path is not None else ckpt_path
+    if raw_path is None:
+        raise ValueError("Phải cung cấp đường dẫn checkpoint ('checkpoint_path' hoặc 'ckpt_path').")
+    ckpt_path_obj = Path(raw_path)
+    if not ckpt_path_obj.is_file():
+        raise FileNotFoundError(f"Checkpoint Stage 2 không tồn tại tại: {ckpt_path_obj.resolve()}")
 
-    dev = torch.device(device) if isinstance(device, str) else device
-    print(f"--> Đang đọc checkpoint Stage 2: {ckpt_path.name}")
-    checkpoint = safe_torch_load(ckpt_path, device=dev)
+    if device is None:
+        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        dev = torch.device(device) if isinstance(device, str) else device
+    print(f"--> Đang đọc checkpoint Stage 2: {ckpt_path_obj.name}")
+    checkpoint = safe_torch_load(ckpt_path_obj, device=dev)
     state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
 
     cleaned_state_dict = {
@@ -612,23 +620,31 @@ def build_and_load_deeplabv3plus(
 
 
 def build_and_load_stage1_netcam(
-    checkpoint_path: Union[str, Path],
-    device: Union[str, torch.device],
+    checkpoint_path: Optional[Union[str, Path]] = None,
+    device: Optional[Union[str, torch.device]] = None,
     n_class: int = 4,
     num_classes: Optional[int] = None,
     strict: bool = True,
+    *,
+    ckpt_path: Optional[Union[str, Path]] = None,
 ) -> WSSSTissueStage1NetCAM:
     """Builds WSSSTissueStage1NetCAM and loads weights from stage1_checkpoint_trained_on_bcss.pth."""
-    ckpt_path = Path(checkpoint_path)
-    if not ckpt_path.is_file():
-        raise FileNotFoundError(f"Checkpoint Stage 1 không tồn tại tại: {ckpt_path.resolve()}")
+    raw_path = checkpoint_path if checkpoint_path is not None else ckpt_path
+    if raw_path is None:
+        raise ValueError("Phải cung cấp đường dẫn checkpoint ('checkpoint_path' hoặc 'ckpt_path').")
+    ckpt_path_obj = Path(raw_path)
+    if not ckpt_path_obj.is_file():
+        raise FileNotFoundError(f"Checkpoint Stage 1 không tồn tại tại: {ckpt_path_obj.resolve()}")
 
-    dev = torch.device(device) if isinstance(device, str) else device
+    if device is None:
+        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        dev = torch.device(device) if isinstance(device, str) else device
     if num_classes is not None:
         n_class = num_classes - 1 if num_classes == 5 else num_classes
 
-    print(f"--> Đang đọc checkpoint Stage 1: {ckpt_path.name}")
-    weights_dict = safe_torch_load(ckpt_path, device=dev)
+    print(f"--> Đang đọc checkpoint Stage 1: {ckpt_path_obj.name}")
+    weights_dict = safe_torch_load(ckpt_path_obj, device=dev)
     if isinstance(weights_dict, dict):
         if "state_dict" in weights_dict:
             weights_dict = weights_dict["state_dict"]
@@ -686,9 +702,36 @@ def load_wsss_models(
     return model_stage2, model_stage1, dev
 
 
+class ColabModelLoader:
+    """Compatibility helper for Colab notebooks loading Stage-1 & Stage-2 models."""
+
+    def __init__(self, device: Optional[Union[str, torch.device]] = None) -> None:
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        elif isinstance(device, str):
+            self.device = torch.device(device)
+        else:
+            self.device = device
+
+    def load_stage1_netcam(
+        self,
+        ckpt_path: Union[str, Path],
+    ) -> WSSSTissueStage1NetCAM:
+        """Builds and loads the Stage-1 ResNet38d Net_CAM model."""
+        return build_and_load_stage1_netcam(checkpoint_path=ckpt_path, device=self.device)
+
+    def load_stage2_deeplabv3plus(
+        self,
+        ckpt_path: Union[str, Path],
+    ) -> DeepLabV3Plus:
+        """Builds and loads the Stage-2 DeepLabV3+ ResNet-101 model."""
+        return build_and_load_deeplabv3plus(checkpoint_path=ckpt_path, device=self.device)
+
+
 # ==============================================================================
 # 4. OTSU CLINICAL GATING SERVICE
 # ==============================================================================
+
 
 class OtsuClinicalGating:
     """Cổng lọc mô học Otsu: Cưỡng bức kính trắng về Class 4 để triệt tiêu dương tính giả."""

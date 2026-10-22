@@ -360,16 +360,23 @@ def safe_torch_load(checkpoint_path: Union[str, Path], device: torch.device):
 
 
 def build_and_load_deeplabv3plus(
-    checkpoint_path: Union[str, Path],
-    device: torch.device,
+    checkpoint_path: Optional[Union[str, Path]] = None,
+    device: Optional[torch.device] = None,
     strict: bool = False,
+    *,
+    ckpt_path: Optional[Union[str, Path]] = None,
 ) -> DeepLabV3Plus:
     """Builds DeepLabV3Plus and loads pretrained weights from stage2_checkpoint_trained_on_bcss.pth."""
-    ckpt_path = Path(checkpoint_path)
-    if not ckpt_path.is_file():
-        raise FileNotFoundError(f"Stage-2 Checkpoint not found at: {ckpt_path.resolve()}")
+    raw_path = checkpoint_path if checkpoint_path is not None else ckpt_path
+    if raw_path is None:
+        raise ValueError("Phải cung cấp đường dẫn checkpoint ('checkpoint_path' hoặc 'ckpt_path').")
+    ckpt_path_obj = Path(raw_path)
+    if not ckpt_path_obj.is_file():
+        raise FileNotFoundError(f"Stage-2 Checkpoint not found at: {ckpt_path_obj.resolve()}")
 
-    checkpoint = safe_torch_load(ckpt_path, device=device)
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint = safe_torch_load(ckpt_path_obj, device=device)
     state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
 
     cleaned_state_dict = {
@@ -620,20 +627,27 @@ class WSSSTissueStage1NetCAM(nn.Module):
 
 
 def build_and_load_stage1_netcam(
-    checkpoint_path: Union[str, Path],
-    device: torch.device,
+    checkpoint_path: Optional[Union[str, Path]] = None,
+    device: Optional[torch.device] = None,
     n_class: int = 4,
     strict: bool = True,
+    *,
+    ckpt_path: Optional[Union[str, Path]] = None,
 ) -> WSSSTissueStage1NetCAM:
     """Builds WSSSTissueStage1NetCAM and loads weights from stage1_checkpoint_trained_on_bcss.pth.
 
     Verifies 100% key match under strict=True.
     """
-    ckpt_path = Path(checkpoint_path)
-    if not ckpt_path.is_file():
-        raise FileNotFoundError(f"Stage-1 Checkpoint not found at: {ckpt_path.resolve()}")
+    raw_path = checkpoint_path if checkpoint_path is not None else ckpt_path
+    if raw_path is None:
+        raise ValueError("Phải cung cấp đường dẫn checkpoint ('checkpoint_path' hoặc 'ckpt_path').")
+    ckpt_path_obj = Path(raw_path)
+    if not ckpt_path_obj.is_file():
+        raise FileNotFoundError(f"Stage-1 Checkpoint not found at: {ckpt_path_obj.resolve()}")
 
-    weights_dict = safe_torch_load(ckpt_path, device=device)
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    weights_dict = safe_torch_load(ckpt_path_obj, device=device)
     if "state_dict" in weights_dict:
         weights_dict = weights_dict["state_dict"]
     elif "model" in weights_dict:

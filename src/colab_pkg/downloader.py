@@ -477,3 +477,28 @@ def prepare_dataset_and_splits(
         "active_test_files": active_test_files,
         "patient_to_files": patient_to_files,
     }
+
+
+class ColabArtifactDownloader:
+    """Compatibility helper for Colab notebooks downloading model checkpoints and assets."""
+
+    def __init__(self, checkpoint_dir: Optional[Union[str, Path]] = None) -> None:
+        self.checkpoint_dir = Path(checkpoint_dir or "checkpoints")
+
+    def download_checkpoints(
+        self,
+        drive_cache_dir: Optional[Union[str, Path]] = None,
+        require_stage2: bool = True,
+    ) -> Tuple[str, str]:
+        """Downloads/verifies stage 1 and stage 2 checkpoints.
+
+        Returns:
+            Tuple of (ckpt_stage1_path, ckpt_stage2_path).
+        """
+        paths = ensure_checkpoints(
+            checkpoint_dir=self.checkpoint_dir,
+            drive_cache_dir=drive_cache_dir,
+            require_stage2=require_stage2,
+        )
+        return str(paths["stage1"]), str(paths["stage2"])
+
