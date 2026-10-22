@@ -28,6 +28,9 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
+# Permit opening gigapixel digital pathology Whole Slide Images without DecompressionBombError
+Image.MAX_IMAGE_PIXELS = None
+
 # Import existing core modules without modification
 from src.datasets.otsu_filter import compute_otsu_tissue_mask
 from src.models.wsss_inference_methods import MultiMethodWSSSEngineV2
@@ -131,10 +134,26 @@ class WSILowMagHighMagPipeline:
                     orig_w, orig_h = slide.dimensions
                     overview = slide.get_thumbnail(self.lowmag_target_size).convert("RGB")
                     return overview, (orig_w, orig_h)
-                except ImportError:
+                except Exception:
+                    pass
+
+                # Multi-resolution SVS pyramid loader via tifffile (avoids loading 7.35 Gigapixels into RAM)
+                try:
+                    import tifffile
+                    with tifffile.TiffFile(str(p)) as tif:
+                        if tif.series and len(tif.series[0].levels) > 0:
+                            series = tif.series[0]
+                            orig_h, orig_w = series.levels[0].shape[:2]
+                            # Use smallest downsampled overview level
+                            smallest = series.levels[-1].asarray()
+                            thumb = Image.fromarray(smallest).convert("RGB")
+                            overview = thumb.resize(self.lowmag_target_size, Image.Resampling.BILINEAR)
+                            return overview, (orig_w, orig_h)
+                except Exception:
                     pass
 
             # Fallback standard PIL loader for large TIFFs or pre-exported overviews
+            Image.MAX_IMAGE_PIXELS = None
             with Image.open(p) as img:
                 img_rgb = img.convert("RGB")
                 orig_w, orig_h = img_rgb.size
@@ -359,9 +378,10 @@ class WSILowMagHighMagPipeline:
                             )
                             crop_np = np.array(crop_pil)
                         return crop_np
-                except ImportError:
+                except Exception:
                     pass
 
+            Image.MAX_IMAGE_PIXELS = None
             with Image.open(p) as img:
                 box = (
                     patch_info.x,
@@ -442,10 +462,12 @@ class WSILowMagHighMagPipeline:
                     import openslide
                     slide_handle = openslide.OpenSlide(str(p))
                     should_close_handle = True
-                except ImportError:
+                except Exception:
+                    Image.MAX_IMAGE_PIXELS = None
                     slide_handle = Image.open(p)
                     should_close_handle = True
             else:
+                Image.MAX_IMAGE_PIXELS = None
                 slide_handle = Image.open(p)
                 should_close_handle = True
         elif isinstance(slide_input, (Image.Image, np.ndarray)):
