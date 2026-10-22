@@ -16,6 +16,7 @@ A state-of-the-art, weakly-supervised semantic segmentation (WSSS) framework des
 - **Benchmark-Setting Accuracy**: Achieves **70.53% 4-class mIoU** on the full 4,986 test patches across 23 independent patients on the official BCSS-WSSS benchmark, surpassing published SOTA baselines.
 - **Patient-Level Anti-Leakage**: Strict zero-leakage patient-level stratification across all splits (no patch-level shuffling across patient boundaries).
 - **Modular Thin-Runner Design**: Clean architecture separating core neural services (`src/colab_pkg/`, `src/models/`, `src/datasets/`) from Google Colab notebooks, enabling 1-click execution without monolithic code dumping.
+- **Clinical WSI End-to-End Pipeline (Bonus Extension)**: Implements Low-to-High magnification guidance (`src/pipeline/wsi_lowmag_highmag_pipeline.py`) inspired by LowMagWSS (arXiv 2024), scanning macro slides at 5x to filter glass and saving 80% to 92% of dense compute before zooming into 40x candidate patches.
 
 ---
 
@@ -70,13 +71,17 @@ medical-wsss/
 │   ├── datasets/                      # BCSS Dataset loader, Otsu filtering & patient splitting
 │   ├── models/                        # DeepLabV3+, Stage-1 Net_CAM & MultiMethodWSSSEngineV2
 │   ├── losses_metrics/                # Loss functions and confusion matrix metrics (IoU, Dice, PA)
-│   ├── pipeline/                      # End-to-end automated pipeline runner
+│   ├── pipeline/                      # End-to-end automated pipeline runner & WSI multi-mag coordinator
+│   │   ├── colab_runner.py            # Automated Colab experiment runner
+│   │   ├── comparative_runner.py      # Multi-method ablation orchestrator
+│   │   └── wsi_lowmag_highmag_pipeline.py # Clinical WSI Low-to-High magnification pipeline
 │   ├── utils/                         # Medical utilities, logging, normalization & auditing
 │   └── visualization/                 # Clinical viewer, proposal figures & heatmap generators
 ├── notebooks/                         # Interactive Jupyter / Colab Notebooks
 │   ├── SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb  # Primary Thin Runner notebook (Tesla T4)
 │   ├── SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb  # Thin Runner notebook (NVIDIA L4)
 │   ├── SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb # Thin Runner notebook (NVIDIA A100)
+│   ├── SE374_Colab_WSI_LowMag_HighMag_BonusDemo.ipynb         # Bonus WSI Low-to-High clinical demo
 │   ├── modular_drive/                 # Standalone drive-mounting notebook variants
 │   └── history_runs/                  # Executed notebooks with full output logs for Runs 1, 2, 3
 ├── experiments/                       # Quantitative Results Across the 3 Real Runs
