@@ -500,6 +500,14 @@ class WSILowMagHighMagPipeline:
                     if self.device.type == "cuda" and (idx + 1) % 50 == 0:
                         torch.cuda.empty_cache()
 
+                    # Tien trinh thuc thi suy luan truc quan tren Colab (tranh cam giac treo cell)
+                    if (idx + 1) % 20 == 0 or (idx + 1) == len(candidates):
+                        elapsed_so_far = time.time() - t_highmag_start
+                        rate = (idx + 1) / max(elapsed_so_far, 0.001)
+                        rem_sec = (len(candidates) - (idx + 1)) / max(rate, 0.001)
+                        pct = (idx + 1) / len(candidates) * 100
+                        print(f"  --> [High-Mag 40x] Tien do: {idx + 1}/{len(candidates)} ({pct:.1f}%) | Toc do: {rate:.2f} patch/s | Con lai: {rem_sec:.0f}s")
+
             highmag_elapsed = time.time() - t_highmag_start
         finally:
             if should_close_handle and slide_handle is not None and hasattr(slide_handle, "close"):
