@@ -93,12 +93,12 @@ def sha256_file(path: Path) -> str:
 
 
 def discover_thin_runner_notebooks(notebooks_dir: Path) -> List[Path]:
-    """Finds all new Thin Runner notebooks in `notebooks/` excluding the 5 legacy notebooks."""
+    """Finds all new Thin Runner notebooks in `notebooks/` excluding legacy notebooks and bonus demos."""
     if not notebooks_dir.is_dir():
         return []
     candidates: List[Path] = []
     for nb_path in sorted(notebooks_dir.glob("*.ipynb")):
-        if nb_path.name not in LEGACY_NOTEBOOKS:
+        if nb_path.name not in LEGACY_NOTEBOOKS and not nb_path.name.endswith("BonusDemo.ipynb"):
             candidates.append(nb_path)
     return candidates
 
