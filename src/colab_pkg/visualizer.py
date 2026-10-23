@@ -450,14 +450,24 @@ def package_and_download_results(
 # ==============================================================================
 
 def plot_coarse_to_fine_pareto_curve(
-    pareto_results: Dict[str, Any],
+    pareto_results: Optional[Dict[str, Any]] = None,
     output_dir: Optional[Union[str, Path]] = None,
     show_plots: bool = False,
+    pareto_data: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
 ) -> Tuple[plt.Figure, Optional[Path]]:
     """Plots the Pareto trade-off curve: Segmentation Accuracy (mIoU) vs Compute Budget.
 
     Compares Adaptive Multi-Magnification Router (Proposed) against Uniform Random Routing baseline.
     """
+    effective_results = pareto_results if pareto_results is not None else pareto_data
+    if effective_results is None:
+        raise ValueError("Phải cung cấp pareto_results hoặc pareto_data.")
+    if "pareto_curve" in effective_results and isinstance(effective_results["pareto_curve"], dict):
+        if "budgets" not in effective_results and "budgets" in effective_results["pareto_curve"]:
+            effective_results = effective_results["pareto_curve"]
+    pareto_results = effective_results
+
     if (
         "budgets" not in pareto_results
         or "adaptive_miou" not in pareto_results
@@ -554,12 +564,17 @@ def plot_coarse_to_fine_pareto_curve(
 
 
 def plot_biomarker_bland_altman_and_regression(
-    patient_pred_dict: Dict[str, Dict[str, float]],
-    patient_gt_dict: Dict[str, Dict[str, float]],
+    patient_pred_dict: Optional[Dict[str, Dict[str, float]]] = None,
+    patient_gt_dict: Optional[Dict[str, Dict[str, float]]] = None,
     output_dir: Optional[Union[str, Path]] = None,
     show_plots: bool = False,
+    pred_biomarkers: Optional[Dict[str, Dict[str, float]]] = None,
+    gt_biomarkers: Optional[Dict[str, Dict[str, float]]] = None,
+    **kwargs: Any,
 ) -> Tuple[plt.Figure, Optional[Path]]:
     """Generates a 4-panel publication figure: Linear Regression and Bland-Altman for VTP & TSR."""
+    patient_pred_dict = patient_pred_dict if patient_pred_dict is not None else (pred_biomarkers or {})
+    patient_gt_dict = patient_gt_dict if patient_gt_dict is not None else (gt_biomarkers or {})
     common_pids = sorted(list(set(patient_pred_dict.keys()) & set(patient_gt_dict.keys())))
     if len(common_pids) < 2:
         fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
@@ -668,18 +683,22 @@ def plot_biomarker_bland_altman_and_regression(
 
 
 def plot_whole_roi_ground_truth_comparison(
-    rgb_image: Union[np.ndarray, Image.Image],
-    pred_mask: np.ndarray,
-    gt_mask: np.ndarray,
+    rgb_image: Optional[Union[np.ndarray, Image.Image]] = None,
+    pred_mask: Optional[np.ndarray] = None,
+    gt_mask: Optional[np.ndarray] = None,
     output_dir: Optional[Union[str, Path]] = None,
     show_plots: bool = False,
     slide_id: str = "Whole_ROI_Sample",
+    slide_rgb: Optional[Union[np.ndarray, Image.Image]] = None,
 ) -> Tuple[plt.Figure, Optional[Path]]:
     """Renders a 4-column publication comparison figure for Whole-ROI digital pathology slides."""
-    if isinstance(rgb_image, Image.Image):
-        rgb_np = np.array(rgb_image.convert("RGB"))
+    img_in = rgb_image if rgb_image is not None else slide_rgb
+    if img_in is None or pred_mask is None or gt_mask is None:
+        raise ValueError("Must provide rgb_image (or slide_rgb), pred_mask, and gt_mask.")
+    if isinstance(img_in, Image.Image):
+        rgb_np = np.array(img_in.convert("RGB"))
     else:
-        rgb_np = rgb_image
+        rgb_np = img_in
 
     h, w = rgb_np.shape[:2]
     # Resize masks if dimensions differ

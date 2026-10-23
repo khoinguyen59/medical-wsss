@@ -18,7 +18,7 @@ opencv-python-headless>=4.9.0.80
 scikit-image>=0.22.0
 
 # Scientific Computing & Data Analysis
-numpy>=1.24.0,<2.0.0
+numpy>=1.24.0
 scipy>=1.11.0
 pandas>=2.1.0
 scikit-learn>=1.4.0

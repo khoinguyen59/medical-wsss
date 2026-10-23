@@ -1,0 +1,16 @@
+{
+  "slide_id": "TCGA_BRCA_PATIENT_AQ_A0Y5_DX1",
+  "selected_method": "M6_MultiScale_Pyramid_D4_Ensemble",
+  "total_possible_patches": 147168,
+  "selected_candidate_patches": 100,
+  "compute_reduction_pct": 64.29,
+  "lowmag_scan_time_sec": 0.694,
+  "highmag_inference_time_sec": 38.847,
+  "total_elapsed_time_sec": 42.081,
+  "tissue_area_px": 673,
+  "tumor_area_px": 0,
+  "stroma_area_px": 673,
+  "lymphocyte_area_px": 0,
+  "necrosis_area_px": 0,
+  "tumor_fraction_pct": 0.0
+}

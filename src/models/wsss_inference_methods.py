@@ -1468,8 +1468,37 @@ class MultiMethodWSSSEngine:
                 gated[labels == lbl] = background_class_idx
         return gated
 
-    def predict_m1(self, model: torch.nn.Module, img_tensor: torch.Tensor) -> np.ndarray:
+    @staticmethod
+    def _ensure_img_tensor(
+        model: torch.nn.Module,
+        img_tensor: Optional[torch.Tensor],
+        raw_rgb: Optional[np.ndarray] = None,
+    ) -> torch.Tensor:
+        """Ensures a valid (1, 3, H, W) float tensor on the model's device, auto-converting raw_rgb if img_tensor is None."""
+        first_param = next(model.parameters(), None)
+        dev = first_param.device if first_param is not None else torch.device("cpu")
+        if img_tensor is None:
+            if raw_rgb is None:
+                raise ValueError("Either img_tensor or raw_rgb must be provided.")
+            rgb_arr = np.asarray(raw_rgb)
+            if rgb_arr.ndim != 3 or rgb_arr.shape[2] != 3:
+                raise ValueError(f"Expected raw_rgb of shape (H, W, 3), got {rgb_arr.shape}")
+            t = torch.from_numpy(rgb_arr.transpose(2, 0, 1)).float()
+            if rgb_arr.dtype == np.uint8 or float(t.max()) > 1.5:
+                t = t.div(255.0)
+            return t.unsqueeze(0).to(dev)
+        if img_tensor.dim() == 3:
+            img_tensor = img_tensor.unsqueeze(0)
+        return img_tensor.to(dev) if img_tensor.device != dev else img_tensor
+
+    def predict_m1(
+        self,
+        model: torch.nn.Module,
+        img_tensor: Optional[torch.Tensor] = None,
+        raw_rgb: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         """M1: Baseline WSSS-Tissue Single-Scale (Han et al., MedIA 2022)."""
+        img_tensor = self._ensure_img_tensor(model, img_tensor, raw_rgb)
         probs_orig, _ = self.forward_d4_tta(
             model, img_tensor, use_amp=self.use_amp, amp_dtype=self.amp_dtype
         )
@@ -1478,10 +1507,12 @@ class MultiMethodWSSSEngine:
     def predict_m2(
         self,
         model: torch.nn.Module,
-        img_tensor: torch.Tensor,
+        img_tensor: Optional[torch.Tensor] = None,
         model_stage1: Optional[torch.nn.Module] = None,
+        raw_rgb: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """M2: Multi-View Dihedral TTA + Stage-1 Net_CAM CGM (y_cls > 0.1)."""
+        img_tensor = self._ensure_img_tensor(model, img_tensor, raw_rgb)
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
         _, probs_d4 = self.forward_d4_tta(
             model, img_tensor, use_amp=self.use_amp, amp_dtype=self.amp_dtype
@@ -1494,10 +1525,12 @@ class MultiMethodWSSSEngine:
     def predict_m3(
         self,
         model: torch.nn.Module,
-        img_tensor: torch.Tensor,
+        img_tensor: Optional[torch.Tensor] = None,
         model_stage1: Optional[torch.nn.Module] = None,
+        raw_rgb: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """M3: Multi-View TTA + CGM + Cross-Stage CAM Fusion + Long-Tail Prior Calibration."""
+        img_tensor = self._ensure_img_tensor(model, img_tensor, raw_rgb)
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
         _, probs_d4 = self.forward_d4_tta(
             model, img_tensor, use_amp=self.use_amp, amp_dtype=self.amp_dtype
@@ -1512,11 +1545,12 @@ class MultiMethodWSSSEngine:
     def predict_m4(
         self,
         model: torch.nn.Module,
-        img_tensor: torch.Tensor,
+        img_tensor: Optional[torch.Tensor] = None,
         raw_rgb: Optional[np.ndarray] = None,
         model_stage1: Optional[torch.nn.Module] = None,
     ) -> np.ndarray:
         """M4: Multi-View TTA + CGM + Spatial Bilateral Refinement & Island Suppression."""
+        img_tensor = self._ensure_img_tensor(model, img_tensor, raw_rgb)
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
         _, probs_d4 = self.forward_d4_tta(
             model, img_tensor, use_amp=self.use_amp, amp_dtype=self.amp_dtype
@@ -1529,11 +1563,12 @@ class MultiMethodWSSSEngine:
     def predict_m5(
         self,
         model: torch.nn.Module,
-        img_tensor: torch.Tensor,
+        img_tensor: Optional[torch.Tensor] = None,
         raw_rgb: Optional[np.ndarray] = None,
         model_stage1: Optional[torch.nn.Module] = None,
     ) -> np.ndarray:
         """M5: Proposed SOTA Ensemble V1 (CGM + CAM Fusion + Prior Calib + Spatial Refinement + Glass Guard)."""
+        img_tensor = self._ensure_img_tensor(model, img_tensor, raw_rgb)
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
         _, probs_d4 = self.forward_d4_tta(
             model,
@@ -1555,12 +1590,13 @@ class MultiMethodWSSSEngine:
     def predict_m6(
         self,
         model: torch.nn.Module,
-        img_tensor: torch.Tensor,
+        img_tensor: Optional[torch.Tensor] = None,
         raw_rgb: Optional[np.ndarray] = None,
         model_stage1: Optional[torch.nn.Module] = None,
         precomputed_s1_d4: Optional[Tuple[np.ndarray, np.ndarray]] = None,
     ) -> np.ndarray:
         """M6: Multi-Scale Pyramid [0.75, 1.0, 1.25] + Uncertainty-Gated D4 TTA + Stage-1 D4 Soft-Gate + Cross-Stage CAM Fusion + Prior Calibration."""
+        img_tensor = self._ensure_img_tensor(model, img_tensor, raw_rgb)
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
         _, _, probs_ms_d4 = self.forward_multiscale_d4_tta(
             model, img_tensor, precomputed_s1_d4=precomputed_s1_d4
@@ -1580,12 +1616,13 @@ class MultiMethodWSSSEngine:
     def predict_m7(
         self,
         model: torch.nn.Module,
-        img_tensor: torch.Tensor,
+        img_tensor: Optional[torch.Tensor] = None,
         raw_rgb: Optional[np.ndarray] = None,
         model_stage1: Optional[torch.nn.Module] = None,
         precomputed_s1_d4: Optional[Tuple[np.ndarray, np.ndarray]] = None,
     ) -> np.ndarray:
         """M7: Proposed Ultra-SOTA Curriculum V2 (Multi-Scale D4 + Adaptive Soft-Gate + Entropy CAM Fusion + H&E Beer-Lambert OD Calib + Multi-Stride Spatial Refinement + Glass Guard)."""
+        img_tensor = self._ensure_img_tensor(model, img_tensor, raw_rgb)
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
         _, _, probs_ms_d4 = self.forward_multiscale_d4_tta(
             model, img_tensor, precomputed_s1_d4=precomputed_s1_d4
@@ -1609,7 +1646,7 @@ class MultiMethodWSSSEngine:
     def predict_all_methods(
         self,
         model: torch.nn.Module,
-        img_tensor: torch.Tensor,
+        img_tensor: Optional[torch.Tensor] = None,
         raw_rgb: Optional[np.ndarray] = None,
         model_stage1: Optional[torch.nn.Module] = None,
         include_v2: Optional[bool] = None,
@@ -1620,6 +1657,7 @@ class MultiMethodWSSSEngine:
         Stage-1 Net_CAM CGM gating and Cross-Stage CAM Fusion.
         When model_stage1 is None, gracefully runs standalone on Stage-2 DeepLabV3+.
         """
+        img_tensor = self._ensure_img_tensor(model, img_tensor, raw_rgb)
         stage1 = model_stage1 if model_stage1 is not None else self.model_stage1
         run_v2 = (
             (self.include_v2 or len(self.METHOD_KEYS) > 5)
