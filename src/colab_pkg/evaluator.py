@@ -948,27 +948,55 @@ def run_val_to_test_scientific_protocol(
     model_stage1: Optional[torch.nn.Module] = None,
     method_key: str = "M6_MultiScale_Pyramid_D4_Ensemble",
     device: Optional[Union[str, torch.device]] = None,
+    candidate_island_areas: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
-    """Scientific standard: Validates on validation split, locks hyperparameters, then tests on held-out test split."""
+    """Scientific standard: Validates on validation split, searches & locks hyperparameters, then tests on held-out test split."""
     print("=" * 80)
-    print("--> BƯỚC 1: Đánh giá tập Validation (Khóa siêu tham số & Kiểm tra quy chuẩn)")
+    print("--> BƯỚC 1: Đánh giá tập Validation & Tìm kiếm khóa siêu tham số (Hyperparameter Lock)")
     print(f"    Số lượng mảng ảnh validation: {len(val_files)}")
-    _, val_metrics = _evaluate_patch_cohort(
-        engine=engine,
-        model_stage2=model_stage2,
-        file_list=val_files,
-        mask_dir=val_mask_dir,
-        model_stage1=model_stage1,
-        method_key=method_key,
-        device=device,
-        progress_desc="Validation Cohort",
-    )
-    print(
-        f"[OK] Validation mIoU: {val_metrics['mIoU']:.2f}% | "
-        f"mDice: {val_metrics['mDice']:.2f}% | FwIoU: {val_metrics['FwIoU']:.2f}%"
-    )
 
-    print("\n--> BƯỚC 2: Đánh giá độc lập trên tập Held-out Test (Zero-Tuning)")
+    candidates = candidate_island_areas if candidate_island_areas is not None else [16, 32, 64]
+    best_param = getattr(engine, "min_island_area", 32)
+    best_val_metrics = None
+    best_val_miou = -1.0
+    val_tuning_history: Dict[int, float] = {}
+
+    # Perform real sweep over candidate hyperparameters on the validation cohort
+    for param_val in candidates:
+        if hasattr(engine, "min_island_area"):
+            engine.min_island_area = param_val
+
+        _, v_metrics = _evaluate_patch_cohort(
+            engine=engine,
+            model_stage2=model_stage2,
+            file_list=val_files,
+            mask_dir=val_mask_dir,
+            model_stage1=model_stage1,
+            method_key=method_key,
+            device=device,
+            progress_desc=f"Val Sweep (area={param_val})",
+        )
+        val_tuning_history[param_val] = float(v_metrics["mIoU"])
+        if v_metrics["mIoU"] > best_val_miou:
+            best_val_miou = float(v_metrics["mIoU"])
+            best_param = param_val
+            best_val_metrics = v_metrics
+
+    # Lock optimal hyperparameter determined strictly from validation set
+    if hasattr(engine, "min_island_area"):
+        engine.min_island_area = best_param
+
+    print(f"[OK] Đã khóa siêu tham số tối ưu từ Validation (min_island_area={best_param}):")
+    print(f"     Lịch sử quét Validation mIoU: {val_tuning_history}")
+    if best_val_metrics is not None:
+        print(
+            f"[OK] Validation mIoU: {best_val_metrics['mIoU']:.2f}% | "
+            f"mDice: {best_val_metrics['mDice']:.2f}% | FwIoU: {best_val_metrics['FwIoU']:.2f}%"
+        )
+    else:
+        raise RuntimeError("Không thu được kết quả đánh giá trên tập Validation.")
+
+    print("\n--> BƯỚC 2: Đánh giá độc lập trên tập Held-out Test với siêu tham số đã khóa (Zero-Tuning)")
     print(f"    Số lượng mảng ảnh test: {len(test_files)}")
     _, test_metrics = _evaluate_patch_cohort(
         engine=engine,
@@ -985,7 +1013,7 @@ def run_val_to_test_scientific_protocol(
         f"mDice: {test_metrics['mDice']:.2f}% | FwIoU: {test_metrics['FwIoU']:.2f}%"
     )
 
-    gen_gap = float(val_metrics["mIoU"] - test_metrics["mIoU"])
+    gen_gap = float(best_val_metrics["mIoU"] - test_metrics["mIoU"])
     protocol_passed = abs(gen_gap) <= 5.0
 
     print("=" * 80)
@@ -993,7 +1021,9 @@ def run_val_to_test_scientific_protocol(
     print("=" * 80)
 
     return {
-        "val_metrics": val_metrics,
+        "locked_hyperparameter": {"min_island_area": best_param},
+        "val_tuning_history": val_tuning_history,
+        "val_metrics": best_val_metrics,
         "test_metrics": test_metrics,
         "generalization_gap": gen_gap,
         "protocol_passed": protocol_passed,

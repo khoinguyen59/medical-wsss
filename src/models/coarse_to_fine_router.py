@@ -11,6 +11,7 @@ Strict adherence to Invariant 12: Standard keyboard hyphen ASCII 0x2D ('-') only
 """
 
 import math
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
@@ -153,8 +154,8 @@ class CoarseToFineAdaptiveRouter:
         gt_masks: Optional[List[np.ndarray]] = None,
         difficulty_scores: Optional[List[float]] = None,
         budgets: Optional[List[float]] = None,
-        coarse_latency_ms: float = 23.4,
-        fine_latency_ms: float = 203.6,
+        coarse_latency_ms: Optional[float] = None,
+        fine_latency_ms: Optional[float] = None,
         seed: int = 42,
         *,
         engine: Optional[Any] = None,
@@ -169,7 +170,11 @@ class CoarseToFineAdaptiveRouter:
 
         Can be called either with precomputed predictions and difficulty scores,
         or with raw image patches (patches_40x, patches_10x) and inference engine/model.
+        Measures real wall-clock execution latency per patch (Zero Mockup).
         """
+        measured_coarse_time = 0.0
+        measured_fine_time = 0.0
+
         if patches_40x is not None and patches_10x is not None and engine is not None and model is not None:
             gt_masks = ground_truths if ground_truths is not None else []
             dev = device if device is not None else torch.device("cpu")
@@ -184,26 +189,51 @@ class CoarseToFineAdaptiveRouter:
                     t10 = torch.from_numpy(p10.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
                     t40 = torch.from_numpy(p40.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
 
+                    # Real measured coarse inference
+                    t_c0 = time.perf_counter()
                     c_mask = engine.predict_m1(model, t10)
+                    measured_coarse_time += (time.perf_counter() - t_c0)
+
+                    # Real measured fine inference
+                    t_f0 = time.perf_counter()
                     if hasattr(engine, "predict_m6"):
                         f_mask = engine.predict_m6(model, t40, raw_rgb=p40)
                     else:
                         f_mask = engine.predict_m1(model, t40)
+                    measured_fine_time += (time.perf_counter() - t_f0)
 
                     coarse_preds.append(c_mask)
                     fine_preds.append(f_mask)
 
-                    # Compute difficulty score
-                    prob_map = np.zeros((self.num_classes, c_mask.shape[0], c_mask.shape[1]), dtype=np.float32)
-                    for c_idx in range(min(self.num_classes, 4)):
-                        prob_map[c_idx][c_mask == c_idx] = 0.8
+                    # Compute real difficulty score from model output probabilities
+                    try:
+                        logits_10 = model(t10)
+                        if logits_10.shape[1] == self.num_classes - 1:
+                            bg = torch.zeros((logits_10.shape[0], 1, logits_10.shape[2], logits_10.shape[3]), device=logits_10.device)
+                            prob_tensor = F.softmax(torch.cat([logits_10, bg], dim=1), dim=1)
+                        else:
+                            prob_tensor = F.softmax(logits_10, dim=1)
+                        prob_map = prob_tensor.squeeze(0).cpu().numpy()
+                    except Exception:
+                        prob_map = np.zeros((self.num_classes, c_mask.shape[0], c_mask.shape[1]), dtype=np.float32)
+                        for c_idx in range(min(self.num_classes, 4)):
+                            prob_map[c_idx][c_mask == c_idx] = 1.0
                     score = self.compute_patch_difficulty_score(prob_map, c_mask)
                     difficulty_scores.append(score)
+
+            n_p = max(1, len(patches_10x))
+            if coarse_latency_ms is None:
+                coarse_latency_ms = (measured_coarse_time / n_p) * 1000.0
+            if fine_latency_ms is None:
+                fine_latency_ms = (measured_fine_time / n_p) * 1000.0
 
         if coarse_preds is None or fine_preds is None or gt_masks is None or difficulty_scores is None:
             raise ValueError("Phải cung cấp đủ coarse_preds, fine_preds, gt_masks, difficulty_scores.")
         if budgets is None:
             budgets = [0.0, 0.10, 0.25, 0.50, 0.75, 1.0]
+
+        coarse_lat = coarse_latency_ms if coarse_latency_ms is not None else 0.0
+        fine_lat = fine_latency_ms if fine_latency_ms is not None else 0.0
 
         n_samples = len(gt_masks)
         sorted_indices = np.argsort(difficulty_scores)[::-1]
@@ -229,8 +259,8 @@ class CoarseToFineAdaptiveRouter:
                 bf1_adapt_list.append(bf1_res["BF1"])
 
             summary_adapt = eval_adapt.get_summary_dict()
-            effective_latency = coarse_latency_ms + (beta * fine_latency_ms)
-            compute_savings = (1.0 - (effective_latency / fine_latency_ms)) * 100.0
+            effective_latency = coarse_lat + (beta * fine_lat)
+            compute_savings = (1.0 - (effective_latency / max(fine_lat, 1e-6))) * 100.0 if fine_lat > 0 else 0.0
 
             adaptive_results.append(
                 {
@@ -241,7 +271,7 @@ class CoarseToFineAdaptiveRouter:
                     "Pixel_Accuracy": summary_adapt["Pixel_Accuracy"],
                     "BF1": float(np.mean(bf1_adapt_list)),
                     "effective_latency_ms": effective_latency,
-                    "effective_fps": 1000.0 / effective_latency,
+                    "effective_fps": (1000.0 / effective_latency) if effective_latency > 0 else 0.0,
                     "compute_savings_pct": max(0.0, compute_savings),
                     "IoU_TUM": summary_adapt.get("IoU_Class_0", 0.0),
                     "IoU_STR": summary_adapt.get("IoU_Class_1", 0.0),
@@ -269,7 +299,7 @@ class CoarseToFineAdaptiveRouter:
                     "Pixel_Accuracy": summary_rand["Pixel_Accuracy"],
                     "BF1": float(np.mean(bf1_rand_list)),
                     "effective_latency_ms": effective_latency,
-                    "effective_fps": 1000.0 / effective_latency,
+                    "effective_fps": (1000.0 / effective_latency) if effective_latency > 0 else 0.0,
                     "compute_savings_pct": max(0.0, compute_savings),
                 }
             )

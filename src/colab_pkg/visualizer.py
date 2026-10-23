@@ -458,9 +458,19 @@ def plot_coarse_to_fine_pareto_curve(
 
     Compares Adaptive Multi-Magnification Router (Proposed) against Uniform Random Routing baseline.
     """
-    budgets = np.array(pareto_results.get("budgets", [0.0, 0.2, 0.4, 0.6, 0.8, 1.0])) * 100.0
-    adaptive_miou = np.array(pareto_results.get("adaptive_miou", [60.0, 68.0, 73.0, 76.0, 78.0, 78.5]))
-    random_miou = np.array(pareto_results.get("random_miou", [60.0, 63.5, 67.2, 71.0, 75.0, 78.5]))
+    if (
+        "budgets" not in pareto_results
+        or "adaptive_miou" not in pareto_results
+        or "random_miou" not in pareto_results
+    ):
+        raise ValueError(
+            "pareto_results must contain real experimental 'budgets', 'adaptive_miou', "
+            "and 'random_miou' lists (Invariant 07: Zero Mockup)."
+        )
+
+    budgets = np.array(pareto_results["budgets"]) * 100.0
+    adaptive_miou = np.array(pareto_results["adaptive_miou"])
+    random_miou = np.array(pareto_results["random_miou"])
 
     fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
 
