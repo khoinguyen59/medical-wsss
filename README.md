@@ -11,11 +11,10 @@
 > **Tên đề tài chính thức:** `Coarse-to-Fine Weakly-Supervised Segmentation for Whole Slide Images`  
 > **Chủ đề nghiên cứu:** Topic 6 - Weakly-supervised segmentation for whole slide images  
 
-### Mô tả dự định đồ án (Project Scope & Objectives)
-- Xây dựng quy trình phân đoạn mô học ung thư vú giám sát yếu 2 giai đoạn (Net_CAM + DeepLabV3+) chỉ từ nhãn mức ảnh trên bộ dữ liệu BCSS.
-- Nghiên cứu và đối chuẩn các kỹ thuật cải tiến SOTA: Tăng cường suy luận (Multi-View D4 TTA), kim tự tháp đa tỷ lệ (Multi-Scale Pyramid) và hiệu chỉnh phân phối đuôi dài (Long-Tail Calibration).
-- Mở rộng thành hệ thống lâm sàng 2 pha: Quét nhanh góc rộng Low-Mag (5x) để sàng lọc vùng nghi ngờ, kết hợp zoom sâu High-Mag (40x) trên tiêu bản Gigapixel TCGA-BRCA.
-- Tự động trích xuất các dấu ấn sinh học lâm sàng (Viable Tumor Percentage - VTP, Tumor-Stroma Ratio - TSR) và tái cấu trúc bản đồ phân đoạn toàn tiêu bản.
+### Mô tả dự định đồ án
+- Phân đoạn các vùng mô ung thư vú có giám sát yếu chỉ từ nhãn mức ảnh trên bộ dữ liệu BCSS.
+- Đề xuất cơ chế quét nhanh góc rộng kết hợp phóng to chi tiết để phân đoạn toàn bộ tiêu bản số (WSI).
+- Đánh giá độ chính xác mô hình và xây dựng giao diện trực quan hóa kết quả hỗ trợ chẩn đoán.
 
 A state-of-the-art, weakly-supervised semantic segmentation (WSSS) framework designed for gigapixel breast cancer histopathology (TCGA-BRCA) Whole Slide Images (WSI). The system implements an end-to-end dual-stage pipeline combining **Stage-1 Multi-Layer Class Activation Maps (Net_CAM)** and **Stage-2 DeepLabV3+**, augmented by an advanced inference engine featuring Dihedral D4 Test-Time Augmentation, Multi-Scale Pyramid Fusion, Stage-1 Soft-Gating, and Histopathology Prior Refinement.
 
