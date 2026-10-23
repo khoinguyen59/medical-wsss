@@ -513,30 +513,42 @@ def ensure_luad_checkpoints(
 def download_bcss_whole_roi_cohort(
     target_dir: Union[str, Path] = Path("/content/bcss_whole_roi"),
     repo_id: str = HF_BCSS_WHOLE_ROI_REPO,
+    allow_mock: bool = False,
 ) -> Path:
     """Downloads or verifies the BCSS Whole-ROI cohort (nabil-m/bcss) with ground truth masks and metadata."""
     t_dir = Path(target_dir)
     t_dir.mkdir(parents=True, exist_ok=True)
 
-    if (t_dir / "masks").is_dir() and (t_dir / "rgbs_colorNormalized").is_dir():
+    mask_dir = t_dir / "masks"
+    rgb_dir = t_dir / "rgbs_colorNormalized"
+
+    if mask_dir.is_dir() and rgb_dir.is_dir() and len(list(mask_dir.glob("*.png"))) > 0:
         print(f"[OK] Đã tìm thấy BCSS Whole-ROI dataset tại: {t_dir.resolve()}")
         return t_dir
 
     print(f"--> Đang tải BCSS Whole-ROI dataset từ HuggingFace repository: {repo_id}...")
     try:
         from huggingface_hub import snapshot_download
+
         snapshot_download(
             repo_id=repo_id,
             repo_type="dataset",
             local_dir=str(t_dir),
             ignore_patterns=["*.git*", "README.md"],
         )
+        if not mask_dir.is_dir() or len(list(mask_dir.glob("*.png"))) == 0:
+            raise FileNotFoundError(f"Tải thành công nhưng không tìm thấy tệp mặt nạ trong {mask_dir}")
         print(f"[OK] Tải thành công BCSS Whole-ROI dataset vào: {t_dir.resolve()}")
     except Exception as exc:
-        print(f"[THÔNG BÁO] Không thể tải snapshot qua huggingface_hub ({exc}). Tạo cấu trúc thư mục sẵn sàng.")
-        (t_dir / "masks").mkdir(parents=True, exist_ok=True)
-        (t_dir / "rgbs_colorNormalized").mkdir(parents=True, exist_ok=True)
-        (t_dir / "meta").mkdir(parents=True, exist_ok=True)
+        if allow_mock:
+            print(f"[THÔNG BÁO] Chế độ mock cho phép tiếp tục ({exc}).")
+            mask_dir.mkdir(parents=True, exist_ok=True)
+            rgb_dir.mkdir(parents=True, exist_ok=True)
+            return t_dir
+        raise RuntimeError(
+            f"Không thể tải BCSS Whole-ROI cohort từ HuggingFace '{repo_id}': {exc}. "
+            "Vui lòng cài đặt huggingface_hub và kiểm tra kết nối mạng."
+        ) from exc
 
     return t_dir
 
