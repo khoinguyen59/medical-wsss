@@ -511,46 +511,68 @@ def ensure_luad_checkpoints(
 
 
 def download_bcss_whole_roi_cohort(
-    target_dir: Union[str, Path] = Path("/content/bcss_whole_roi"),
+    target_dir: Optional[Union[str, Path]] = None,
+    dest_dir: Optional[Union[str, Path]] = None,
     repo_id: str = HF_BCSS_WHOLE_ROI_REPO,
     allow_mock: bool = False,
-) -> Path:
-    """Downloads or verifies the BCSS Whole-ROI cohort (nabil-m/bcss) with ground truth masks and metadata."""
-    t_dir = Path(target_dir)
+) -> List[Dict[str, Any]]:
+    """Downloads or verifies the BCSS Whole-ROI cohort (nabil-m/bcss) with ground truth masks and metadata.
+
+    Returns:
+        List of sample dictionaries: [{'img': Path, 'mask': Path, 'patient_id': str, 'filename': str}, ...]
+    """
+    chosen_dir = dest_dir or target_dir or Path("/content/bcss_whole_roi")
+    t_dir = Path(chosen_dir)
     t_dir.mkdir(parents=True, exist_ok=True)
 
     mask_dir = t_dir / "masks"
     rgb_dir = t_dir / "rgbs_colorNormalized"
+    if not rgb_dir.is_dir() and (t_dir / "images").is_dir():
+        rgb_dir = t_dir / "images"
 
-    if mask_dir.is_dir() and rgb_dir.is_dir() and len(list(mask_dir.glob("*.png"))) > 0:
-        print(f"[OK] Đã tìm thấy BCSS Whole-ROI dataset tại: {t_dir.resolve()}")
-        return t_dir
+    if not (mask_dir.is_dir() and rgb_dir.is_dir() and len(list(mask_dir.glob("*.png"))) > 0):
+        print(f"--> Đang tải BCSS Whole-ROI dataset từ HuggingFace repository: {repo_id}...")
+        try:
+            from huggingface_hub import snapshot_download
 
-    print(f"--> Đang tải BCSS Whole-ROI dataset từ HuggingFace repository: {repo_id}...")
-    try:
-        from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                local_dir=str(t_dir),
+                ignore_patterns=["*.git*", "README.md"],
+            )
+        except Exception as exc:
+            if allow_mock:
+                print(f"[THÔNG BÁO] Chế độ mock cho phép tiếp tục ({exc}).")
+                mask_dir.mkdir(parents=True, exist_ok=True)
+                rgb_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                raise RuntimeError(
+                    f"Không thể tải BCSS Whole-ROI cohort từ HuggingFace '{repo_id}': {exc}. "
+                    "Vui lòng cài đặt huggingface_hub và kiểm tra kết nối mạng."
+                ) from exc
 
-        snapshot_download(
-            repo_id=repo_id,
-            repo_type="dataset",
-            local_dir=str(t_dir),
-            ignore_patterns=["*.git*", "README.md"],
-        )
-        if not mask_dir.is_dir() or len(list(mask_dir.glob("*.png"))) == 0:
-            raise FileNotFoundError(f"Tải thành công nhưng không tìm thấy tệp mặt nạ trong {mask_dir}")
-        print(f"[OK] Tải thành công BCSS Whole-ROI dataset vào: {t_dir.resolve()}")
-    except Exception as exc:
-        if allow_mock:
-            print(f"[THÔNG BÁO] Chế độ mock cho phép tiếp tục ({exc}).")
-            mask_dir.mkdir(parents=True, exist_ok=True)
-            rgb_dir.mkdir(parents=True, exist_ok=True)
-            return t_dir
-        raise RuntimeError(
-            f"Không thể tải BCSS Whole-ROI cohort từ HuggingFace '{repo_id}': {exc}. "
-            "Vui lòng cài đặt huggingface_hub và kiểm tra kết nối mạng."
-        ) from exc
+    samples: List[Dict[str, Any]] = []
+    mask_files = sorted(mask_dir.glob("*.png"))
+    for mf in mask_files:
+        # Match corresponding RGB image by filename or stem
+        rf = rgb_dir / mf.name
+        if not rf.is_file():
+            rf_candidates = sorted(rgb_dir.glob(f"{mf.stem}.*"))
+            if rf_candidates:
+                rf = rf_candidates[0]
+            else:
+                continue
+        pid = extract_patient_id(mf.name)
+        samples.append({
+            "img": rf,
+            "mask": mf,
+            "patient_id": pid,
+            "filename": mf.name,
+        })
 
-    return t_dir
+    print(f"[OK] Đã nạp {len(samples)} mẫu Whole-ROI BCSS đối sánh ground-truth tại: {t_dir.resolve()}")
+    return samples
 
 
 def extract_patient_id(filename: str) -> str:

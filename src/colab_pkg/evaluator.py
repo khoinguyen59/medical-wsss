@@ -947,10 +947,14 @@ def run_val_to_test_scientific_protocol(
     test_mask_dir: Union[str, Path],
     model_stage1: Optional[torch.nn.Module] = None,
     method_key: str = "M6_MultiScale_Pyramid_D4_Ensemble",
+    method: Optional[str] = None,
     device: Optional[Union[str, torch.device]] = None,
     candidate_island_areas: Optional[List[int]] = None,
+    output_dir: Optional[Union[str, Path]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Scientific standard: Validates on validation split, searches & locks hyperparameters, then tests on held-out test split."""
+    effective_method = method or method_key
     print("=" * 80)
     print("--> BƯỚC 1: Đánh giá tập Validation & Tìm kiếm khóa siêu tham số (Hyperparameter Lock)")
     print(f"    Số lượng mảng ảnh validation: {len(val_files)}")
@@ -972,7 +976,7 @@ def run_val_to_test_scientific_protocol(
             file_list=val_files,
             mask_dir=val_mask_dir,
             model_stage1=model_stage1,
-            method_key=method_key,
+            method_key=effective_method,
             device=device,
             progress_desc=f"Val Sweep (area={param_val})",
         )
@@ -1004,7 +1008,7 @@ def run_val_to_test_scientific_protocol(
         file_list=test_files,
         mask_dir=test_mask_dir,
         model_stage1=model_stage1,
-        method_key=method_key,
+        method_key=effective_method,
         device=device,
         progress_desc="Test Cohort",
     )
@@ -1020,29 +1024,49 @@ def run_val_to_test_scientific_protocol(
     print(f"[KẾT LUẬN GIAO THỨC VAL-TO-TEST]: Generalization Gap: {gen_gap:+.2f}% | Hợp lệ (<= 5%): {protocol_passed}")
     print("=" * 80)
 
-    return {
+    result_dict = {
         "locked_hyperparameter": {"min_island_area": best_param},
         "val_tuning_history": val_tuning_history,
         "val_metrics": best_val_metrics,
         "test_metrics": test_metrics,
-        "generalization_gap": gen_gap,
+        "generalization_gap": {"mIoU_gap": gen_gap, "passed": protocol_passed},
         "protocol_passed": protocol_passed,
-        "method_key": method_key,
+        "method_key": effective_method,
     }
+
+    if output_dir is not None:
+        out_p = Path(output_dir)
+        out_p.mkdir(parents=True, exist_ok=True)
+        report_file = out_p / "val_to_test_report.json"
+        with open(report_file, "w", encoding="utf-8") as rf:
+            json.dump(sanitize_for_json(result_dict), rf, indent=2)
+        print(f"[OK] Đã lưu báo cáo khoa học Val-to-Test vào: {report_file.resolve()}")
+
+    return result_dict
 
 
 def run_multimag_and_pareto_benchmark(
     engine: Any,
     model_stage2: torch.nn.Module,
-    test_files: List[Path],
-    test_mask_dir: Union[str, Path],
+    test_files: Optional[List[Path]] = None,
+    test_mask_dir: Optional[Union[str, Path]] = None,
     model_stage1: Optional[torch.nn.Module] = None,
     magnifications: Tuple[int, ...] = (5, 10, 20, 40),
-    budget_steps: int = 11,
+    budget_steps: int = 5,
     device: Optional[Union[str, torch.device]] = None,
+    patch_files: Optional[List[Path]] = None,
+    mask_dir: Optional[Union[str, Path]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Evaluates multi-magnification degradation (5x, 10x, 20x, 40x) and computes Adaptive Pareto frontier."""
-    m_dir = Path(test_mask_dir)
+    effective_files = test_files or patch_files
+    if effective_files is None:
+        raise ValueError("Phải cung cấp danh sách file ảnh (test_files hoặc patch_files).")
+    effective_mask_dir = test_mask_dir or mask_dir
+    if effective_mask_dir is None:
+        raise ValueError("Phải cung cấp thư mục mask (test_mask_dir hoặc mask_dir).")
+
+    m_dir = Path(effective_mask_dir)
     dev = device if device is not None else (
         torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
@@ -1053,52 +1077,38 @@ def run_multimag_and_pareto_benchmark(
     mag_metrics: Dict[int, Dict[str, float]] = {}
 
     for mag in magnifications:
-        print(f"--> Đang đánh giá tại độ phóng đại mô phỏng: {mag}x...")
-        evaluator = ColabSegmentationEvaluator()
-        with torch.no_grad():
-            for p in test_files:
-                m_path = m_dir / p.name
-                if not m_path.is_file():
-                    continue
-                pil_img = Image.open(p).convert("RGB")
-                raw_rgb = np.array(pil_img)
-                gt_mask = np.array(Image.open(m_path), dtype=np.int64)
+        print(f"--> Đang đánh giá tầng độ phóng đại {mag}x...")
+        # Simulate degradation
+        patches_sim = []
+        gts = []
+        for p in effective_files:
+            m_path = m_dir / p.name
+            if not m_path.is_file():
+                continue
+            img_pil = Image.open(p).convert("RGB")
+            gt = np.array(Image.open(m_path), dtype=np.int64)
+            sim_img = simulate_magnification_patch(np.array(img_pil), target_mag=mag, base_mag=40)
+            patches_sim.append(sim_img)
+            gts.append(gt)
 
-                deg_rgb = simulate_magnification_patch(raw_rgb, target_mag=mag, base_mag=40)
-                tensor_in = (
-                    torch.from_numpy(deg_rgb.transpose(2, 0, 1))
-                    .float()
-                    .div(255.0)
-                    .unsqueeze(0)
-                    .to(dev)
-                )
-                pred_mask = engine.predict_m1(model_stage2, tensor_in)
-                evaluator.update(pred=pred_mask, target=gt_mask, patient_id=extract_patient_id(p.name))
+        # Run inference
+        evaluator = ColabSegmentationEvaluator(num_classes=5, class_names=list(CLASS_CODES))
+        for img_arr, gt in zip(patches_sim, gts):
+            t_in = torch.from_numpy(img_arr.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
+            if hasattr(engine, "predict_m6"):
+                p_mask = engine.predict_m6(model_stage2, t_in, raw_rgb=img_arr, model_stage1=model_stage1)
+            else:
+                p_mask = engine.predict_m1(model_stage2, t_in)
+            evaluator.update(pred=p_mask, target=gt)
+        mag_metrics[mag] = evaluator.compute_metrics()
+        print(f"    [{mag}x] mIoU: {mag_metrics[mag]['mIoU']:.2f}% | Dice: {mag_metrics[mag]['mDice']:.2f}%")
 
-        mag_res = evaluator.compute_metrics()
-        mag_metrics[mag] = {
-            "mIoU": mag_res["mIoU"],
-            "mDice": mag_res["mDice"],
-            "FwIoU": mag_res["FwIoU"],
-            "Accuracy": mag_res["Accuracy"],
-        }
-        print(f"    * {mag}x -> mIoU: {mag_res['mIoU']:.2f}% | mDice: {mag_res['mDice']:.2f}%")
+    print("\n--> Đang tính toán đường cong Pareto thích ứng (Adaptive Coarse-to-Fine Router)...")
+    patches_40x = [np.array(Image.open(p).convert("RGB")) for p in effective_files if (m_dir / p.name).is_file()]
+    patches_10x = [simulate_magnification_patch(img, target_mag=10, base_mag=40) for img in patches_40x]
+    ground_truths = [np.array(Image.open(m_dir / p.name), dtype=np.int64) for p in effective_files if (m_dir / p.name).is_file()]
 
-    print("--> Đang tính toán đường cong Pareto Trade-off Curve (Adaptive Router vs Random Baseline)...")
-    patches_40x = []
-    patches_10x = []
-    ground_truths = []
-    for p in test_files:
-        m_path = m_dir / p.name
-        if not m_path.is_file():
-            continue
-        pil_img = Image.open(p).convert("RGB")
-        arr = np.array(pil_img)
-        patches_40x.append(arr)
-        patches_10x.append(simulate_magnification_patch(arr, target_mag=10, base_mag=40))
-        ground_truths.append(np.array(Image.open(m_path), dtype=np.int64))
-
-    pareto_results = router.evaluate_pareto_curve(
+    pareto_data = router.evaluate_pareto_curve(
         engine=engine,
         model=model_stage2,
         patches_40x=patches_40x,
@@ -1107,11 +1117,10 @@ def run_multimag_and_pareto_benchmark(
         budget_steps=budget_steps,
         device=dev,
     )
-
-    return {
-        "magnification_metrics": mag_metrics,
-        "pareto_curve": pareto_results,
-    }
+    pareto_data["mag_metrics"] = mag_metrics
+    pareto_data["magnification_metrics"] = mag_metrics
+    pareto_data["pareto_curve"] = pareto_data
+    return pareto_data
 
 
 def run_biomarker_correlation_study(
@@ -1190,17 +1199,35 @@ def run_biomarker_correlation_study(
 
 def run_cross_dataset_luad_benchmark(
     engine: Any,
-    model_luad_stage2: torch.nn.Module,
-    luad_test_files: List[Path],
-    luad_mask_dir: Union[str, Path],
+    model_luad_stage2: Optional[torch.nn.Module] = None,
+    luad_test_files: Optional[List[Path]] = None,
+    luad_mask_dir: Optional[Union[str, Path]] = None,
     model_luad_stage1: Optional[torch.nn.Module] = None,
+    model_stage2: Optional[torch.nn.Module] = None,
+    model_stage1: Optional[torch.nn.Module] = None,
+    test_files: Optional[List[Path]] = None,
+    test_mask_dir: Optional[Union[str, Path]] = None,
     method_key: str = "M6_MultiScale_Pyramid_D4_Ensemble",
+    method: Optional[str] = None,
     device: Optional[Union[str, torch.device]] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Cross-dataset benchmark on LUAD-HistoSeg (Lung Adenocarcinoma) using 4 tissue classes."""
+    s2 = model_luad_stage2 or model_stage2
+    if s2 is None:
+        raise ValueError("Phải cung cấp mô hình Stage-2 (model_luad_stage2 hoặc model_stage2).")
+    s1 = model_luad_stage1 or model_stage1
+    files = luad_test_files or test_files
+    if files is None:
+        raise ValueError("Phải cung cấp danh sách tệp ảnh test (luad_test_files hoặc test_files).")
+    m_dir = luad_mask_dir or test_mask_dir
+    if m_dir is None:
+        raise ValueError("Phải cung cấp thư mục mask (luad_mask_dir hoặc test_mask_dir).")
+    m_key = method or method_key
+
     print("=" * 80)
     print("--> Đang đánh giá khả năng tổng quát hóa đa cơ quan trên LUAD-HistoSeg...")
-    print(f"    Số lượng mảng ảnh test: {len(luad_test_files)}")
+    print(f"    Số lượng mảng ảnh test: {len(files)}")
 
     evaluator = ColabSegmentationEvaluator(
         num_classes=5,
@@ -1208,11 +1235,11 @@ def run_cross_dataset_luad_benchmark(
     )
     evaluator, metrics = _evaluate_patch_cohort(
         engine=engine,
-        model_stage2=model_luad_stage2,
-        file_list=luad_test_files,
-        mask_dir=luad_mask_dir,
-        model_stage1=model_luad_stage1,
-        method_key=method_key,
+        model_stage2=s2,
+        file_list=files,
+        mask_dir=m_dir,
+        model_stage1=s1,
+        method_key=m_key,
         device=device,
         evaluator=evaluator,
         num_classes=5,
@@ -1226,4 +1253,6 @@ def run_cross_dataset_luad_benchmark(
     )
     print("=" * 80)
 
-    return metrics
+    res = dict(metrics)
+    res["metrics"] = metrics
+    return res
