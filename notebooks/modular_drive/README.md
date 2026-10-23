@@ -1,6 +1,6 @@
 # SE374.R11 - Thin Drive Runner v2 Colab Notebook Suite
 
-Thu muc nay chua bo 4 Google Colab Notebooks the he moi (**Thin Drive Runner v2**) danh cho de tai **Topic 6: Weakly-Supervised Segmentation for Whole Slide Images (LowMagWSS)** cua **Nhom 5** (Nguyễn Trọng Khôi - 23520790, Lê Nguyễn Thành Tài - 23521374; GVHD: [CHUA XAC NHAN: TS. Bui Cao Doanh]).
+Thu muc nay chua bo 4 Google Colab Notebooks the he moi (**Thin Drive Runner v2**) danh cho de tai **Topic 6: Weakly-Supervised Segmentation for Whole Slide Images (LowMagWSS)** cua **Nhom 5** (Nguyễn Trọng Khôi - 23520790, Lê Nguyễn Thành Tài - 23521374; GVHD: TS. Bui Cao Doanh).
 
 ## 1. Diem Khac Biet Cua Kien Truc Thin Drive Runner v2
 - **Khong nhung code mo hinh khong lo vao o notebook:** Thay vi nhung hang nghin dong dinh nghia class (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`, `MultiMethodWSSSEngine`) truc tiep trong `.ipynb`, toan bo logic duoc dat trong thu muc code `src/` tren Google Drive (`src/colab_pkg/`, `src/pipeline/colab_runner.py`, `src/models/wsss_inference_methods.py`).

@@ -168,8 +168,8 @@ def build_thin_notebook(spec: Dict[str, Any]) -> Dict[str, Any]:
 ## Thin Google Drive Runner v2: `{spec['title_badge']}`
 
 * **Mon hoc:** SE374.R11 - Phat trien phan mem xu ly anh y khoa (UIT - DHQG-HCM)
-* **Giang vien huong dan:** [CHUA XAC NHAN: TS. Bui Cao Doanh]
-* **Nhom thuc hien:** [CHUA XAC NHAN: Nhom ... - Ho va ten Sinh vien (MSSV)]
+* **Giang vien huong dan:** TS. Bui Cao Doanh
+* **Nhom thuc hien:** [Nhom de xuat rieng - Ho va ten Sinh vien (MSSV)]
 * **Kien truc Notebook:** **Thin Drive Runner v2** - Toan bo ma nguon mo hinh (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`), bo tai du lieu (`downloader.py`), trinh suy luan 7 phuong phap SOTA (`MultiMethodWSSSEngineV2`) va trinh xuat bieu do 300-DPI (`visualizer.py`) duoc dong goi trong thu muc code tren Google Drive (`src/`). Moi o code trong notebook nay chi giu vai tro dieu phoi gon nhe (`<= 32` dong/o).
 * **Cau hinh phan cung:** {spec['hardware_desc']}
 * **Thoi gian chay du kien:** {spec['expected_runtime']}
@@ -515,7 +515,7 @@ def build_modular_drive_readme() -> str:
     """Create `notebooks/modular_drive/README.md` with Google Drive setup instructions."""
     text = """# SE374.R11 - Thin Drive Runner v2 Colab Notebook Suite
 
-Thu muc nay chua bo 4 Google Colab Notebooks the he moi (**Thin Drive Runner v2**) danh cho de tai **Topic 6: Weakly-Supervised Segmentation for Whole Slide Images (LowMagWSS)** cua **Nhom 5** (Nguyễn Trọng Khôi - 23520790, Lê Nguyễn Thành Tài - 23521374; GVHD: [CHUA XAC NHAN: TS. Bui Cao Doanh]).
+Thu muc nay chua bo 4 Google Colab Notebooks the he moi (**Thin Drive Runner v2**) danh cho de tai **Topic 6: Weakly-Supervised Segmentation for Whole Slide Images (LowMagWSS)** cua **Nhom 5** (Nguyễn Trọng Khôi - 23520790, Lê Nguyễn Thành Tài - 23521374; GVHD: TS. Bui Cao Doanh).
 
 ## 1. Diem Khac Biet Cua Kien Truc Thin Drive Runner v2
 - **Khong nhung code mo hinh khong lo vao o notebook:** Thay vi nhung hang nghin dong dinh nghia class (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`, `MultiMethodWSSSEngine`) truc tiep trong `.ipynb`, toan bo logic duoc dat trong thu muc code `src/` tren Google Drive (`src/colab_pkg/`, `src/pipeline/colab_runner.py`, `src/models/wsss_inference_methods.py`).
