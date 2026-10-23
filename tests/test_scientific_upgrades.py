@@ -69,6 +69,7 @@ class DummySegmentationModel(nn.Module):
     def __init__(self, num_classes: int = 4) -> None:
         super().__init__()
         self.num_classes = num_classes
+        self.dummy_param = nn.Parameter(torch.zeros(1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, c, h, w = x.shape
@@ -76,6 +77,14 @@ class DummySegmentationModel(nn.Module):
         logits[:, 0, :, :] = 2.0  # TUM prior
         logits[:, 1, :, :] = 1.0  # STR prior
         return logits
+
+    def forward_cam(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        b, c, h, w = x.shape
+        cam = torch.zeros((b, self.num_classes, max(1, h // 8), max(1, w // 8)), device=x.device)
+        cam[:, 0, :, :] = 3.0
+        cam[:, 1, :, :] = 2.5
+        y_cls = torch.full((b, self.num_classes), 0.85, device=x.device)
+        return cam, y_cls
 
 
 class DummyWSSSEngine:
@@ -333,3 +342,97 @@ def test_val_to_test_scientific_protocol(tmp_path: Path) -> None:
     assert "test_metrics" in res
     assert "generalization_gap" in res
     assert "protocol_passed" in res
+
+
+def test_scientific_runner_notebook_end_to_end_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Executes all code cells of SE374_Colab_Scientific_Research_Runner.ipynb end-to-end against mocked local datasets and models."""
+    import json
+    import src.colab_pkg.downloader as dl_mod
+    import src.colab_pkg.model_loader as ml_mod
+
+    nb_path = Path(__file__).resolve().parent.parent / "SE374_Colab_Scientific_Research_Runner.ipynb"
+    assert nb_path.is_file()
+    nb_data = json.loads(nb_path.read_text(encoding="utf-8"))
+
+    # Verify Cell 2 never calls `pip install -r requirements.txt` on Colab (prevents NumPy 2.x ABI downgrade)
+    cell2_src = "".join(nb_data["cells"][2]["source"])
+    assert '"requirements.txt"' not in cell2_src
+    assert "drive.mount" not in cell2_src
+
+    # Create mock BCSS dataset
+    bcss_root = tmp_path / "BCSS-WSSS"
+    bcss_test_img = bcss_root / "test" / "img"
+    bcss_test_mask = bcss_root / "test" / "mask"
+    bcss_test_img.mkdir(parents=True)
+    bcss_test_mask.mkdir(parents=True)
+
+    pids = ["TCGA-A1-A0SD", "TCGA-A2-A04P", "TCGA-AQ-A04H", "TCGA-B6-A0I6", "TCGA-C8-A1HJ", "TCGA-D8-A142"]
+    for idx, pid in enumerate(pids):
+        for j in range(2):
+            img_arr = np.full((64, 64, 3), 180, dtype=np.uint8)
+            mask_arr = np.zeros((64, 64), dtype=np.uint8)
+            mask_arr[:32, :] = idx % 2
+            mask_arr[32:, :] = (idx + 1) % 3
+            fname = f"{pid}_patch_{j}.png"
+            Image.fromarray(img_arr).save(bcss_test_img / fname)
+            Image.fromarray(mask_arr).save(bcss_test_mask / fname)
+
+    # Create mock LUAD dataset
+    luad_root = tmp_path / "LUAD-HistoSeg"
+    luad_test_img = luad_root / "test" / "img"
+    luad_test_mask = luad_root / "test" / "mask"
+    luad_test_img.mkdir(parents=True)
+    luad_test_mask.mkdir(parents=True)
+    for j in range(2):
+        Image.fromarray(np.full((64, 64, 3), 170, dtype=np.uint8)).save(luad_test_img / f"LUAD_p{j}.png")
+        Image.fromarray(np.zeros((64, 64), dtype=np.uint8)).save(luad_test_mask / f"LUAD_p{j}.png")
+
+    # Create mock Whole-ROI sample
+    roi_img_p = tmp_path / "roi_img.png"
+    roi_mask_p = tmp_path / "roi_mask.png"
+    Image.fromarray(np.full((128, 128, 3), 175, dtype=np.uint8)).save(roi_img_p)
+    Image.fromarray(np.ones((128, 128), dtype=np.uint8)).save(roi_mask_p)
+
+    monkeypatch.setattr(dl_mod, "ensure_bcss_dataset", lambda **kw: (bcss_root, bcss_test_img, bcss_test_mask))
+    monkeypatch.setattr(dl_mod, "ensure_checkpoints", lambda **kw: {"stage1": tmp_path / "s1.pth", "stage2": tmp_path / "s2.pth"})
+    monkeypatch.setattr(dl_mod, "ensure_luad_dataset", lambda **kw: (luad_root, luad_test_img, luad_test_mask))
+    monkeypatch.setattr(dl_mod, "ensure_luad_checkpoints", lambda **kw: {"stage1": tmp_path / "ls1.pth", "stage2": tmp_path / "ls2.pth"})
+    monkeypatch.setattr(
+        dl_mod,
+        "download_bcss_whole_roi_cohort",
+        lambda **kw: [{"img": roi_img_p, "mask": roi_mask_p, "patient_id": "TCGA-A1-A0SD", "filename": "roi.png"}],
+    )
+
+    class MockLoader:
+        def __init__(self, device: str = "cpu") -> None:
+            self.device = device
+
+        def load_stage1_netcam(self, ckpt_path: object) -> DummySegmentationModel:
+            return DummySegmentationModel()
+
+        def load_stage2_deeplabv3plus(self, ckpt_path: object) -> DummySegmentationModel:
+            return DummySegmentationModel()
+
+    monkeypatch.setattr(ml_mod, "ColabModelLoader", MockLoader)
+    monkeypatch.setattr(
+        ml_mod,
+        "load_luad_models",
+        lambda **kw: (DummySegmentationModel(), DummySegmentationModel(), torch.device("cpu")),
+    )
+
+    ns: dict = {"__name__": "__main__"}
+    code_cells = [c for c in nb_data["cells"] if c.get("cell_type") == "code"]
+    assert len(code_cells) == 9
+
+    for idx, cell in enumerate(code_cells):
+        src = "".join(cell["source"])
+        if idx == 1:
+            # Redirect WORK_ROOT to tmp_path and use tiny DRY_RUN_SAMPLES=4 for fast test execution
+            src = src.replace('Path("/content" if IN_COLAB else "./se374_scientific_work")', f"Path(r'{tmp_path}')")
+            src = src.replace("DRY_RUN_SAMPLES = 50", "DRY_RUN_SAMPLES = 4")
+        exec(compile(src, f"<notebook_cell_{idx}>", "exec"), ns)
+
+    assert "zip_out" in ns
+    assert Path(ns["zip_out"]).is_file()
+    assert Path(ns["zip_out"]).stat().st_size > 0
+
