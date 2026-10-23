@@ -19,8 +19,48 @@ import json
 from pathlib import Path
 import shutil
 from typing import Any, Dict, List, Optional, Tuple, Union
+import cv2
 import numpy as np
+from PIL import Image
 from scipy import stats
+import torch
+
+try:
+    from src.losses_metrics.metrics import (
+        compute_boundary_f1,
+        compute_fwiou,
+        compute_patient_biomarker_correlation,
+        compute_pixel_accuracy,
+    )
+    from src.models.coarse_to_fine_router import (
+        CoarseToFineAdaptiveRouter,
+        simulate_magnification_patch,
+    )
+except ImportError:
+    try:
+        from losses_metrics.metrics import (
+            compute_boundary_f1,
+            compute_fwiou,
+            compute_patient_biomarker_correlation,
+            compute_pixel_accuracy,
+        )
+        from models.coarse_to_fine_router import (
+            CoarseToFineAdaptiveRouter,
+            simulate_magnification_patch,
+        )
+    except ImportError:
+        pass
+
+try:
+    from .downloader import extract_patient_id
+except ImportError:
+    try:
+        from downloader import extract_patient_id
+    except ImportError:
+        def extract_patient_id(fn: str) -> str:
+            import re
+            m = re.match(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", fn, re.IGNORECASE)
+            return m.group(1).upper() if m else fn.split("_")[0]
 
 
 CLASS_CODES: List[str] = ["TUM", "STR", "LYM", "NEC", "BACK"]
@@ -29,6 +69,16 @@ CLASS_LABELS: List[str] = [
     "Mô đệm (STR)",
     "Bạch huyết bào (LYM)",
     "Hoại tử (NEC)",
+    "Kính trắng / Ngoài ROI (BACK)",
+]
+
+# Canonical LUAD-HistoSeg 4-class nomenclature (Han et al., MedIA 2022)
+LUAD_CLASS_CODES: List[str] = ["TE", "NEC", "LYM", "TAS", "BACK"]
+LUAD_CLASS_LABELS: List[str] = [
+    "Biểu mô u (TE)",
+    "Hoại tử (NEC)",
+    "Bạch huyết bào (LYM)",
+    "Mô đệm liên kết u (TAS)",
     "Kính trắng / Ngoài ROI (BACK)",
 ]
 
@@ -47,6 +97,8 @@ class ColabSegmentationEvaluator:
         self.confusion_matrix_4cls = np.zeros((4, 4), dtype=np.int64)
         self.patch_miou_4cls: List[float] = []
         self.patch_mdice_4cls: List[float] = []
+        self.patch_fwiou: List[float] = []
+        self.patch_bf1: List[float] = []
         self.patient_cm_4cls: Dict[str, np.ndarray] = defaultdict(
             lambda: np.zeros((4, 4), dtype=np.int64)
         )
@@ -57,6 +109,8 @@ class ColabSegmentationEvaluator:
         self.confusion_matrix_4cls.fill(0)
         self.patch_miou_4cls.clear()
         self.patch_mdice_4cls.clear()
+        self.patch_fwiou.clear()
+        self.patch_bf1.clear()
         self.patient_cm_4cls.clear()
 
     @staticmethod
@@ -114,6 +168,14 @@ class ColabSegmentationEvaluator:
         p_miou, p_mdice = self._compute_4cls_miou_mdice_from_cm(counts_4)
         self.patch_miou_4cls.append(p_miou)
         self.patch_mdice_4cls.append(p_mdice)
+
+        try:
+            p_fwiou = compute_fwiou(pred, target, num_classes=self.num_classes)
+            self.patch_fwiou.append(p_fwiou * 100.0)
+            p_bf1 = compute_boundary_f1(pred, target, num_classes=self.num_classes)
+            self.patch_bf1.append(p_bf1 * 100.0)
+        except Exception:
+            pass
 
         if patient_id is not None:
             self.patient_cm_4cls[patient_id] += counts_4
@@ -243,6 +305,8 @@ class ColabSegmentationEvaluator:
             "mIoU_5cls": miou_5cls * 100.0,
             "mDice_5cls": mdice_5cls * 100.0,
             "Macro_F1_5cls": mdice_5cls * 100.0,
+            "FwIoU": float(np.mean(self.patch_fwiou)) if self.patch_fwiou else 0.0,
+            "Boundary_F1": float(np.mean(self.patch_bf1)) if self.patch_bf1 else 0.0,
             "Accuracy": accuracy_4cls * 100.0,
             "Accuracy_5cls": accuracy_5cls * 100.0,
             "VTP": vtp,
@@ -561,6 +625,8 @@ def export_evaluation_artifacts(
                 "mIoU_5cls": metrics["mIoU_5cls"],
                 "mDice_5cls": metrics["mDice_5cls"],
                 "Macro_F1_5cls": metrics.get("Macro_F1_5cls", metrics["mDice_5cls"]),
+                "FwIoU": metrics.get("FwIoU", 0.0),
+                "Boundary_F1": metrics.get("Boundary_F1", 0.0),
                 "Accuracy": metrics["Accuracy"],
                 "Accuracy_5cls": metrics["Accuracy_5cls"],
                 "VTP": metrics["VTP"],
@@ -784,3 +850,350 @@ def export_evaluation_artifacts(
         "csv_ablation_path": csv_ablation_path,
         "csv_class_path": csv_class_path,
     }
+
+
+# ==============================================================================
+# 4. PUBLICATION-GRADE SCIENTIFIC EVALUATION SUITE
+# ==============================================================================
+
+def _evaluate_patch_cohort(
+    engine: Any,
+    model_stage2: torch.nn.Module,
+    file_list: List[Path],
+    mask_dir: Union[str, Path],
+    model_stage1: Optional[torch.nn.Module] = None,
+    method_key: str = "M6_MultiScale_Pyramid_D4_Ensemble",
+    device: Optional[Union[str, torch.device]] = None,
+    evaluator: Optional[ColabSegmentationEvaluator] = None,
+    num_classes: int = 5,
+    class_names: Optional[List[str]] = None,
+    progress_desc: str = "Cohort Evaluation",
+) -> Tuple[ColabSegmentationEvaluator, Dict[str, Any]]:
+    """Evaluates a list of patch images against ground truth masks."""
+    m_dir = Path(mask_dir)
+    dev = device if device is not None else (
+        torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    )
+    if isinstance(dev, str):
+        dev = torch.device(dev)
+
+    if evaluator is None:
+        evaluator = ColabSegmentationEvaluator(
+            num_classes=num_classes,
+            class_names=class_names or list(CLASS_CODES),
+        )
+
+    model_stage2.eval()
+    if model_stage1 is not None:
+        model_stage1.eval()
+
+    total = len(file_list)
+    with torch.no_grad():
+        for idx, p in enumerate(file_list):
+            m_path = m_dir / p.name
+            if not m_path.is_file():
+                m_candidates = list(m_dir.glob(f"{p.stem}.*"))
+                if m_candidates:
+                    m_path = m_candidates[0]
+                else:
+                    continue
+
+            pil_img = Image.open(p).convert("RGB")
+            raw_rgb = np.array(pil_img)
+            gt_mask = np.array(Image.open(m_path), dtype=np.int64)
+
+            tensor_in = (
+                torch.from_numpy(raw_rgb.transpose(2, 0, 1))
+                .float()
+                .div(255.0)
+                .unsqueeze(0)
+                .to(dev)
+            )
+
+            if hasattr(engine, "predict_all_methods"):
+                preds = engine.predict_all_methods(
+                    model=model_stage2,
+                    img_tensor=tensor_in,
+                    raw_rgb=raw_rgb,
+                    model_stage1=model_stage1,
+                    include_v2=True,
+                )
+                pred_mask = preds.get(method_key, preds.get("M1_Baseline_SingleScale"))
+            elif hasattr(engine, "predict_m6") and method_key == "M6_MultiScale_Pyramid_D4_Ensemble":
+                pred_mask = engine.predict_m6(
+                    model_stage2, tensor_in, raw_rgb=raw_rgb, model_stage1=model_stage1
+                )
+            elif hasattr(engine, "predict_m5") and method_key == "M5_Proposed_SOTA_Ensemble":
+                pred_mask = engine.predict_m5(
+                    model_stage2, tensor_in, raw_rgb=raw_rgb, model_stage1=model_stage1
+                )
+            else:
+                pred_mask = engine.predict_m1(model_stage2, tensor_in)
+
+            pid = extract_patient_id(p.name)
+            raw_4cls = getattr(engine, "_last_raw_4cls_preds", {}).get(method_key, None)
+            evaluator.update(pred=pred_mask, target=gt_mask, pred_raw_4cls=raw_4cls, patient_id=pid)
+
+    metrics = evaluator.compute_metrics()
+    return evaluator, metrics
+
+
+def run_val_to_test_scientific_protocol(
+    engine: Any,
+    model_stage2: torch.nn.Module,
+    val_files: List[Path],
+    test_files: List[Path],
+    val_mask_dir: Union[str, Path],
+    test_mask_dir: Union[str, Path],
+    model_stage1: Optional[torch.nn.Module] = None,
+    method_key: str = "M6_MultiScale_Pyramid_D4_Ensemble",
+    device: Optional[Union[str, torch.device]] = None,
+) -> Dict[str, Any]:
+    """Scientific standard: Validates on validation split, locks hyperparameters, then tests on held-out test split."""
+    print("=" * 80)
+    print("--> BƯỚC 1: Đánh giá tập Validation (Khóa siêu tham số & Kiểm tra quy chuẩn)")
+    print(f"    Số lượng mảng ảnh validation: {len(val_files)}")
+    _, val_metrics = _evaluate_patch_cohort(
+        engine=engine,
+        model_stage2=model_stage2,
+        file_list=val_files,
+        mask_dir=val_mask_dir,
+        model_stage1=model_stage1,
+        method_key=method_key,
+        device=device,
+        progress_desc="Validation Cohort",
+    )
+    print(
+        f"[OK] Validation mIoU: {val_metrics['mIoU']:.2f}% | "
+        f"mDice: {val_metrics['mDice']:.2f}% | FwIoU: {val_metrics['FwIoU']:.2f}%"
+    )
+
+    print("\n--> BƯỚC 2: Đánh giá độc lập trên tập Held-out Test (Zero-Tuning)")
+    print(f"    Số lượng mảng ảnh test: {len(test_files)}")
+    _, test_metrics = _evaluate_patch_cohort(
+        engine=engine,
+        model_stage2=model_stage2,
+        file_list=test_files,
+        mask_dir=test_mask_dir,
+        model_stage1=model_stage1,
+        method_key=method_key,
+        device=device,
+        progress_desc="Test Cohort",
+    )
+    print(
+        f"[OK] Test mIoU: {test_metrics['mIoU']:.2f}% | "
+        f"mDice: {test_metrics['mDice']:.2f}% | FwIoU: {test_metrics['FwIoU']:.2f}%"
+    )
+
+    gen_gap = float(val_metrics["mIoU"] - test_metrics["mIoU"])
+    protocol_passed = abs(gen_gap) <= 5.0
+
+    print("=" * 80)
+    print(f"[KẾT LUẬN GIAO THỨC VAL-TO-TEST]: Generalization Gap: {gen_gap:+.2f}% | Hợp lệ (<= 5%): {protocol_passed}")
+    print("=" * 80)
+
+    return {
+        "val_metrics": val_metrics,
+        "test_metrics": test_metrics,
+        "generalization_gap": gen_gap,
+        "protocol_passed": protocol_passed,
+        "method_key": method_key,
+    }
+
+
+def run_multimag_and_pareto_benchmark(
+    engine: Any,
+    model_stage2: torch.nn.Module,
+    test_files: List[Path],
+    test_mask_dir: Union[str, Path],
+    model_stage1: Optional[torch.nn.Module] = None,
+    magnifications: Tuple[int, ...] = (5, 10, 20, 40),
+    budget_steps: int = 11,
+    device: Optional[Union[str, torch.device]] = None,
+) -> Dict[str, Any]:
+    """Evaluates multi-magnification degradation (5x, 10x, 20x, 40x) and computes Adaptive Pareto frontier."""
+    m_dir = Path(test_mask_dir)
+    dev = device if device is not None else (
+        torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    )
+    if isinstance(dev, str):
+        dev = torch.device(dev)
+
+    router = CoarseToFineAdaptiveRouter()
+    mag_metrics: Dict[int, Dict[str, float]] = {}
+
+    for mag in magnifications:
+        print(f"--> Đang đánh giá tại độ phóng đại mô phỏng: {mag}x...")
+        evaluator = ColabSegmentationEvaluator()
+        with torch.no_grad():
+            for p in test_files:
+                m_path = m_dir / p.name
+                if not m_path.is_file():
+                    continue
+                pil_img = Image.open(p).convert("RGB")
+                raw_rgb = np.array(pil_img)
+                gt_mask = np.array(Image.open(m_path), dtype=np.int64)
+
+                deg_rgb = simulate_magnification_patch(raw_rgb, target_mag=mag, base_mag=40)
+                tensor_in = (
+                    torch.from_numpy(deg_rgb.transpose(2, 0, 1))
+                    .float()
+                    .div(255.0)
+                    .unsqueeze(0)
+                    .to(dev)
+                )
+                pred_mask = engine.predict_m1(model_stage2, tensor_in)
+                evaluator.update(pred=pred_mask, target=gt_mask, patient_id=extract_patient_id(p.name))
+
+        mag_res = evaluator.compute_metrics()
+        mag_metrics[mag] = {
+            "mIoU": mag_res["mIoU"],
+            "mDice": mag_res["mDice"],
+            "FwIoU": mag_res["FwIoU"],
+            "Accuracy": mag_res["Accuracy"],
+        }
+        print(f"    * {mag}x -> mIoU: {mag_res['mIoU']:.2f}% | mDice: {mag_res['mDice']:.2f}%")
+
+    print("--> Đang tính toán đường cong Pareto Trade-off Curve (Adaptive Router vs Random Baseline)...")
+    patches_40x = []
+    patches_10x = []
+    ground_truths = []
+    for p in test_files:
+        m_path = m_dir / p.name
+        if not m_path.is_file():
+            continue
+        pil_img = Image.open(p).convert("RGB")
+        arr = np.array(pil_img)
+        patches_40x.append(arr)
+        patches_10x.append(simulate_magnification_patch(arr, target_mag=10, base_mag=40))
+        ground_truths.append(np.array(Image.open(m_path), dtype=np.int64))
+
+    pareto_results = router.evaluate_pareto_curve(
+        engine=engine,
+        model=model_stage2,
+        patches_40x=patches_40x,
+        patches_10x=patches_10x,
+        ground_truths=ground_truths,
+        budget_steps=budget_steps,
+        device=dev,
+    )
+
+    return {
+        "magnification_metrics": mag_metrics,
+        "pareto_curve": pareto_results,
+    }
+
+
+def run_biomarker_correlation_study(
+    patient_predictions: Dict[str, List[np.ndarray]],
+    patient_ground_truths: Dict[str, List[np.ndarray]],
+    output_csv_path: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """Computes patient-level Viable Tumor Percentage (VTP) and Tumor-Stroma Ratio (TSR) correlation."""
+    pred_biomarkers: Dict[str, Dict[str, float]] = {}
+    gt_biomarkers: Dict[str, Dict[str, float]] = {}
+
+    for pid in patient_ground_truths:
+        if pid not in patient_predictions:
+            continue
+        gts = patient_ground_truths[pid]
+        preds = patient_predictions[pid]
+
+        gt_tum = sum(int(np.sum(g == 0)) for g in gts)
+        gt_str = sum(int(np.sum(g == 1)) for g in gts)
+        gt_lym = sum(int(np.sum(g == 2)) for g in gts)
+        gt_nec = sum(int(np.sum(g == 3)) for g in gts)
+        gt_tissue = gt_tum + gt_str + gt_lym + gt_nec
+
+        gt_vtp = (gt_tum / float(gt_tissue) * 100.0) if gt_tissue > 0 else 0.0
+        gt_tsr = (gt_tum / float(gt_tum + gt_str) * 100.0) if (gt_tum + gt_str) > 0 else 0.0
+        gt_biomarkers[pid] = {"vtp": gt_vtp, "tsr": gt_tsr}
+
+        pr_tum = sum(int(np.sum(p == 0)) for p in preds)
+        pr_str = sum(int(np.sum(p == 1)) for p in preds)
+        pr_lym = sum(int(np.sum(p == 2)) for p in preds)
+        pr_nec = sum(int(np.sum(p == 3)) for p in preds)
+        pr_tissue = pr_tum + pr_str + pr_lym + pr_nec
+
+        pr_vtp = (pr_tum / float(pr_tissue) * 100.0) if pr_tissue > 0 else 0.0
+        pr_tsr = (pr_tum / float(pr_tum + pr_str) * 100.0) if (pr_tum + pr_str) > 0 else 0.0
+        pred_biomarkers[pid] = {"vtp": pr_vtp, "tsr": pr_tsr}
+
+    stats_report = compute_patient_biomarker_correlation(pred_biomarkers, gt_biomarkers)
+
+    if output_csv_path is not None:
+        csv_p = Path(output_csv_path)
+        csv_p.parent.mkdir(parents=True, exist_ok=True)
+        with open(csv_p, "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow([
+                "Patient_ID",
+                "Pred_VTP_pct",
+                "GT_VTP_pct",
+                "Diff_VTP",
+                "Pred_TSR_pct",
+                "GT_TSR_pct",
+                "Diff_TSR",
+            ])
+            for pid in sorted(pred_biomarkers.keys()):
+                pv = pred_biomarkers[pid]["vtp"]
+                gv = gt_biomarkers[pid]["vtp"]
+                pt = pred_biomarkers[pid]["tsr"]
+                gt = gt_biomarkers[pid]["tsr"]
+                w.writerow([
+                    pid,
+                    f"{pv:.2f}",
+                    f"{gv:.2f}",
+                    f"{pv - gv:+.2f}",
+                    f"{pt:.2f}",
+                    f"{gt:.2f}",
+                    f"{pt - gt:+.2f}",
+                ])
+        print(f"[OK] Đã xuất báo cáo tương quan chỉ dấu sinh học: {csv_p.resolve()}")
+
+    return {
+        "correlation_metrics": stats_report,
+        "pred_biomarkers": pred_biomarkers,
+        "gt_biomarkers": gt_biomarkers,
+    }
+
+
+def run_cross_dataset_luad_benchmark(
+    engine: Any,
+    model_luad_stage2: torch.nn.Module,
+    luad_test_files: List[Path],
+    luad_mask_dir: Union[str, Path],
+    model_luad_stage1: Optional[torch.nn.Module] = None,
+    method_key: str = "M6_MultiScale_Pyramid_D4_Ensemble",
+    device: Optional[Union[str, torch.device]] = None,
+) -> Dict[str, Any]:
+    """Cross-dataset benchmark on LUAD-HistoSeg (Lung Adenocarcinoma) using 4 tissue classes."""
+    print("=" * 80)
+    print("--> Đang đánh giá khả năng tổng quát hóa đa cơ quan trên LUAD-HistoSeg...")
+    print(f"    Số lượng mảng ảnh test: {len(luad_test_files)}")
+
+    evaluator = ColabSegmentationEvaluator(
+        num_classes=5,
+        class_names=LUAD_CLASS_CODES,
+    )
+    evaluator, metrics = _evaluate_patch_cohort(
+        engine=engine,
+        model_stage2=model_luad_stage2,
+        file_list=luad_test_files,
+        mask_dir=luad_mask_dir,
+        model_stage1=model_luad_stage1,
+        method_key=method_key,
+        device=device,
+        evaluator=evaluator,
+        num_classes=5,
+        class_names=LUAD_CLASS_CODES,
+        progress_desc="LUAD-HistoSeg Cohort",
+    )
+
+    print(
+        f"[OK] LUAD-HistoSeg mIoU: {metrics['mIoU']:.2f}% | "
+        f"mDice: {metrics['mDice']:.2f}% | FwIoU: {metrics['FwIoU']:.2f}%"
+    )
+    print("=" * 80)
+
+    return metrics

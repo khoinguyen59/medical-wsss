@@ -702,6 +702,32 @@ def load_wsss_models(
     return model_stage2, model_stage1, dev
 
 
+def load_luad_models(
+    stage2_ckpt: Union[str, Path],
+    stage1_ckpt: Optional[Union[str, Path]] = None,
+    device: Optional[Union[str, torch.device]] = None,
+) -> Tuple[DeepLabV3Plus, Optional[WSSSTissueStage1NetCAM], torch.device]:
+    """Convenience loader for LUAD-HistoSeg Stage-2 DeepLabV3+ and Stage-1 ResNet38d Net_CAM models."""
+    if device is None:
+        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    elif isinstance(device, str):
+        dev = torch.device(device)
+    else:
+        dev = device
+
+    print(f"[OK] Thiết bị tính toán (LUAD-HistoSeg): {dev}")
+    model_stage2 = build_and_load_deeplabv3plus(stage2_ckpt, dev)
+
+    model_stage1: Optional[WSSSTissueStage1NetCAM] = None
+    if stage1_ckpt is not None and Path(stage1_ckpt).is_file():
+        try:
+            model_stage1 = build_and_load_stage1_netcam(stage1_ckpt, dev, n_class=4)
+        except Exception as exc:
+            print(f"[CẢNH BÁO] Không thể nạp Stage 1 Net_CAM LUAD ({exc}). Tiếp tục với chế độ fallback.")
+
+    return model_stage2, model_stage1, dev
+
+
 class ColabModelLoader:
     """Compatibility helper for Colab notebooks loading Stage-1 & Stage-2 models."""
 
@@ -726,6 +752,18 @@ class ColabModelLoader:
     ) -> DeepLabV3Plus:
         """Builds and loads the Stage-2 DeepLabV3+ ResNet-101 model."""
         return build_and_load_deeplabv3plus(checkpoint_path=ckpt_path, device=self.device)
+
+    def load_luad_models(
+        self,
+        ckpt_stage2_path: Union[str, Path],
+        ckpt_stage1_path: Optional[Union[str, Path]] = None,
+    ) -> Tuple[DeepLabV3Plus, Optional[WSSSTissueStage1NetCAM], torch.device]:
+        """Loads both LUAD-HistoSeg Stage-2 and Stage-1 models."""
+        return load_luad_models(
+            stage2_ckpt=ckpt_stage2_path,
+            stage1_ckpt=ckpt_stage1_path,
+            device=self.device,
+        )
 
 
 # ==============================================================================

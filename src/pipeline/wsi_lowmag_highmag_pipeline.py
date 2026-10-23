@@ -35,6 +35,19 @@ Image.MAX_IMAGE_PIXELS = None
 from src.datasets.otsu_filter import compute_otsu_tissue_mask
 from src.models.wsss_inference_methods import MultiMethodWSSSEngineV2
 
+try:
+    from src.losses_metrics.metrics import (
+        compute_boundary_f1,
+        compute_fwiou,
+        compute_pixel_accuracy,
+    )
+except ImportError:
+    from losses_metrics.metrics import (
+        compute_boundary_f1,
+        compute_fwiou,
+        compute_pixel_accuracy,
+    )
+
 # BCSS tissue class constants & standard clinical palette
 CLASS_NAMES: List[str] = ["Tumor", "Stroma", "Lymphocyte", "Necrosis", "Background"]
 COLOR_PALETTE: Dict[int, Tuple[int, int, int]] = {
@@ -56,6 +69,7 @@ class WSICandidatePatch:
     height: int
     macro_tissue_score: float
     macro_tumor_prob: float
+    priority_score: float = 0.0
     predicted_mask: Optional[np.ndarray] = None
     prediction_confidence: float = 0.0
 
@@ -288,6 +302,17 @@ class WSILowMagHighMagPipeline:
 
                 # Low-Mag Gating Rule: Discard pure glass, background, and empty zones
                 if tissue_ratio >= self.tissue_threshold:
+                    macro_roi_probs = macro_prob_heatmap[:, my_start:my_end, mx_start:mx_end]
+                    if macro_roi_probs.size > 0:
+                        mean_p = np.mean(macro_roi_probs, axis=(1, 2))
+                        p_norm = mean_p / (np.sum(mean_p) + 1e-8)
+                        entropy = -float(np.sum(p_norm * np.log(p_norm + 1e-8))) / np.log(4.0)
+                    else:
+                        entropy = 0.0
+
+                    # Clinical priority: tumor likelihood + invasive boundary complexity + tissue content
+                    priority = 0.65 * tumor_score + 0.25 * entropy + 0.10 * tissue_ratio
+
                     candidates.append(
                         WSICandidatePatch(
                             patch_id=patch_id,
@@ -297,9 +322,13 @@ class WSILowMagHighMagPipeline:
                             height=actual_h,
                             macro_tissue_score=tissue_ratio,
                             macro_tumor_prob=tumor_score,
+                            priority_score=priority,
                         )
                     )
                 patch_id += 1
+
+        # Sort candidate patches strictly by clinical priority so high-yield tumor regions are inferred first
+        candidates.sort(key=lambda c: c.priority_score, reverse=True)
 
         selected_count = len(candidates)
         reduction_pct = (
@@ -541,8 +570,10 @@ class WSILowMagHighMagPipeline:
         total_elapsed = time.time() - t0
 
         # Step 4: Stitching Patch Predictions Back to Macro Coordinate Canvas
-        stitched_mask = np.zeros(self.lowmag_target_size, dtype=np.uint8)  # Class 4 = Background
-        stitched_mask.fill(4)
+        # Initialize canvas with 100% tissue coverage from coarse low-mag predictions
+        stitched_mask = np.full(self.lowmag_target_size, 4, dtype=np.uint8)  # Class 4 = Background
+        coarse_preds = np.argmax(macro_probs, axis=0).astype(np.uint8)
+        stitched_mask[tissue_mask] = coarse_preds[tissue_mask]
 
         macro_h, macro_w = self.lowmag_target_size
         scale_x = macro_w / float(orig_dims[0])
@@ -604,3 +635,91 @@ class WSILowMagHighMagPipeline:
         for class_idx, color in COLOR_PALETTE.items():
             rgb[mask == class_idx] = color
         return Image.fromarray(rgb)
+
+    def evaluate_wsi_with_ground_truth_roi(
+        self,
+        predicted_mask: np.ndarray,
+        ground_truth_roi: Union[str, Path, np.ndarray],
+        num_classes: int = 5,
+    ) -> Dict[str, Any]:
+        """Evaluates whole-slide or whole-ROI segmentation against expert annotations.
+
+        Supports standard BCSS Whole-ROI annotations (nabil-m/bcss, yyyff1/BCSS_WSI).
+        Maps BCSS standard GT codes: 1 -> 0 (TUM), 2 -> 1 (STR), 3 -> 2 (LYM), 4 -> 3 (NEC), 0 -> 4 (BACK).
+
+        Args:
+            predicted_mask: [H, W] uint8 predicted segmentation mask.
+            ground_truth_roi: Path to mask image or [H, W] numpy array.
+            num_classes: Total classes (default 5).
+
+        Returns:
+            Dictionary with mIoU_4cls, mDice_4cls, Pixel_Accuracy, FwIoU, Boundary_F1,
+            per_class_iou, per_class_dice.
+        """
+        if isinstance(ground_truth_roi, (str, Path)):
+            gt_img = Image.open(ground_truth_roi)
+            gt_arr = np.array(gt_img)
+        else:
+            gt_arr = np.array(ground_truth_roi)
+
+        unique_vals = set(np.unique(gt_arr))
+        standardized_gt = gt_arr.copy()
+        if unique_vals.issubset({0, 1, 2, 3, 4}) and 0 in unique_vals and 4 in unique_vals:
+            remapped = np.full_like(gt_arr, 4)
+            remapped[gt_arr == 1] = 0
+            remapped[gt_arr == 2] = 1
+            remapped[gt_arr == 3] = 2
+            remapped[gt_arr == 4] = 3
+            standardized_gt = remapped
+
+        h_gt, w_gt = standardized_gt.shape[:2]
+        h_pred, w_pred = predicted_mask.shape[:2]
+        if (h_pred, w_pred) != (h_gt, w_gt):
+            pred_pil = Image.fromarray(predicted_mask)
+            pred_resized = np.array(
+                pred_pil.resize((w_gt, h_gt), Image.Resampling.NEAREST)
+            )
+        else:
+            pred_resized = predicted_mask
+
+        roi_valid = (standardized_gt >= 0) & (standardized_gt < 4)
+        cm4 = np.zeros((4, 4), dtype=np.int64)
+        if np.any(roi_valid):
+            t4 = standardized_gt[roi_valid]
+            p4 = np.clip(pred_resized[roi_valid], 0, 3)
+            encoded = t4 * 4 + p4
+            counts = np.bincount(encoded, minlength=16).reshape((4, 4))
+            cm4 += counts
+
+        tp = np.diag(cm4).astype(np.float64)
+        fp = cm4.sum(axis=0) - tp
+        fn = cm4.sum(axis=1) - tp
+        denom_iou = tp + fp + fn
+        denom_dice = 2.0 * tp + fp + fn
+        v_iou = denom_iou > 0
+        v_dice = denom_dice > 0
+
+        miou_4cls = float(np.mean(tp[v_iou] / denom_iou[v_iou]) * 100.0) if np.any(v_iou) else 0.0
+        mdice_4cls = float(np.mean((2.0 * tp[v_dice]) / denom_dice[v_dice]) * 100.0) if np.any(v_dice) else 0.0
+        pa = float(compute_pixel_accuracy(pred_resized, standardized_gt) * 100.0)
+        fwiou = float(compute_fwiou(pred_resized, standardized_gt, num_classes=num_classes) * 100.0)
+        bf1_dict = compute_boundary_f1(pred_resized, standardized_gt, num_classes=num_classes)
+        bf1 = float(bf1_dict["BF1"])
+
+        class_names = ["TUM", "STR", "LYM", "NEC"]
+        per_class_iou = {}
+        per_class_dice = {}
+        for idx_c, c_name in enumerate(class_names):
+            per_class_iou[c_name] = float(tp[idx_c] / denom_iou[idx_c] * 100.0) if denom_iou[idx_c] > 0 else 0.0
+            per_class_dice[c_name] = float((2.0 * tp[idx_c]) / denom_dice[idx_c] * 100.0) if denom_dice[idx_c] > 0 else 0.0
+
+        return {
+            "mIoU_4cls": miou_4cls,
+            "mDice_4cls": mdice_4cls,
+            "Pixel_Accuracy": pa,
+            "FwIoU": fwiou,
+            "Boundary_F1": bf1,
+            "per_class_iou": per_class_iou,
+            "per_class_dice": per_class_dice,
+            "confusion_matrix_4cls": cm4.tolist(),
+        }
