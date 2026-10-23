@@ -173,7 +173,10 @@ class ColabSegmentationEvaluator:
             p_fwiou = compute_fwiou(pred, target, num_classes=self.num_classes)
             self.patch_fwiou.append(p_fwiou * 100.0)
             p_bf1 = compute_boundary_f1(pred, target, num_classes=self.num_classes)
-            self.patch_bf1.append(p_bf1 * 100.0)
+            if isinstance(p_bf1, dict):
+                self.patch_bf1.append(float(p_bf1.get("BF1", 0.0)))
+            else:
+                self.patch_bf1.append(float(p_bf1) * 100.0)
         except Exception:
             pass
 
@@ -1258,6 +1261,7 @@ def run_cross_dataset_luad_benchmark(
     method_key: str = "M6_MultiScale_Pyramid_D4_Ensemble",
     method: Optional[str] = None,
     device: Optional[Union[str, torch.device]] = None,
+    output_dir: Optional[Union[str, Path]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """Cross-dataset benchmark on LUAD-HistoSeg (Lung Adenocarcinoma) using 4 tissue classes."""
@@ -1303,4 +1307,17 @@ def run_cross_dataset_luad_benchmark(
 
     res = dict(metrics)
     res["metrics"] = metrics
+
+    out_d = output_dir or kwargs.get("output_dir")
+    if out_d is not None:
+        out_p = Path(out_d)
+        out_p.mkdir(parents=True, exist_ok=True)
+        report_file = out_p / "luad_cross_dataset_report.json"
+        with open(report_file, "w", encoding="utf-8") as rf:
+            json.dump(sanitize_for_json(res), rf, indent=2)
+        metrics_file = out_p / "luad_benchmark_metrics.json"
+        with open(metrics_file, "w", encoding="utf-8") as mf:
+            json.dump(sanitize_for_json(res), mf, indent=2)
+        print(f"[OK] Đã lưu báo cáo LUAD-HistoSeg JSON vào: {report_file.resolve()}")
+
     return res

@@ -1,32 +1,46 @@
 import os
 import glob
 
-def test_no_ai_em_dash_in_markdown():
-    bad_chars = ['\u2014', '\u2013', '\u2012', '\u2015', '\u2212']
-    
-    ignored_prefixes = (
-        "repos\\", "repos/",
-        "graphify-out\\", "graphify-out/",
-        "graphify-out-all\\", "graphify-out-all/",
-        "temp_graphify_all\\", "temp_graphify_all/",
-        ".pytest_cache\\", ".pytest_cache/"
-    )
-    
-    md_files = glob.glob("**/*.md", recursive=True)
-    target_files = [
-        f for f in md_files 
-        if not f.startswith(ignored_prefixes)
-    ]
-    
+IGNORED_DASH_PREFIXES = (
+    "repos\\", "repos/",
+    "graphify-out\\", "graphify-out/",
+    "graphify-out-all\\", "graphify-out-all/",
+    "temp_graphify_all\\", "temp_graphify_all/",
+    ".pytest_cache\\", ".pytest_cache/",
+    ".ruff_cache\\", ".ruff_cache/",
+    ".git\\", ".git/",
+)
+
+BAD_DASH_CHARS = ['\u2014', '\u2013', '\u2012', '\u2015', '\u2212']
+
+
+def _scan_files_for_bad_dashes(patterns):
+    target_files = []
+    for pat in patterns:
+        for f in glob.glob(pat, recursive=True):
+            if not f.startswith(IGNORED_DASH_PREFIXES):
+                target_files.append(f)
+
     violations = []
     for fpath in target_files:
-        with open(fpath, "r", encoding="utf-8") as f:
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
             for line_idx, line in enumerate(f, start=1):
-                for bad_c in bad_chars:
+                for bad_c in BAD_DASH_CHARS:
                     if bad_c in line:
                         violations.append(f"{fpath}:{line_idx} contains bad dash (U+{ord(bad_c):04X})")
-    
-    assert len(violations) == 0, f"Found {len(violations)} non-ASCII dash violations:\n" + "\n".join(violations[:10])
+    return violations
+
+
+def test_no_ai_em_dash_in_markdown():
+    """Verify zero non-ASCII dashes across all markdown files (Invariant 12)."""
+    violations = _scan_files_for_bad_dashes(["**/*.md"])
+    assert len(violations) == 0, f"Found {len(violations)} non-ASCII dash violations in markdown:\n" + "\n".join(violations[:10])
+
+
+def test_no_ai_em_dash_in_python_and_notebooks():
+    """Verify zero non-ASCII dashes across all Python files and Jupyter notebooks (Invariant 12)."""
+    violations = _scan_files_for_bad_dashes(["**/*.py", "**/*.ipynb"])
+    assert len(violations) == 0, f"Found {len(violations)} non-ASCII dash violations in code/notebooks:\n" + "\n".join(violations[:10])
 
 
 def test_invariants_24_and_25_defined_in_agents_md():
