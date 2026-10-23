@@ -6,6 +6,8 @@
 [![Dataset BCSS-WSSS](https://img.shields.io/badge/Dataset-BCSS--WSSS-success.svg)](https://github.com/PathologyDataScience/BCSS)
 [![Benchmark 70.53% mIoU](https://img.shields.io/badge/BCSS_mIoU-70.53%25-brightgreen.svg)](#benchmark-results)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Open In Colab: Scientific Benchmark Runner](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/SE374_Colab_Scientific_Research_Runner.ipynb)
+[![Open In Colab: WSI Clinical Demo](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/SE374_Colab_WSI_LowMag_HighMag_BonusDemo.ipynb)
 
 > **Môn học:** SE374.R11 - Phát triển phần mềm xử lý ảnh y khoa (Khoa Kỹ thuật Phần mềm, UIT - ĐHQG-HCM)  
 > **Tên đề tài chính thức:** `Coarse-to-Fine Weakly-Supervised Segmentation for Whole Slide Images`  
@@ -88,6 +90,7 @@ medical-wsss/
 │   ├── utils/                         # Medical utilities, logging, normalization & auditing
 │   └── visualization/                 # Clinical viewer, proposal figures & heatmap generators
 ├── notebooks/                         # Interactive Jupyter / Colab Notebooks
+│   ├── SE374_Colab_Scientific_Research_Runner.ipynb          # Primary Standalone GitHub-First Runner (5 Experiments)
 │   ├── SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb  # Primary Thin Runner notebook (Tesla T4)
 │   ├── SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb  # Thin Runner notebook (NVIDIA L4)
 │   ├── SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb # Thin Runner notebook (NVIDIA A100)
@@ -137,16 +140,20 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-### Running on Google Colab GPU
+### 🚀 1-Click Run on Google Colab (Zero Google Drive Setup)
 
-1. Open [`notebooks/SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb`](notebooks/SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb) in Google Colab.
-2. Select a GPU runtime (Runtime > Change runtime type > **T4 GPU** or **L4 GPU**).
-3. Run the cells sequentially:
-   - **Cell 1**: Mount Google Drive and auto-install dependencies (`gdown`, `albumentations`).
-   - **Cell 2**: Auto-download official BCSS test images and pretrained checkpoints (`stage1_checkpoint_trained_on_bcss.pth` and `stage2_checkpoint_trained_on_bcss.pth`).
-   - **Cell 3**: Execute the M1-M7 evaluation pipeline with Mixed Precision FP16.
-   - **Cell 4**: Display the comparative ablation study table and clinical visual comparison grids.
-   - **Cell 5**: Export results, figures, CSVs, and markdown reports directly to Google Drive.
+You can run the entire scientific evaluation suite directly on Google Colab GPU with **zero Google Drive setup** required:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/SE374_Colab_Scientific_Research_Runner.ipynb)
+
+1. Click the **Open In Colab** badge above to launch [`notebooks/SE374_Colab_Scientific_Research_Runner.ipynb`](notebooks/SE374_Colab_Scientific_Research_Runner.ipynb).
+2. Select a free GPU runtime (**Runtime > Change runtime type > T4 GPU**).
+3. Click **Runtime > Run all** (hoặc `Ctrl + F9`):
+   - **Step 1 (GitHub Direct Clone)**: Automatically clones this repository (`https://github.com/khoinguyen59/medical-wsss.git`) directly into the Colab VM without requiring Google Drive mounting.
+   - **Step 2 (Environment Setup)**: Installs dependencies (`requirements.txt`, `monai`, `timm`, `huggingface_hub`, `gdown`) and sets random seeds.
+   - **Step 3 (Pretrained Weights & BCSS Data)**: Automatically pulls weights and dataset mirrors via HuggingFace CDN.
+   - **Steps 4-8 (5 Scientific Benchmarks)**: Runs the 5 publication-grade experiments (Validation-to-Test protocol, Multi-Magnification Pareto curve, Patient-level clinical biomarkers VTP/TSR, LUAD cross-dataset transfer, and Whole-ROI 100% tissue coverage).
+   - **Step 9 (Automatic Local Download)**: Automatically packages all generated 300-DPI publication figures, CSV tables, and JSON evaluation reports into `SE374_Scientific_Research_Results.zip` and triggers your browser to download the file **directly to your computer's Downloads folder**!
 
 ---
 

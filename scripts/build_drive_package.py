@@ -1075,6 +1075,162 @@ def copy_clean_src_tree(src_root: Path, dest_src_dir: Path) -> List[str]:
     return sorted(set(copied_rel_paths))
 
 
+def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
+    """Updates `SE374_Colab_Scientific_Research_Runner.ipynb` to be a 100% GitHub-First Standalone Runner.
+
+    Key Features:
+    1. Zero Google Drive mounting: Clones repository directly from GitHub (https://github.com/khoinguyen59/medical-wsss.git)
+       into /content/medical-wsss.
+    2. Zero Drive cache dependencies: Automatically downloads datasets and model checkpoints via HuggingFace CDN mirrors.
+    3. Direct browser download: Automatically packages evaluation results, charts, CSVs, and JSON reports into
+       SE374_Scientific_Research_Results.zip and triggers browser download straight to the user's PC via google.colab.files.download.
+    4. Strict Invariant 12 (ASCII hyphen only) and Invariant 20 (sanitized administrative identities).
+    """
+    root = repo_root or PROJECT_ROOT
+    nb_path = root / "notebooks" / "SE374_Colab_Scientific_Research_Runner.ipynb"
+    if not nb_path.is_file():
+        raise FileNotFoundError(f"Missing scientific runner notebook: {nb_path}")
+
+    nb_data = json.loads(nb_path.read_text(encoding="utf-8"))
+
+    # Update Cell 0: Header Markdown
+    nb_data["cells"][0]["source"] = [
+        "# SE374.R11 - Scientific Research & Publication Benchmark Runner\n",
+        "## 5 Chuyen De Nghiem Thu Khoa Hoc Chuyen Sau (Publication-Grade Benchmarks)\n",
+        "\n",
+        "* **Mon hoc:** SE374.R11 - Phat trien phan mem xu ly anh y khoa (UIT - DHQG-HCM)\n",
+        "* **Giang vien huong dan:** TS. Bui Cao Doanh\n",
+        "* **Nhom thuc hien:** [Nhom de xuat rieng - Ho va ten Sinh vien (MSSV)]\n",
+        "* **Kien truc:** **GitHub-First Standalone Scientific Runner** - Tu dong clone ma nguon truc tiep tu GitHub repository (`https://github.com/khoinguyen59/medical-wsss.git`), khong can ket noi Google Drive. Toan bo ket qua nghien cuu duoc tu dong nen va tai truc tiep ve may tinh nguoi dung.\n",
+        "* **5 Thi Nghiem Khoa Hoc Chuyen Sau:**\n",
+        "  1. **Validation-to-Test Scientific Protocol**: Quet sieu tham so tren Val, dong bang va danh gia tren Test (Zero Leakage, mIoU, Dice, FwIoU, Pixel Accuracy, Boundary F1).\n",
+        "  2. **Multi-Magnification & Coarse-to-Fine Adaptive Router**: Mo phong phan giai da tang (5x, 10x, 20x, 40x), router do phuc tap thong minh, duong cong Pareto tiet kiem 80%+ GPU.\n",
+        "  3. **Patient-Level Clinical Biomarker Correlation**: Tinh toan VTP, TSR theo cap do benh nhan, Pearson r, Spearman rho, Bland-Altman va do phu hop nguy co CAP.\n",
+        "  4. **Cross-Dataset LUAD-HistoSeg Generalization**: Thu nghiem tong quat hoa khac co quan (Cross-Organ Zero-Shot tren Ung thu phoi LUAD).\n",
+        "  5. **Whole-ROI 100% Tissue Coverage Evaluation**: Danh gia phan vung toan bo vung mo tren tap Whole-ROI BCSS doi sanh Ground-Truth chuyen gia."
+    ]
+
+    # Update Cell 1: Step 1 Markdown
+    nb_data["cells"][1]["source"] = [
+        "---\n",
+        "## Buoc 1: Dong Bo Ma Nguon Truc Tiep Tu GitHub & Khoi Tao Moi Truong GPU (Zero Google Drive)\n",
+        "O code duoi day tu dong:\n",
+        "1. Clone ma nguon truc tiep tu GitHub: `https://github.com/khoinguyen59/medical-wsss.git` (hoac pull ban moi nhat neu da ton tai).\n",
+        "2. Chuyen vao thu muc du an va nap duong dan he thong vao `sys.path`.\n",
+        "3. Cai dat cac thu vien phu thuoc can thiet (`requirements.txt`, `gdown`, `huggingface_hub`, `monai`, `timm`).\n",
+        "4. Khoi tao hat giong ngau nhien co dinh (seed 42) va xac thuc GPU (Hoan toan khong can mount Google Drive)."
+    ]
+
+    # Update Cell 2: Step 1 Code
+    nb_data["cells"][2]["source"] = [
+        "import os, sys, subprocess\n",
+        "from pathlib import Path\n",
+        "\n",
+        "IN_COLAB = \"google.colab\" in sys.modules\n",
+        "REPO_URL = \"https://github.com/khoinguyen59/medical-wsss.git\"\n",
+        "REPO_DIR = Path(\"/content/medical-wsss\") if IN_COLAB else Path.cwd().resolve()\n",
+        "\n",
+        "if IN_COLAB:\n",
+        "    if not (REPO_DIR / \"src\" / \"pipeline\").is_dir():\n",
+        "        print(f\"--> Dang clone ma nguon truc tiep tu GitHub: {REPO_URL}...\")\n",
+        "        subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", REPO_URL, str(REPO_DIR)], check=True)\n",
+        "    else:\n",
+        "        print(\"--> Cap nhat ma nguon moi nhat tu GitHub...\")\n",
+        "        subprocess.run([\"git\", \"-C\", str(REPO_DIR), \"pull\", \"origin\", \"master\"], check=False)\n",
+        "\n",
+        "    os.chdir(REPO_DIR)\n",
+        "    print(\"--> Dang cai dat thu vien phu thuoc...\")\n",
+        "    subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"-q\", \"-r\", \"requirements.txt\"], check=False)\n",
+        "    subprocess.run([sys.executable, \"-m\", \"pip\", \"install\", \"-q\", \"gdown\", \"huggingface_hub\", \"monai\", \"timm\"], check=False)\n",
+        "\n",
+        "CODE_ROOT = str(REPO_DIR)\n",
+        "if CODE_ROOT not in sys.path:\n",
+        "    sys.path.insert(0, CODE_ROOT)\n",
+        "\n",
+        "from src.pipeline.colab_runner import set_reproducible_seed\n",
+        "ENV_INFO = set_reproducible_seed(seed=42, verbose=True)\n",
+        "print(f\"[READY] CODE_ROOT = {CODE_ROOT}\")\n",
+        "print(f\"[READY] Device = {ENV_INFO['device']} | CUDA Available = {ENV_INFO['cuda_available']}\")"
+    ]
+
+    # Update Cell 4: Config Code
+    nb_data["cells"][4]["source"] = [
+        "import torch\n",
+        "\n",
+        "SANITY_DRY_RUN = True\n",
+        "DRY_RUN_SAMPLES = 50\n",
+        "USE_AMP = True\n",
+        "AMP_DTYPE = torch.float16\n",
+        "\n",
+        "WORK_ROOT = Path(\"/content\" if IN_COLAB else \"./se374_scientific_work\")\n",
+        "OUTPUT_DIR = WORK_ROOT / \"scientific_results\"\n",
+        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n",
+        "\n",
+        "print(f\"[CONFIG] SANITY_DRY_RUN = {SANITY_DRY_RUN} (Samples per split: {DRY_RUN_SAMPLES})\")\n",
+        "print(f\"[CONFIG] Device: {ENV_INFO['device']} | AMP: {USE_AMP} ({AMP_DTYPE})\")\n",
+        "print(f\"[CONFIG] Output Directory: {OUTPUT_DIR}\")"
+    ]
+
+    # Update Cell 6: Data & Checkpoints Code
+    c6_text = "".join(nb_data["cells"][6]["source"])
+    c6_text = c6_text.replace("drive_cache_dir=DRIVE_CACHE_DIR", "drive_cache_dir=None")
+    nb_data["cells"][6]["source"] = [l + "\n" for l in c6_text.splitlines()[:-1]] + [c6_text.splitlines()[-1]]
+
+    # Update Cell 14: LUAD Code
+    c14_text = "".join(nb_data["cells"][14]["source"])
+    c14_text = c14_text.replace("drive_cache_dir=DRIVE_CACHE_DIR", "drive_cache_dir=None")
+    nb_data["cells"][14]["source"] = [l + "\n" for l in c14_text.splitlines()[:-1]] + [c14_text.splitlines()[-1]]
+
+    # Update Cell 17: Step 9 Markdown
+    nb_data["cells"][17]["source"] = [
+        "---\n",
+        "## Buoc 9: Dong Goi Ket Qua & Tu Dong Tai Truc Tiep Ve May Tinh (Direct Browser Download)\n",
+        "Toan bo ket qua nghien cuu khoa hoc (cac file JSON chi so, bang tong hop CSV, bieu do xuat ban 300-DPI chat luong cao PNG) se duoc tu dong nen thanh goi ZIP va kich hoat trinh duyet tai truc tiep ve may tinh cua ban ma hoan toan khong can Google Drive."
+    ]
+
+    # Update Cell 18: Step 9 Code
+    nb_data["cells"][18]["source"] = [
+        "import os, zipfile, shutil\n",
+        "from pathlib import Path\n",
+        "\n",
+        "zip_name = \"SE374_Scientific_Research_Results.zip\"\n",
+        "zip_out = WORK_ROOT / zip_name\n",
+        "if zip_out.is_file():\n",
+        "    zip_out.unlink()\n",
+        "\n",
+        "print(f\"--> Dang dong goi ket qua nghien cuu tu {OUTPUT_DIR} vao file ZIP...\")\n",
+        "with zipfile.ZipFile(zip_out, \"w\", zipfile.ZIP_DEFLATED) as zf:\n",
+        "    for root, _, files in os.walk(OUTPUT_DIR):\n",
+        "        for f in files:\n",
+        "            p = Path(root) / f\n",
+        "            zf.write(p, arcname=p.relative_to(OUTPUT_DIR))\n",
+        "\n",
+        "zip_size_mb = zip_out.stat().st_size / (1024 * 1024)\n",
+        "print(f\"[OK] Da tao thanh cong goi ket qua: {zip_out.resolve()} ({zip_size_mb:.2f} MB)\")\n",
+        "\n",
+        "if \"google.colab\" in sys.modules:\n",
+        "    try:\n",
+        "        from google.colab import files\n",
+        "        print(\"--> Dang kich hoat hop thoai tai ve tren trinh duyet cua ban...\")\n",
+        "        files.download(str(zip_out))\n",
+        "        print(\"[THANH CONG] Trinh duyet dang tai tap tin ket qua ve may tinh cua ban!\")\n",
+        "    except Exception as err:\n",
+        "        print(f\"[HUONG DAN] Neu trinh duyet chan popup tu dong, ban co the mo thanh quan ly file ben trai Colab va tai file '{zip_name}'.\")\n",
+        "else:\n",
+        "    print(f\"[OK] Ket qua duoc luu tai thu muc cuc bo: {zip_out.resolve()}\")"
+    ]
+
+    # Sanitize and serialize
+    serialized = json.dumps(nb_data, ensure_ascii=False, indent=1)
+    serialized = sanitize_ascii_hyphens(serialized)
+
+    nb_path.write_text(serialized, encoding="utf-8", newline="\n")
+    root_nb_path = root / "SE374_Colab_Scientific_Research_Runner.ipynb"
+    root_nb_path.write_text(serialized, encoding="utf-8", newline="\n")
+
+    return nb_path
+
+
 def build_drive_package(
     project_root: Optional[Path] = None,
     output_base_dir: Optional[Path] = None,
@@ -1086,6 +1242,7 @@ def build_drive_package(
     root = (project_root or PROJECT_ROOT).resolve()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
+    update_scientific_runner_notebook(root)
     sync_historical_and_standalone_outputs(root)
     out_base = (output_base_dir or (root / "drive_upload_ready")).resolve()
     bundle_dir = out_base / "SE374_WSSS_Drive_Code"
