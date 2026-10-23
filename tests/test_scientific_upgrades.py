@@ -552,3 +552,82 @@ def test_sanity_dry_run_patient_diversity_balanced_sampling() -> None:
     assert val_distinct_patients.isdisjoint(test_distinct_patients), "Patient overlap detected between val and test!"
 
 
+def test_bcss_official_22class_roi_remapping_and_metrics() -> None:
+    """Verifies PathologyDataScience/BCSS meta/gtruth_codes.tsv 22-class remapping fixes the off-by-one shift."""
+    pipeline = WSILowMagHighMagPipeline(device="cpu")
+
+    # Construct raw BCSS 22-class ROI mask:
+    # 0=outside_roi, 1=tumor, 19=angioinvasion, 20=dcis, 2=stroma, 3=lymphocyte, 10=plasma_cells, 4=necrosis, 6=blood_vessel
+    raw_bcss_gt = np.zeros((100, 100), dtype=np.uint8)
+    raw_bcss_gt[0:20, :] = 1    # tumor -> 0 (TUM)
+    raw_bcss_gt[20:30, :] = 20  # dcis -> 0 (TUM)
+    raw_bcss_gt[30:55, :] = 2   # stroma -> 1 (STR)
+    raw_bcss_gt[55:75, :] = 3   # lymphocyte -> 2 (LYM)
+    raw_bcss_gt[75:80, :] = 10  # plasma_cells -> 2 (LYM)
+    raw_bcss_gt[80:95, :] = 4   # necrosis -> 3 (NEC)
+    raw_bcss_gt[95:98, :] = 6   # blood_vessel -> 4 (outside_roi / ignored)
+    raw_bcss_gt[98:100, :] = 0  # outside_roi -> 4 (ignored)
+
+    # Model prediction in WSSS-Tissue 0-indexed convention [0=TUM, 1=STR, 2=LYM, 3=NEC, 4=BACK]
+    pred_wsss = np.full((100, 100), 4, dtype=np.uint8)
+    pred_wsss[0:30, :] = 0
+    pred_wsss[30:55, :] = 1
+    pred_wsss[55:80, :] = 2
+    pred_wsss[80:95, :] = 3
+
+    metrics = pipeline.evaluate_wsi_with_ground_truth_roi(pred_wsss, raw_bcss_gt)
+    assert metrics["mIoU_4cls"] == 100.0
+    assert metrics["mDice_4cls"] == 100.0
+    assert metrics["Pixel_Accuracy"] == 100.0
+    assert metrics["FwIoU"] == 100.0
+
+
+def test_pareto_router_4cls_oracle_and_concave_gain() -> None:
+    """Verifies Pareto router evaluates 4-class mIoU, computes Oracle upper bound, and achieves positive AUC gain."""
+    router = CoarseToFineAdaptiveRouter()
+    gt = np.zeros((64, 64), dtype=np.int64)
+    gt[:32, :] = 2  # LYM
+    gt[32:, :] = 3  # NEC
+
+    # Patch 0: Easy patch where coarse is already 100% accurate
+    coarse_easy = gt.copy()
+    fine_easy = gt.copy()
+
+    # Patch 1: Hard minority-class patch where coarse fails (predicts 1=STR) and fine succeeds (100%)
+    coarse_hard = np.ones((64, 64), dtype=np.uint8)
+    fine_hard = gt.copy()
+
+    res = router.evaluate_pareto_curve(
+        coarse_preds=[coarse_easy, coarse_hard],
+        fine_preds=[fine_easy, fine_hard],
+        gt_masks=[gt, gt],
+        difficulty_scores=[0.10, 0.90],
+        budgets=[0.0, 0.5, 1.0],
+        num_random_trials=20,
+    )
+
+    assert res["adaptive_miou"][1] > res["random_miou"][1]
+    assert res["oracle_miou"][1] >= res["adaptive_miou"][1]
+    assert res["auc_gain"] > 0.0
+
+
+def test_biomarker_icc_ccc_and_tumor_positive_subgroup() -> None:
+    """Verifies ICC(2,1), Lin's CCC, Bland-Altman LoA, and zero-filtered tumor-positive subgroup."""
+    records = [
+        {"patient_id": "P_ZERO_1", "pred_vtp": 0.0, "gt_vtp": 0.0, "pred_tsr": 0.0, "gt_tsr": 0.0},
+        {"patient_id": "P_ZERO_2", "pred_vtp": 0.0, "gt_vtp": 0.0, "pred_tsr": 0.0, "gt_tsr": 0.0},
+        {"patient_id": "P_TUM_1", "pred_vtp": 25.0, "gt_vtp": 27.0, "pred_tsr": 40.0, "gt_tsr": 42.0},
+        {"patient_id": "P_TUM_2", "pred_vtp": 55.0, "gt_vtp": 52.0, "pred_tsr": 65.0, "gt_tsr": 62.0},
+        {"patient_id": "P_TUM_3", "pred_vtp": 80.0, "gt_vtp": 78.0, "pred_tsr": 85.0, "gt_tsr": 83.0},
+    ]
+    report = compute_patient_biomarker_correlation(records)
+    assert report["patient_count"] == 5
+    assert report["tumor_positive_patient_count"] == 3
+    assert report["vtp_icc"] > 0.95
+    assert report["vtp_ccc"] > 0.95
+    assert "tumor_positive_subgroup" in report
+    assert report["tumor_positive_subgroup"]["patient_count"] == 3
+    assert report["tumor_positive_subgroup"]["tsr_icc"] > 0.95
+
+
+

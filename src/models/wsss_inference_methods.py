@@ -811,6 +811,7 @@ class MultiMethodWSSSEngine:
         self.min_island_area = min_island_area
         self.cls_threshold = cls_threshold
         self.cam_fusion_alpha = cam_fusion_alpha
+        self.m6_cam_fusion_alpha = 0.22
         self.min_glass_area = min_glass_area
         self.use_full_d8_in_m5 = use_full_d8_in_m5
 
@@ -1606,7 +1607,9 @@ class MultiMethodWSSSEngine:
             stage1, img_tensor, (H, W)
         )
         probs_m6_gated = self.apply_cgm_gate(probs_ms_d4, soft_gate)
-        probs_m6_fused = self.apply_cam_fusion(probs_m6_gated, cam_probs_v2, alpha=0.22)
+        probs_m6_fused = self.apply_cam_fusion(
+            probs_m6_gated, cam_probs_v2, alpha=getattr(self, "m6_cam_fusion_alpha", 0.22)
+        )
         probs_m6 = self.apply_prior_calibration(probs_m6_fused)
         pred_m6 = np.argmax(probs_m6, axis=0).astype(np.uint8)
         if raw_rgb is not None:

@@ -636,21 +636,82 @@ class WSILowMagHighMagPipeline:
             rgb[mask == class_idx] = color
         return Image.fromarray(rgb)
 
+    @staticmethod
+    def standardize_bcss_roi_mask(
+        gt_arr: np.ndarray,
+        pred_mask: Optional[np.ndarray] = None,
+        label_convention: str = "auto",
+    ) -> np.ndarray:
+        """Standardizes BCSS Whole-ROI 22-class mask codes into WSSS-Tissue 5-class convention.
+
+        Follows official PathologyDataScience/BCSS `meta/gtruth_codes.tsv` (Amgad et al., 2019):
+        - 1 (tumor), 19 (angioinvasion), 20 (dcis) -> 0 (TUM)
+        - 2 (stroma) -> 1 (STR)
+        - 3 (lymphocytic_infiltrate), 10 (plasma_cells), 11 (other_immune_infiltrate) -> 2 (LYM)
+        - 4 (necrosis_or_debris) -> 3 (NEC)
+        - 0 (outside_roi, zero-weight "don't care") and other non-core classes -> 4 (BACK / outside_roi)
+        """
+        arr = np.asarray(gt_arr, dtype=np.int64)
+        if arr.ndim == 3:
+            arr = arr[:, :, 0]
+
+        if label_convention == "wsss_4cls":
+            return arr.copy()
+
+        bcss_remapped = np.full(arr.shape, 4, dtype=np.int64)
+        bcss_remapped[(arr == 1) | (arr == 19) | (arr == 20)] = 0
+        bcss_remapped[arr == 2] = 1
+        bcss_remapped[(arr == 3) | (arr == 10) | (arr == 11)] = 2
+        bcss_remapped[arr == 4] = 3
+
+        if label_convention == "bcss_raw":
+            return bcss_remapped
+
+        unique_vals = set(np.unique(arr).tolist())
+        # Any code > 4 or presence of both 0 (outside_roi) and 4 (necrosis) in raw BCSS
+        if np.max(arr) > 4 or (0 in unique_vals and 4 in unique_vals):
+            return bcss_remapped
+
+        # Disambiguate masks with values in {0..4} using prediction concordance when available
+        if pred_mask is not None and any(v in unique_vals for v in (1, 2, 3, 4)):
+            pred_arr = np.asarray(pred_mask)
+            if pred_arr.shape[:2] != arr.shape[:2]:
+                pred_arr = np.array(
+                    Image.fromarray(pred_arr.astype(np.uint8)).resize(
+                        (arr.shape[1], arr.shape[0]), Image.Resampling.NEAREST
+                    )
+                )
+            valid_raw = (arr >= 0) & (arr < 4)
+            valid_remap = (bcss_remapped >= 0) & (bcss_remapped < 4)
+            acc_raw = float(np.mean(pred_arr[valid_raw] == arr[valid_raw])) if np.any(valid_raw) else 0.0
+            acc_remap = (
+                float(np.mean(pred_arr[valid_remap] == bcss_remapped[valid_remap]))
+                if np.any(valid_remap)
+                else 0.0
+            )
+            if acc_remap > acc_raw + 0.05:
+                return bcss_remapped
+
+        return arr.copy()
+
     def evaluate_wsi_with_ground_truth_roi(
         self,
         predicted_mask: np.ndarray,
         ground_truth_roi: Union[str, Path, np.ndarray],
         num_classes: int = 5,
+        label_convention: str = "auto",
     ) -> Dict[str, Any]:
         """Evaluates whole-slide or whole-ROI segmentation against expert annotations.
 
-        Supports standard BCSS Whole-ROI annotations (nabil-m/bcss, yyyff1/BCSS_WSI).
-        Maps BCSS standard GT codes: 1 -> 0 (TUM), 2 -> 1 (STR), 3 -> 2 (LYM), 4 -> 3 (NEC), 0 -> 4 (BACK).
+        Supports standard BCSS Whole-ROI annotations (PathologyDataScience/BCSS, nabil-m/bcss).
+        Maps BCSS standard GT codes per `meta/gtruth_codes.tsv`:
+        1,19,20 -> 0 (TUM); 2 -> 1 (STR); 3,10,11 -> 2 (LYM); 4 -> 3 (NEC); 0 & others -> 4 (outside_roi).
 
         Args:
             predicted_mask: [H, W] uint8 predicted segmentation mask.
             ground_truth_roi: Path to mask image or [H, W] numpy array.
             num_classes: Total classes (default 5).
+            label_convention: 'auto', 'bcss_raw', or 'wsss_4cls'.
 
         Returns:
             Dictionary with mIoU_4cls, mDice_4cls, Pixel_Accuracy, FwIoU, Boundary_F1,
@@ -659,28 +720,24 @@ class WSILowMagHighMagPipeline:
         if isinstance(ground_truth_roi, (str, Path)):
             gt_img = Image.open(ground_truth_roi)
             gt_arr = np.array(gt_img)
+            if label_convention == "auto":
+                label_convention = "bcss_raw"
         else:
             gt_arr = np.array(ground_truth_roi)
 
-        unique_vals = set(np.unique(gt_arr))
-        standardized_gt = gt_arr.copy()
-        if unique_vals.issubset({0, 1, 2, 3, 4}) and 0 in unique_vals and 4 in unique_vals:
-            remapped = np.full_like(gt_arr, 4)
-            remapped[gt_arr == 1] = 0
-            remapped[gt_arr == 2] = 1
-            remapped[gt_arr == 3] = 2
-            remapped[gt_arr == 4] = 3
-            standardized_gt = remapped
-
-        h_gt, w_gt = standardized_gt.shape[:2]
+        h_gt, w_gt = gt_arr.shape[:2]
         h_pred, w_pred = predicted_mask.shape[:2]
         if (h_pred, w_pred) != (h_gt, w_gt):
-            pred_pil = Image.fromarray(predicted_mask)
+            pred_pil = Image.fromarray(predicted_mask.astype(np.uint8))
             pred_resized = np.array(
                 pred_pil.resize((w_gt, h_gt), Image.Resampling.NEAREST)
             )
         else:
             pred_resized = predicted_mask
+
+        standardized_gt = self.standardize_bcss_roi_mask(
+            gt_arr, pred_mask=pred_resized, label_convention=label_convention
+        )
 
         roi_valid = (standardized_gt >= 0) & (standardized_gt < 4)
         cm4 = np.zeros((4, 4), dtype=np.int64)
@@ -701,9 +758,22 @@ class WSILowMagHighMagPipeline:
 
         miou_4cls = float(np.mean(tp[v_iou] / denom_iou[v_iou]) * 100.0) if np.any(v_iou) else 0.0
         mdice_4cls = float(np.mean((2.0 * tp[v_dice]) / denom_dice[v_dice]) * 100.0) if np.any(v_dice) else 0.0
-        pa = float(compute_pixel_accuracy(pred_resized, standardized_gt) * 100.0)
-        fwiou = float(compute_fwiou(pred_resized, standardized_gt, num_classes=num_classes) * 100.0)
-        bf1_dict = compute_boundary_f1(pred_resized, standardized_gt, num_classes=num_classes)
+
+        total_valid_px = float(np.sum(cm4))
+        if total_valid_px > 0:
+            pa = float(np.sum(tp) / total_valid_px * 100.0)
+            freq = cm4.sum(axis=1).astype(np.float64)
+            fwiou = float(np.sum((freq[v_iou] / total_valid_px) * (tp[v_iou] / denom_iou[v_iou])) * 100.0) if np.any(v_iou) else 0.0
+        else:
+            pa = float(compute_pixel_accuracy(pred_resized, standardized_gt) * 100.0)
+            fwiou = float(compute_fwiou(pred_resized, standardized_gt, num_classes=num_classes) * 100.0)
+
+        bf1_dict = compute_boundary_f1(
+            np.clip(pred_resized, 0, 4),
+            standardized_gt,
+            num_classes=4,
+            ignore_index=4,
+        )
         bf1 = float(bf1_dict["BF1"])
 
         class_names = ["TUM", "STR", "LYM", "NEC"]

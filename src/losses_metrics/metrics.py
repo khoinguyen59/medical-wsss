@@ -352,24 +352,151 @@ def compute_boundary_f1(
     }
 
 
+def _compute_icc_2_1_and_ccc(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, float, float, float]:
+    """Computes ICC(2,1) absolute agreement, Lin's CCC, Mean Bias, and 95% Bland-Altman LoA."""
+    n = len(x)
+    if n == 0:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    diff = x - y
+    bias = float(np.mean(diff))
+    sd_diff = float(np.std(diff, ddof=1)) if n > 1 else 0.0
+    loa_lower = bias - 1.96 * sd_diff
+    loa_upper = bias + 1.96 * sd_diff
+
+    if n < 2:
+        val = 1.0 if np.allclose(x, y) else 0.0
+        return val, val, bias, loa_lower, loa_upper
+
+    # Lin's Concordance Correlation Coefficient (CCC)
+    mean_x = float(np.mean(x))
+    mean_y = float(np.mean(y))
+    var_x = float(np.var(x, ddof=1))
+    var_y = float(np.var(y, ddof=1))
+    cov_xy = float(np.cov(x, y, ddof=1)[0, 1])
+    denom_ccc = var_x + var_y + (mean_x - mean_y) ** 2
+    ccc = float((2.0 * cov_xy) / denom_ccc) if denom_ccc > 1e-12 else (1.0 if np.allclose(x, y) else 0.0)
+
+    # Two-way random effects, absolute agreement, single rater ICC(2,1) (Shrout & Fleiss 1979)
+    ratings = np.column_stack([x, y])  # shape (n, 2)
+    k = 2
+    grand_mean = float(np.mean(ratings))
+    row_means = np.mean(ratings, axis=1)
+    col_means = np.mean(ratings, axis=0)
+    ss_total = float(np.sum((ratings - grand_mean) ** 2))
+    ss_rows = float(k * np.sum((row_means - grand_mean) ** 2))
+    ss_cols = float(n * np.sum((col_means - grand_mean) ** 2))
+    ss_err = max(0.0, ss_total - ss_rows - ss_cols)
+
+    ms_r = ss_rows / max(1, n - 1)
+    ms_c = ss_cols / max(1, k - 1)
+    ms_e = ss_err / max(1, (n - 1) * (k - 1))
+    denom_icc = ms_r + (k - 1) * ms_e + (k * (ms_c - ms_e) / max(1, n))
+    icc = float((ms_r - ms_e) / denom_icc) if denom_icc > 1e-12 else (1.0 if np.allclose(x, y) else 0.0)
+
+    return float(np.clip(icc, -1.0, 1.0)), float(np.clip(ccc, -1.0, 1.0)), bias, loa_lower, loa_upper
+
+
+def _evaluate_biomarker_subset(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Helper to compute correlation, error, and clinical agreement metrics on a patient subset."""
+    if not records:
+        return {
+            "patient_count": 0,
+            "vtp_pearson_r": 0.0,
+            "vtp_pearson_p": 1.0,
+            "vtp_spearman_rho": 0.0,
+            "vtp_spearman_p": 1.0,
+            "vtp_icc": 0.0,
+            "vtp_ccc": 0.0,
+            "vtp_mae": 0.0,
+            "vtp_rmse": 0.0,
+            "vtp_bias": 0.0,
+            "vtp_loa_lower": 0.0,
+            "vtp_loa_upper": 0.0,
+            "tsr_pearson_r": 0.0,
+            "tsr_pearson_p": 1.0,
+            "tsr_spearman_rho": 0.0,
+            "tsr_spearman_p": 1.0,
+            "tsr_icc": 0.0,
+            "tsr_ccc": 0.0,
+            "tsr_mae": 0.0,
+            "tsr_rmse": 0.0,
+            "tsr_bias": 0.0,
+            "tsr_loa_lower": 0.0,
+            "tsr_loa_upper": 0.0,
+            "cap_risk_concordance_pct": 0.0,
+        }
+
+    pred_vtp = np.array([r["pred_vtp"] for r in records], dtype=np.float64)
+    gt_vtp = np.array([r["gt_vtp"] for r in records], dtype=np.float64)
+    pred_tsr = np.array([r["pred_tsr"] for r in records], dtype=np.float64)
+    gt_tsr = np.array([r["gt_tsr"] for r in records], dtype=np.float64)
+    n = len(records)
+
+    vtp_mae = float(np.mean(np.abs(pred_vtp - gt_vtp)))
+    vtp_rmse = float(np.sqrt(np.mean((pred_vtp - gt_vtp) ** 2)))
+    if n >= 2 and np.std(pred_vtp) > 1e-6 and np.std(gt_vtp) > 1e-6:
+        vtp_pearson = stats.pearsonr(pred_vtp, gt_vtp)
+        vtp_spearman = stats.spearmanr(pred_vtp, gt_vtp)
+        vtp_r, vtp_r_p = float(vtp_pearson.statistic), float(vtp_pearson.pvalue)
+        vtp_rho, vtp_rho_p = float(vtp_spearman.statistic), float(vtp_spearman.pvalue)
+    else:
+        vtp_r, vtp_r_p = 1.0 if np.allclose(pred_vtp, gt_vtp) else 0.0, 1.0
+        vtp_rho, vtp_rho_p = 1.0 if np.allclose(pred_vtp, gt_vtp) else 0.0, 1.0
+    vtp_icc, vtp_ccc, vtp_bias, vtp_loa_l, vtp_loa_u = _compute_icc_2_1_and_ccc(pred_vtp, gt_vtp)
+
+    tsr_mae = float(np.mean(np.abs(pred_tsr - gt_tsr)))
+    tsr_rmse = float(np.sqrt(np.mean((pred_tsr - gt_tsr) ** 2)))
+    if n >= 2 and np.std(pred_tsr) > 1e-6 and np.std(gt_tsr) > 1e-6:
+        tsr_pearson = stats.pearsonr(pred_tsr, gt_tsr)
+        tsr_spearman = stats.spearmanr(pred_tsr, gt_tsr)
+        tsr_r, tsr_r_p = float(tsr_pearson.statistic), float(tsr_pearson.pvalue)
+        tsr_rho, tsr_rho_p = float(tsr_spearman.statistic), float(tsr_spearman.pvalue)
+    else:
+        tsr_r, tsr_r_p = 1.0 if np.allclose(pred_tsr, gt_tsr) else 0.0, 1.0
+        tsr_rho, tsr_rho_p = 1.0 if np.allclose(pred_tsr, gt_tsr) else 0.0, 1.0
+    tsr_icc, tsr_ccc, tsr_bias, tsr_loa_l, tsr_loa_u = _compute_icc_2_1_and_ccc(pred_tsr, gt_tsr)
+
+    # CAP Risk Category Concordance on tumor-bearing cases: Stroma-Rich High Risk if TSR <= 50%
+    pred_high_risk = pred_tsr <= 50.0
+    gt_high_risk = gt_tsr <= 50.0
+    cap_concordance = float(np.mean(pred_high_risk == gt_high_risk) * 100.0)
+
+    return {
+        "patient_count": n,
+        "vtp_pearson_r": vtp_r,
+        "vtp_pearson_p": vtp_r_p,
+        "vtp_spearman_rho": vtp_rho,
+        "vtp_spearman_p": vtp_rho_p,
+        "vtp_icc": vtp_icc,
+        "vtp_ccc": vtp_ccc,
+        "vtp_mae": vtp_mae,
+        "vtp_rmse": vtp_rmse,
+        "vtp_bias": vtp_bias,
+        "vtp_loa_lower": vtp_loa_l,
+        "vtp_loa_upper": vtp_loa_u,
+        "tsr_pearson_r": tsr_r,
+        "tsr_pearson_p": tsr_r_p,
+        "tsr_spearman_rho": tsr_rho,
+        "tsr_spearman_p": tsr_rho_p,
+        "tsr_icc": tsr_icc,
+        "tsr_ccc": tsr_ccc,
+        "tsr_mae": tsr_mae,
+        "tsr_rmse": tsr_rmse,
+        "tsr_bias": tsr_bias,
+        "tsr_loa_lower": tsr_loa_l,
+        "tsr_loa_upper": tsr_loa_u,
+        "cap_risk_concordance_pct": cap_concordance,
+    }
+
+
 def compute_patient_biomarker_correlation(
     patient_records: Union[List[Dict[str, Any]], Dict[str, Dict[str, float]]],
     gt_biomarkers: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> Dict[str, Any]:
-    """Computes statistical correlation and clinical risk concordance across patients.
+    """Computes statistical correlation, ICC(2,1), CCC, Bland-Altman, and clinical risk concordance.
 
-    Parameters
-    ----------
-    patient_records : Union[List[Dict[str, Any]], Dict[str, Dict[str, float]]]
-        Either a list of patient record dicts with keys 'pred_vtp', 'gt_vtp', 'pred_tsr', 'gt_tsr',
-        or a dictionary mapping patient_id to {"vtp": float, "tsr": float} (when gt_biomarkers is also provided).
-    gt_biomarkers : Optional[Dict[str, Dict[str, float]]]
-        Optional dictionary mapping patient_id to ground truth {"vtp": float, "tsr": float}.
-
-    Returns
-    -------
-    Dict[str, Any]
-        Dictionary with Pearson r, Spearman rho, MAE, RMSE, and CAP concordance.
+    Reports both full-cohort metrics and strictly filtered tumor-positive subgroup metrics
+    (`gt_vtp > 0` or `pred_vtp > 0`) to eliminate zero-inflation on non-tumor patch samples.
     """
     if gt_biomarkers is not None and isinstance(patient_records, dict):
         formatted_records = []
@@ -384,76 +511,14 @@ def compute_patient_biomarker_correlation(
                 })
         patient_records = formatted_records
 
-    if not patient_records:
-        return {
-            "patient_count": 0,
-            "vtp_pearson_r": 0.0,
-            "vtp_pearson_p": 1.0,
-            "vtp_spearman_rho": 0.0,
-            "vtp_spearman_p": 1.0,
-            "vtp_mae": 0.0,
-            "vtp_rmse": 0.0,
-            "tsr_pearson_r": 0.0,
-            "tsr_pearson_p": 1.0,
-            "tsr_spearman_rho": 0.0,
-            "tsr_spearman_p": 1.0,
-            "tsr_mae": 0.0,
-            "tsr_rmse": 0.0,
-            "cap_risk_concordance_pct": 0.0,
-        }
+    all_metrics = _evaluate_biomarker_subset(list(patient_records) if patient_records else [])
+    tumor_pos_records = [
+        r for r in (patient_records or [])
+        if float(r.get("gt_vtp", 0.0)) > 1e-6 or float(r.get("pred_vtp", 0.0)) > 1e-6
+    ]
+    tumor_pos_metrics = _evaluate_biomarker_subset(tumor_pos_records)
 
-    pred_vtp = np.array([r["pred_vtp"] for r in patient_records], dtype=np.float64)
-    gt_vtp = np.array([r["gt_vtp"] for r in patient_records], dtype=np.float64)
-    pred_tsr = np.array([r["pred_tsr"] for r in patient_records], dtype=np.float64)
-    gt_tsr = np.array([r["gt_tsr"] for r in patient_records], dtype=np.float64)
-
-    n = len(patient_records)
-
-    # VTP correlations and errors
-    vtp_mae = float(np.mean(np.abs(pred_vtp - gt_vtp)))
-    vtp_rmse = float(np.sqrt(np.mean((pred_vtp - gt_vtp) ** 2)))
-
-    if n >= 2 and np.std(pred_vtp) > 1e-6 and np.std(gt_vtp) > 1e-6:
-        vtp_pearson = stats.pearsonr(pred_vtp, gt_vtp)
-        vtp_spearman = stats.spearmanr(pred_vtp, gt_vtp)
-        vtp_r, vtp_r_p = float(vtp_pearson.statistic), float(vtp_pearson.pvalue)
-        vtp_rho, vtp_rho_p = float(vtp_spearman.statistic), float(vtp_spearman.pvalue)
-    else:
-        vtp_r, vtp_r_p = 1.0 if np.allclose(pred_vtp, gt_vtp) else 0.0, 1.0
-        vtp_rho, vtp_rho_p = 1.0 if np.allclose(pred_vtp, gt_vtp) else 0.0, 1.0
-
-    # TSR correlations and errors
-    tsr_mae = float(np.mean(np.abs(pred_tsr - gt_tsr)))
-    tsr_rmse = float(np.sqrt(np.mean((pred_tsr - gt_tsr) ** 2)))
-
-    if n >= 2 and np.std(pred_tsr) > 1e-6 and np.std(gt_tsr) > 1e-6:
-        tsr_pearson = stats.pearsonr(pred_tsr, gt_tsr)
-        tsr_spearman = stats.spearmanr(pred_tsr, gt_tsr)
-        tsr_r, tsr_r_p = float(tsr_pearson.statistic), float(tsr_pearson.pvalue)
-        tsr_rho, tsr_rho_p = float(tsr_spearman.statistic), float(tsr_spearman.pvalue)
-    else:
-        tsr_r, tsr_r_p = 1.0 if np.allclose(pred_tsr, gt_tsr) else 0.0, 1.0
-        tsr_rho, tsr_rho_p = 1.0 if np.allclose(pred_tsr, gt_tsr) else 0.0, 1.0
-
-    # CAP Risk Category Concordance: Stroma-Rich High Risk if TSR <= 50%
-    pred_high_risk = pred_tsr <= 50.0
-    gt_high_risk = gt_tsr <= 50.0
-    cap_concordance = float(np.mean(pred_high_risk == gt_high_risk) * 100.0)
-
-    return {
-        "patient_count": n,
-        "vtp_pearson_r": vtp_r,
-        "vtp_pearson_p": vtp_r_p,
-        "vtp_spearman_rho": vtp_rho,
-        "vtp_spearman_p": vtp_rho_p,
-        "vtp_mae": vtp_mae,
-        "vtp_rmse": vtp_rmse,
-        "tsr_pearson_r": tsr_r,
-        "tsr_pearson_p": tsr_r_p,
-        "tsr_spearman_rho": tsr_rho,
-        "tsr_spearman_p": tsr_rho_p,
-        "tsr_mae": tsr_mae,
-        "tsr_rmse": tsr_rmse,
-        "cap_risk_concordance_pct": cap_concordance,
-    }
+    all_metrics["tumor_positive_patient_count"] = tumor_pos_metrics["patient_count"]
+    all_metrics["tumor_positive_subgroup"] = tumor_pos_metrics
+    return all_metrics
 

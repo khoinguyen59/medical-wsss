@@ -481,8 +481,24 @@ def plot_coarse_to_fine_pareto_curve(
     budgets = np.array(pareto_results["budgets"]) * 100.0
     adaptive_miou = np.array(pareto_results["adaptive_miou"])
     random_miou = np.array(pareto_results["random_miou"])
+    oracle_miou = (
+        np.array(pareto_results["oracle_miou"])
+        if "oracle_miou" in pareto_results and len(pareto_results["oracle_miou"]) == len(budgets)
+        else None
+    )
 
     fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
+
+    if oracle_miou is not None:
+        ax.plot(
+            budgets,
+            oracle_miou,
+            "^:",
+            color="#2ca02c",
+            linewidth=1.8,
+            markersize=5,
+            label="Oracle Upper Bound (True Gain Ranking)",
+        )
 
     # Plot Pareto curves
     ax.plot(
@@ -492,7 +508,7 @@ def plot_coarse_to_fine_pareto_curve(
         color="#1f77b4",
         linewidth=2.5,
         markersize=6,
-        label="Proposed Adaptive Router (Entropy + Tumor Likelihood)",
+        label="Proposed Adaptive Router (Entropy + Boundary + Minority Disagreement)",
     )
     ax.plot(
         budgets,
@@ -501,7 +517,7 @@ def plot_coarse_to_fine_pareto_curve(
         color="#7f7f7f",
         linewidth=1.8,
         markersize=5,
-        label="Baseline Uniform Random Router",
+        label="Baseline Uniform Random Router (10-Seed Expected Value)",
     )
 
     # Fill Pareto efficiency gain
@@ -516,8 +532,8 @@ def plot_coarse_to_fine_pareto_curve(
         label="Adaptive Routing Efficiency Gain",
     )
 
-    # Sweet spot highlight (around 30% compute budget)
-    idx_sweet = int(len(budgets) * 0.3)
+    # Sweet spot highlight (around 30-50% compute budget)
+    idx_sweet = max(1, min(len(budgets) - 2, int(round(len(budgets) * 0.4)))) if len(budgets) >= 3 else 0
     if idx_sweet < len(budgets):
         bx = budgets[idx_sweet]
         by = adaptive_miou[idx_sweet]
@@ -525,25 +541,29 @@ def plot_coarse_to_fine_pareto_curve(
         ax.annotate(
             f"Sweet Spot (Budget {bx:.0f}% -> mIoU {by:.1f}%)",
             xy=(bx, by),
-            xytext=(bx + 5, by - 4),
+            xytext=(min(bx + 5, 60.0), by - 1.5),
             arrowprops=dict(facecolor="#d62728", arrowstyle="->", lw=1.2),
             fontsize=9.5,
             fontweight="bold",
             color="#d62728",
         )
 
+    all_vals = list(adaptive_miou) + list(random_miou) + (list(oracle_miou) if oracle_miou is not None else [])
+    y_min = float(np.min(all_vals)) - 2.0
+    y_max = float(np.max(all_vals)) + 2.5
+
     ax.set_title(
-        "Pareto Frontier: Accuracy vs Compute Budget in Coarse-to-Fine WSI Inference",
+        "Pareto Frontier: 4-Class Tissue mIoU vs High-Mag Compute Budget",
         fontsize=12,
         fontweight="bold",
         pad=12,
     )
     ax.set_xlabel("High-Magnification (40x) Compute Budget (%)", fontsize=11, fontweight="bold")
-    ax.set_ylabel("Macro Segmentation Accuracy (mIoU %)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("Macro Tissue Segmentation Accuracy (mIoU_4cls %)", fontsize=11, fontweight="bold")
     ax.set_xlim(-2.0, 102.0)
-    ax.set_ylim(min(float(np.min(random_miou)) - 3.0, 50.0), max(float(np.max(adaptive_miou)) + 3.0, 85.0))
+    ax.set_ylim(y_min, y_max)
     ax.grid(True, linestyle="--", alpha=0.5)
-    ax.legend(loc="lower right", fontsize=9.5, framealpha=0.95)
+    ax.legend(loc="lower right", fontsize=9.0, framealpha=0.95)
 
     plt.tight_layout()
 
@@ -709,25 +729,32 @@ def plot_whole_roi_ground_truth_comparison(
         pred_m = pred_mask
 
     if gt_mask.shape[:2] != (h, w):
-        gt_p = Image.fromarray(gt_mask).resize((w, h), Image.Resampling.NEAREST)
-        gt_m = np.array(gt_p)
+        gt_p = Image.fromarray(gt_mask.astype(np.uint8)).resize((w, h), Image.Resampling.NEAREST)
+        gt_raw = np.array(gt_p)
     else:
-        gt_m = gt_mask
+        gt_raw = gt_mask
+
+    from src.pipeline.wsi_lowmag_highmag_pipeline import WSILowMagHighMagPipeline
+
+    gt_m = WSILowMagHighMagPipeline.standardize_bcss_roi_mask(
+        gt_raw, pred_mask=pred_m, label_convention="auto"
+    ).astype(np.uint8)
 
     color_pred = colorize_mask(pred_m)
     color_gt = colorize_mask(gt_m)
 
-    # Error map: Correct (Green), FP (Red), FN (Blue), Background Match (Gray)
+    # Error map: Concordant tissue (Green), Class mismatch inside ROI (Red), Outside ROI / Background (Light Gray)
     error_map = np.zeros((h, w, 3), dtype=np.uint8)
-    match = (pred_m == gt_m) & (gt_m < 4)
-    fp = (pred_m < 4) & (pred_m != gt_m)
-    fn = (gt_m < 4) & (pred_m != gt_m)
-    bg = (gt_m == 4) & (pred_m == 4)
+    roi_valid = gt_m < 4
+    match = (pred_m == gt_m) & roi_valid
+    fp = roi_valid & (pred_m < 4) & (pred_m != gt_m)
+    fn = roi_valid & (pred_m >= 4)
+    outside_or_bg = ~roi_valid
 
-    error_map[match] = [46, 139, 87]    # Sea Green: Concordant tissue
-    error_map[fp] = [220, 20, 60]       # Crimson Red: False positive tissue
-    error_map[fn] = [30, 144, 255]      # Dodger Blue: False negative tissue
-    error_map[bg] = [230, 230, 230]     # Light Gray: Concordant background glass
+    error_map[match] = [46, 139, 87]           # Sea Green: Concordant tissue class inside ROI
+    error_map[fp] = [220, 20, 60]              # Crimson Red: Tissue class misclassified inside ROI
+    error_map[fn] = [30, 144, 255]             # Dodger Blue: Missed tissue (predicted background inside ROI)
+    error_map[outside_or_bg] = [230, 230, 230] # Light Gray: Outside annotated ROI / Background glass
 
     fig, axes = plt.subplots(1, 4, figsize=(18, 5), dpi=300)
 

@@ -183,8 +183,8 @@ class ColabSegmentationEvaluator:
         if patient_id is not None:
             self.patient_cm_4cls[patient_id] += counts_4
 
-    def compute_patient_level_metrics(self) -> Dict[str, float]:
-        """Computes mean and std of 4-class mIoU and mDice across distinct patients."""
+    def compute_patient_level_metrics(self, n_bootstrap: int = 500, seed: int = 42) -> Dict[str, Any]:
+        """Computes mean, std, and patient-cluster bootstrap 95% CIs of 4-class mIoU/mDice across distinct patients."""
         if not self.patient_cm_4cls:
             return {
                 "patient_count": 0,
@@ -192,14 +192,18 @@ class ColabSegmentationEvaluator:
                 "patient_miou_std": 0.0,
                 "patient_mdice_mean": 0.0,
                 "patient_mdice_std": 0.0,
+                "patient_bootstrap_miou_ci95": [0.0, 0.0],
+                "patient_bootstrap_mdice_ci95": [0.0, 0.0],
             }
         p_mious: List[float] = []
         p_mdices: List[float] = []
+        valid_cms: List[np.ndarray] = []
         for pcm in self.patient_cm_4cls.values():
             if pcm.sum() > 0:
                 miou_val, mdice_val = self._compute_4cls_miou_mdice_from_cm(pcm)
                 p_mious.append(miou_val)
                 p_mdices.append(mdice_val)
+                valid_cms.append(pcm)
         if not p_mious:
             return {
                 "patient_count": 0,
@@ -207,13 +211,36 @@ class ColabSegmentationEvaluator:
                 "patient_miou_std": 0.0,
                 "patient_mdice_mean": 0.0,
                 "patient_mdice_std": 0.0,
+                "patient_bootstrap_miou_ci95": [0.0, 0.0],
+                "patient_bootstrap_mdice_ci95": [0.0, 0.0],
             }
+
+        k_patients = len(valid_cms)
+        if k_patients >= 2 and n_bootstrap > 0:
+            rng = np.random.RandomState(seed)
+            cm_stack = np.stack(valid_cms, axis=0)  # (K, 4, 4)
+            boot_mious: List[float] = []
+            boot_mdices: List[float] = []
+            for _ in range(n_bootstrap):
+                idx = rng.randint(0, k_patients, size=k_patients)
+                agg_cm = np.sum(cm_stack[idx], axis=0)
+                bm, bd = self._compute_4cls_miou_mdice_from_cm(agg_cm)
+                boot_mious.append(bm)
+                boot_mdices.append(bd)
+            ci_miou = [float(np.percentile(boot_mious, 2.5)), float(np.percentile(boot_mious, 97.5))]
+            ci_mdice = [float(np.percentile(boot_mdices, 2.5)), float(np.percentile(boot_mdices, 97.5))]
+        else:
+            ci_miou = [float(p_mious[0]), float(p_mious[0])]
+            ci_mdice = [float(p_mdices[0]), float(p_mdices[0])]
+
         return {
-            "patient_count": len(p_mious),
+            "patient_count": k_patients,
             "patient_miou_mean": float(np.mean(p_mious)),
             "patient_miou_std": float(np.std(p_mious)),
             "patient_mdice_mean": float(np.mean(p_mdices)),
             "patient_mdice_std": float(np.std(p_mdices)),
+            "patient_bootstrap_miou_ci95": ci_miou,
+            "patient_bootstrap_mdice_ci95": ci_mdice,
         }
 
     def compute_metrics(self) -> Dict[str, Any]:
@@ -997,15 +1024,20 @@ def run_val_to_test_scientific_protocol(
     print(f"    Số lượng mảng ảnh validation: {len(val_files)}")
 
     candidates = candidate_island_areas if candidate_island_areas is not None else [16, 32, 64]
+    alpha_map = {16: 0.12, 32: 0.22, 64: 0.34}
     best_param = getattr(engine, "min_island_area", 32)
+    best_alpha = getattr(engine, "m6_cam_fusion_alpha", 0.22)
     best_val_metrics = None
     best_val_miou = -1.0
     val_tuning_history: Dict[int, float] = {}
 
     # Perform real sweep over candidate hyperparameters on the validation cohort
     for param_val in candidates:
+        cand_alpha = alpha_map.get(param_val, round(min(0.45, max(0.05, param_val / 150.0)), 3))
         if hasattr(engine, "min_island_area"):
             engine.min_island_area = param_val
+        if hasattr(engine, "m6_cam_fusion_alpha"):
+            engine.m6_cam_fusion_alpha = cand_alpha
 
         _, v_metrics = _evaluate_patch_cohort(
             engine=engine,
@@ -1015,19 +1047,25 @@ def run_val_to_test_scientific_protocol(
             model_stage1=model_stage1,
             method_key=effective_method,
             device=device,
-            progress_desc=f"Val Sweep (area={param_val})",
+            progress_desc=f"Val Sweep (area={param_val}, alpha={cand_alpha:.2f})",
         )
         val_tuning_history[param_val] = float(v_metrics["mIoU"])
         if v_metrics["mIoU"] > best_val_miou:
             best_val_miou = float(v_metrics["mIoU"])
             best_param = param_val
+            best_alpha = cand_alpha
             best_val_metrics = v_metrics
 
     # Lock optimal hyperparameter determined strictly from validation set
     if hasattr(engine, "min_island_area"):
         engine.min_island_area = best_param
+    if hasattr(engine, "m6_cam_fusion_alpha"):
+        engine.m6_cam_fusion_alpha = best_alpha
 
-    print(f"[OK] Đã khóa siêu tham số tối ưu từ Validation (min_island_area={best_param}):")
+    print(
+        f"[OK] Đã khóa siêu tham số tối ưu từ Validation "
+        f"(min_island_area={best_param}, cam_fusion_alpha={best_alpha:.2f}):"
+    )
     print(f"     Lịch sử quét Validation mIoU: {val_tuning_history}")
     if best_val_metrics is not None:
         print(
@@ -1062,7 +1100,10 @@ def run_val_to_test_scientific_protocol(
     print("=" * 80)
 
     result_dict = {
-        "locked_hyperparameter": {"min_island_area": best_param},
+        "locked_hyperparameter": {
+            "min_island_area": best_param,
+            "cam_fusion_alpha": best_alpha,
+        },
         "val_tuning_history": val_tuning_history,
         "val_metrics": best_val_metrics,
         "test_metrics": test_metrics,
@@ -1132,6 +1173,7 @@ def run_multimag_and_pareto_benchmark(
         # Simulate degradation
         patches_sim = []
         gts = []
+        pids = []
         for p in effective_files:
             m_path = m_dir / p.name
             if not m_path.is_file():
@@ -1141,16 +1183,17 @@ def run_multimag_and_pareto_benchmark(
             sim_img = simulate_magnification_patch(np.array(img_pil), target_mag=mag, base_mag=40)
             patches_sim.append(sim_img)
             gts.append(gt)
+            pids.append(extract_patient_id(p.name))
 
         # Run inference
         evaluator = ColabSegmentationEvaluator(num_classes=5, class_names=list(CLASS_CODES))
-        for img_arr, gt in zip(patches_sim, gts):
+        for img_arr, gt, pid in zip(patches_sim, gts, pids):
             t_in = torch.from_numpy(img_arr.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
             if hasattr(engine, "predict_m6"):
                 p_mask = engine.predict_m6(model_stage2, t_in, raw_rgb=img_arr, model_stage1=model_stage1)
             else:
                 p_mask = engine.predict_m1(model_stage2, t_in)
-            evaluator.update(pred=p_mask, target=gt)
+            evaluator.update(pred=p_mask, target=gt, patient_id=pid)
         mag_metrics[mag] = evaluator.compute_metrics()
         print(f"    [{mag}x] mIoU: {mag_metrics[mag]['mIoU']:.2f}% | Dice: {mag_metrics[mag]['mDice']:.2f}%")
 
@@ -1162,6 +1205,7 @@ def run_multimag_and_pareto_benchmark(
     pareto_data = router.evaluate_pareto_curve(
         engine=engine,
         model=model_stage2,
+        model_stage1=model_stage1,
         patches_40x=patches_40x,
         patches_10x=patches_10x,
         ground_truths=ground_truths,
@@ -1262,9 +1306,11 @@ def run_cross_dataset_luad_benchmark(
     method: Optional[str] = None,
     device: Optional[Union[str, torch.device]] = None,
     output_dir: Optional[Union[str, Path]] = None,
+    bcss_model_stage2: Optional[torch.nn.Module] = None,
+    bcss_model_stage1: Optional[torch.nn.Module] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Cross-dataset benchmark on LUAD-HistoSeg (Lung Adenocarcinoma) using 4 tissue classes."""
+    """Cross-organ WSSS benchmark on LUAD-HistoSeg (Lung Adenocarcinoma, Han et al. MedIA 2022)."""
     s2 = model_luad_stage2 or model_stage2
     if s2 is None:
         raise ValueError("Phải cung cấp mô hình Stage-2 (model_luad_stage2 hoặc model_stage2).")
@@ -1278,7 +1324,7 @@ def run_cross_dataset_luad_benchmark(
     m_key = method or method_key
 
     print("=" * 80)
-    print("--> Đang đánh giá khả năng tổng quát hóa đa cơ quan trên LUAD-HistoSeg...")
+    print("--> Đang đánh giá khả năng tổng quát hóa kiến trúc WSSS đa cơ quan trên LUAD-HistoSeg...")
     print(f"    Số lượng mảng ảnh test: {len(files)}")
 
     evaluator = ColabSegmentationEvaluator(
@@ -1300,13 +1346,52 @@ def run_cross_dataset_luad_benchmark(
     )
 
     print(
-        f"[OK] LUAD-HistoSeg mIoU: {metrics['mIoU']:.2f}% | "
-        f"mDice: {metrics['mDice']:.2f}% | FwIoU: {metrics['FwIoU']:.2f}%"
+        f"[OK] LUAD-HistoSeg (In-Domain WSSS Checkpoint) mIoU: {metrics['mIoU']:.2f}% | "
+        f"mDice: {metrics['mDice']:.2f}% | FwIoU: {metrics['FwIoU']:.2f}% "
+        f"(cf. Han et al. MedIA 2022 SOTA: 75.60%)"
     )
-    print("=" * 80)
 
     res = dict(metrics)
     res["metrics"] = metrics
+    res["evaluation_protocol"] = "Cross-Organ WSSS Architecture Generalization (LUAD-HistoSeg In-Domain Checkpoints)"
+    res["published_reference"] = {
+        "paper": "Han et al., Multi-Layer Pseudo-Supervision for Histopathology Tissue Semantic Segmentation (MedIA 2022)",
+        "stage1_miou_4cls": 74.26,
+        "stage2_miou_4cls": 75.60,
+        "fwiou_4cls": 75.13,
+    }
+
+    if bcss_model_stage2 is not None:
+        print("--> Đang đánh giá bổ sung Zero-Shot Weight Transfer trực tiếp (BCSS Breast -> LUAD Lung)...")
+        # Remap BCSS 4-class order [TUM=0, STR=1, LYM=2, NEC=3] -> LUAD 4-class order [TE=0, NEC=1, LYM=2, TAS=3]
+        zs_eval = ColabSegmentationEvaluator(num_classes=5, class_names=LUAD_CLASS_CODES)
+        dev = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if isinstance(dev, str):
+            dev = torch.device(dev)
+        bcss_to_luad_lut = np.array([0, 3, 2, 1, 4], dtype=np.uint8)
+        m_dir_p = Path(m_dir)
+        with torch.no_grad():
+            for p in files:
+                mp = m_dir_p / p.name
+                if not mp.is_file():
+                    continue
+                rgb_arr = np.array(Image.open(p).convert("RGB"))
+                gt_arr = np.array(Image.open(mp), dtype=np.int64)
+                t_in = torch.from_numpy(rgb_arr.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
+                if hasattr(engine, "predict_m6"):
+                    p_bcss = engine.predict_m6(bcss_model_stage2, t_in, raw_rgb=rgb_arr, model_stage1=bcss_model_stage1)
+                else:
+                    p_bcss = engine.predict_m1(bcss_model_stage2, t_in)
+                p_luad = bcss_to_luad_lut[np.clip(p_bcss, 0, 4)]
+                zs_eval.update(pred=p_luad, target=gt_arr, patient_id=extract_patient_id(p.name))
+        zs_metrics = zs_eval.compute_metrics()
+        res["zero_shot_bcss_to_luad_transfer"] = zs_metrics
+        print(
+            f"[OK] Zero-Shot Weight Transfer (BCSS -> LUAD) mIoU: {zs_metrics['mIoU']:.2f}% | "
+            f"mDice: {zs_metrics['mDice']:.2f}%"
+        )
+
+    print("=" * 80)
 
     out_d = output_dir or kwargs.get("output_dir")
     if out_d is not None:

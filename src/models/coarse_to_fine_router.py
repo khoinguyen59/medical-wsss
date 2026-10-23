@@ -81,14 +81,64 @@ class CoarseToFineAdaptiveRouter:
     def __init__(
         self,
         num_classes: int = 5,
-        entropy_weight: float = 0.50,
+        entropy_weight: float = 0.40,
         boundary_weight: float = 0.30,
-        tumor_weight: float = 0.20,
+        tumor_weight: float = 0.30,
     ) -> None:
         self.num_classes = num_classes
         self.entropy_weight = entropy_weight
         self.boundary_weight = boundary_weight
         self.tumor_weight = tumor_weight
+
+    @staticmethod
+    def _compute_4cls_cohort_summary(
+        preds: List[np.ndarray],
+        gts: List[np.ndarray],
+    ) -> Dict[str, float]:
+        """Computes WSSS-Tissue standard 4-class tissue segmentation metrics (excluding Class 4 background)."""
+        cm4 = np.zeros((4, 4), dtype=np.int64)
+        for p, g in zip(preds, gts):
+            valid = (g >= 0) & (g < 4)
+            if np.any(valid):
+                t4 = g[valid].astype(np.int64)
+                p4 = np.clip(p[valid].astype(np.int64), 0, 3)
+                cm4 += np.bincount(t4 * 4 + p4, minlength=16).reshape((4, 4))
+
+        tp = np.diag(cm4).astype(np.float64)
+        fp = cm4.sum(axis=0).astype(np.float64) - tp
+        fn = cm4.sum(axis=1).astype(np.float64) - tp
+        denom_iou = tp + fp + fn
+        denom_dice = 2.0 * tp + fp + fn
+        v_iou = denom_iou > 0
+        v_dice = denom_dice > 0
+
+        miou_4 = float(np.mean(tp[v_iou] / denom_iou[v_iou]) * 100.0) if np.any(v_iou) else 0.0
+        mdice_4 = float(np.mean((2.0 * tp[v_dice]) / denom_dice[v_dice]) * 100.0) if np.any(v_dice) else 0.0
+        total_px = float(np.sum(cm4))
+        pa_4 = float(np.sum(tp) / total_px * 100.0) if total_px > 0 else 0.0
+        freq = cm4.sum(axis=1).astype(np.float64)
+        fwiou_4 = (
+            float(np.sum((freq[v_iou] / total_px) * (tp[v_iou] / denom_iou[v_iou])) * 100.0)
+            if total_px > 0 and np.any(v_iou)
+            else 0.0
+        )
+
+        iou_per_cls = [
+            float(tp[c] / denom_iou[c] * 100.0) if denom_iou[c] > 0 else 0.0
+            for c in range(4)
+        ]
+        return {
+            "mIoU": miou_4,
+            "mIoU_4cls": miou_4,
+            "mDice": mdice_4,
+            "mDice_4cls": mdice_4,
+            "FwIoU": fwiou_4,
+            "Pixel_Accuracy": pa_4,
+            "IoU_Class_0": iou_per_cls[0],
+            "IoU_Class_1": iou_per_cls[1],
+            "IoU_Class_2": iou_per_cls[2],
+            "IoU_Class_3": iou_per_cls[3],
+        }
 
     def compute_patch_difficulty_score(
         self,
@@ -98,8 +148,9 @@ class CoarseToFineAdaptiveRouter:
     ) -> float:
         """Computes a scalar difficulty score S_route in [0..1] for a patch.
 
-        Higher score indicates complex tumor boundaries or high predictive uncertainty,
-        prioritizing the patch for fine 40x M6 multi-scale magnification.
+        Higher score indicates high predictive entropy over the 4 tissue classes,
+        complex morphological boundaries, or fine-structure minority tissue (LYM/NEC)
+        that degrades under 10x optical downsampling (LowMagWSS, Do et al. 2026).
 
         Parameters
         ----------
@@ -115,35 +166,45 @@ class CoarseToFineAdaptiveRouter:
         float
             Routing difficulty score in [0.0..1.0].
         """
-        if prob_map.ndim == 3 and prob_map.shape[-1] == self.num_classes:
+        if prob_map.ndim == 3 and prob_map.shape[-1] in (4, self.num_classes):
             prob_map = prob_map.transpose(2, 0, 1)
 
-        c, h, w = prob_map.shape
         eps = 1e-7
-
-        # 1. Normalized Shannon Entropy component
-        entropy_pixel = -np.sum(prob_map * np.log(prob_map + eps), axis=0) / math.log(c)
         valid_tissue = pred_mask != 4
+
+        # Use 4-class normalized tissue probabilities so dummy background channel does not skew entropy
+        tissue_probs = prob_map[:4].astype(np.float64)
+        prob_sum = np.sum(tissue_probs, axis=0, keepdims=True)
+        tissue_probs = np.where(prob_sum > eps, tissue_probs / np.maximum(prob_sum, eps), 0.25)
+
+        # 1. Normalized 4-class Shannon Entropy component
+        entropy_pixel = -np.sum(tissue_probs * np.log(np.clip(tissue_probs, eps, 1.0)), axis=0) / math.log(4.0)
         mean_entropy = float(np.mean(entropy_pixel[valid_tissue])) if np.any(valid_tissue) else 0.0
 
-        # 2. Boundary transition ratio (morphological gradient)
+        # 2. Boundary transition ratio & multi-class heterogeneity
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         dilated = cv2.dilate(pred_mask.astype(np.uint8), kernel)
         eroded = cv2.erode(pred_mask.astype(np.uint8), kernel)
         boundary_pixels = (dilated != eroded) & valid_tissue
         boundary_ratio = float(np.sum(boundary_pixels)) / float(max(1, np.sum(valid_tissue)))
 
-        # 3. Tumor / Minority class presence
-        tumor_prob = 0.0
-        if cam_prob is not None and len(cam_prob) > 0:
-            tumor_prob = float(cam_prob[0])
+        # 3. Minority / fine-structure sensitivity (LYM=2, NEC=3) + multi-class mixing
+        if np.any(valid_tissue):
+            minority_prob = float(np.mean(tissue_probs[2, valid_tissue] + tissue_probs[3, valid_tissue]))
+            class_counts = np.array([np.sum(pred_mask[valid_tissue] == c) for c in range(4)], dtype=np.float64)
+            class_fracs = class_counts / max(1.0, float(np.sum(class_counts)))
+            patch_mix_entropy = float(-np.sum(class_fracs * np.log(np.clip(class_fracs, eps, 1.0))) / math.log(4.0))
+            minority_And_mix = float(np.clip(0.6 * minority_prob + 0.4 * patch_mix_entropy, 0.0, 1.0))
         else:
-            tumor_prob = float(np.mean(prob_map[0, valid_tissue])) if np.any(valid_tissue) else 0.0
+            minority_And_mix = 0.0
+
+        if cam_prob is not None and len(cam_prob) >= 4:
+            minority_And_mix = float(np.clip(0.5 * minority_And_mix + 0.5 * float(np.mean(cam_prob[2:4])), 0.0, 1.0))
 
         score = (
             self.entropy_weight * mean_entropy
-            + self.boundary_weight * boundary_ratio
-            + self.tumor_weight * tumor_prob
+            + self.boundary_weight * min(1.0, boundary_ratio * 4.0)
+            + self.tumor_weight * minority_And_mix
         )
         return float(np.clip(score, 0.0, 1.0))
 
@@ -160,11 +221,13 @@ class CoarseToFineAdaptiveRouter:
         *,
         engine: Optional[Any] = None,
         model: Optional[nn.Module] = None,
+        model_stage1: Optional[nn.Module] = None,
         patches_40x: Optional[List[np.ndarray]] = None,
         patches_10x: Optional[List[np.ndarray]] = None,
         ground_truths: Optional[List[np.ndarray]] = None,
         budget_steps: Optional[int] = None,
         device: Optional[Union[str, torch.device]] = None,
+        num_random_trials: int = 10,
     ) -> Dict[str, Any]:
         """Evaluates accuracy vs compute trade-off curve across budgets beta in [0..1].
 
@@ -189,15 +252,25 @@ class CoarseToFineAdaptiveRouter:
                     t10 = torch.from_numpy(p10.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
                     t40 = torch.from_numpy(p40.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
 
-                    # Real measured coarse inference
+                    # Real measured coarse 10x inference (consistent model family with 10x magnification benchmark)
                     t_c0 = time.perf_counter()
-                    c_mask = engine.predict_m1(model, t10)
+                    if hasattr(engine, "predict_m6"):
+                        c_mask = engine.predict_m6(
+                            model, t10, raw_rgb=p10, model_stage1=model_stage1
+                        )
+                    else:
+                        c_mask = engine.predict_m1(model, t10)
+                    logits_10 = model(t10)
+                    prob_tensor = F.softmax(logits_10[:, :4], dim=1)
+                    prob_map = prob_tensor.squeeze(0).cpu().numpy()
                     measured_coarse_time += (time.perf_counter() - t_c0)
 
-                    # Real measured fine inference
+                    # Real measured fine 40x multi-scale D4 + Stage-1 CAM ensemble inference
                     t_f0 = time.perf_counter()
                     if hasattr(engine, "predict_m6"):
-                        f_mask = engine.predict_m6(model, t40, raw_rgb=p40)
+                        f_mask = engine.predict_m6(
+                            model, t40, raw_rgb=p40, model_stage1=model_stage1
+                        )
                     else:
                         f_mask = engine.predict_m1(model, t40)
                     measured_fine_time += (time.perf_counter() - t_f0)
@@ -205,20 +278,18 @@ class CoarseToFineAdaptiveRouter:
                     coarse_preds.append(c_mask)
                     fine_preds.append(f_mask)
 
-                    # Compute real difficulty score from model output probabilities
-                    try:
-                        logits_10 = model(t10)
-                        if logits_10.shape[1] == self.num_classes - 1:
-                            bg = torch.zeros((logits_10.shape[0], 1, logits_10.shape[2], logits_10.shape[3]), device=logits_10.device)
-                            prob_tensor = F.softmax(torch.cat([logits_10, bg], dim=1), dim=1)
-                        else:
-                            prob_tensor = F.softmax(logits_10, dim=1)
-                        prob_map = prob_tensor.squeeze(0).cpu().numpy()
-                    except Exception:
-                        prob_map = np.zeros((self.num_classes, c_mask.shape[0], c_mask.shape[1]), dtype=np.float32)
-                        for c_idx in range(min(self.num_classes, 4)):
-                            prob_map[c_idx][c_mask == c_idx] = 1.0
-                    score = self.compute_patch_difficulty_score(prob_map, c_mask)
+                    # Also measure scale-instability between 10x and 5x on coarse pass to enrich difficulty score
+                    p5 = simulate_magnification_patch(p10, target_mag=5, orig_mag=10)
+                    t5 = torch.from_numpy(p5.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
+                    c5_mask = engine.predict_m1(model, t5)
+                    valid_c = c_mask != 4
+                    scale_disagreement = (
+                        float(np.mean(c_mask[valid_c] != c5_mask[valid_c]))
+                        if np.any(valid_c)
+                        else 0.0
+                    )
+                    base_score = self.compute_patch_difficulty_score(prob_map, c_mask)
+                    score = float(np.clip(0.65 * base_score + 0.35 * scale_disagreement, 0.0, 1.0))
                     difficulty_scores.append(score)
 
             n_p = max(1, len(patches_10x))
@@ -238,76 +309,112 @@ class CoarseToFineAdaptiveRouter:
         n_samples = len(gt_masks)
         sorted_indices = np.argsort(difficulty_scores)[::-1]
 
-        rng = np.random.RandomState(seed)
-        random_indices = rng.permutation(n_samples)
+        # Compute per-patch true 4-class mIoU gain for Oracle Router upper bound
+        oracle_gains = []
+        for i in range(n_samples):
+            c_m = self._compute_4cls_cohort_summary([coarse_preds[i]], [gt_masks[i]])["mIoU_4cls"]
+            f_m = self._compute_4cls_cohort_summary([fine_preds[i]], [gt_masks[i]])["mIoU_4cls"]
+            oracle_gains.append(f_m - c_m)
+        oracle_indices = np.argsort(oracle_gains)[::-1]
 
         adaptive_results = []
         random_results = []
+        oracle_results = []
+
+        # Precompute per-patch BF1 for coarse and fine masks to avoid redundant morphological ops across trials
+        bf1_coarse = [
+            compute_boundary_f1(coarse_preds[i], gt_masks[i], num_classes=4, ignore_index=4)["BF1"]
+            for i in range(n_samples)
+        ]
+        bf1_fine = [
+            compute_boundary_f1(fine_preds[i], gt_masks[i], num_classes=4, ignore_index=4)["BF1"]
+            for i in range(n_samples)
+        ]
 
         for beta in budgets:
             k_fine = int(round(beta * n_samples))
             fine_set_adaptive = set(sorted_indices[:k_fine])
-            fine_set_random = set(random_indices[:k_fine])
+            fine_set_oracle = set(oracle_indices[:k_fine])
 
-            # 1. Adaptive Routing Evaluation
-            eval_adapt = MedicalSegmentationMetrics(num_classes=self.num_classes)
-            bf1_adapt_list = []
-            for i in range(n_samples):
-                chosen_mask = fine_preds[i] if i in fine_set_adaptive else coarse_preds[i]
-                eval_adapt.update(chosen_mask, gt_masks[i])
-                bf1_res = compute_boundary_f1(chosen_mask, gt_masks[i], num_classes=self.num_classes)
-                bf1_adapt_list.append(bf1_res["BF1"])
-
-            summary_adapt = eval_adapt.get_summary_dict()
             effective_latency = coarse_lat + (beta * fine_lat)
-            compute_savings = (1.0 - (effective_latency / max(fine_lat, 1e-6))) * 100.0 if fine_lat > 0 else 0.0
+            compute_savings = (1.0 - (effective_latency / max(fine_lat, 1e-6))) * 100.0 if fine_lat > 0 else (1.0 - beta) * 100.0
+
+            # 1. Adaptive Routing Evaluation (4-class WSSS-Tissue standard)
+            chosen_adapt = [fine_preds[i] if i in fine_set_adaptive else coarse_preds[i] for i in range(n_samples)]
+            summary_adapt = self._compute_4cls_cohort_summary(chosen_adapt, gt_masks)
+            bf1_adapt_list = [bf1_fine[i] if i in fine_set_adaptive else bf1_coarse[i] for i in range(n_samples)]
 
             adaptive_results.append(
                 {
                     "budget_pct": beta * 100.0,
-                    "mIoU": summary_adapt["mIoU"],
-                    "mDice": summary_adapt["mDice"],
+                    "mIoU": summary_adapt["mIoU_4cls"],
+                    "mIoU_4cls": summary_adapt["mIoU_4cls"],
+                    "mDice": summary_adapt["mDice_4cls"],
+                    "mDice_4cls": summary_adapt["mDice_4cls"],
                     "FwIoU": summary_adapt["FwIoU"],
                     "Pixel_Accuracy": summary_adapt["Pixel_Accuracy"],
-                    "BF1": float(np.mean(bf1_adapt_list)),
+                    "BF1": float(np.mean(bf1_adapt_list)) if bf1_adapt_list else 0.0,
                     "effective_latency_ms": effective_latency,
                     "effective_fps": (1000.0 / effective_latency) if effective_latency > 0 else 0.0,
                     "compute_savings_pct": max(0.0, compute_savings),
-                    "IoU_TUM": summary_adapt.get("IoU_Class_0", 0.0),
-                    "IoU_STR": summary_adapt.get("IoU_Class_1", 0.0),
-                    "IoU_LYM": summary_adapt.get("IoU_Class_2", 0.0),
-                    "IoU_NEC": summary_adapt.get("IoU_Class_3", 0.0),
+                    "IoU_TUM": summary_adapt["IoU_Class_0"],
+                    "IoU_STR": summary_adapt["IoU_Class_1"],
+                    "IoU_LYM": summary_adapt["IoU_Class_2"],
+                    "IoU_NEC": summary_adapt["IoU_Class_3"],
                 }
             )
 
-            # 2. Random Routing Baseline Evaluation
-            eval_rand = MedicalSegmentationMetrics(num_classes=self.num_classes)
-            bf1_rand_list = []
-            for i in range(n_samples):
-                chosen_mask = fine_preds[i] if i in fine_set_random else coarse_preds[i]
-                eval_rand.update(chosen_mask, gt_masks[i])
-                bf1_res = compute_boundary_f1(chosen_mask, gt_masks[i], num_classes=self.num_classes)
-                bf1_rand_list.append(bf1_res["BF1"])
+            # 2. Multi-Seed Uniform Random Routing Baseline (Expected Value over num_random_trials)
+            n_trials = max(1, int(num_random_trials))
+            trial_mious, trial_mdices, trial_fwious, trial_pas, trial_bf1s = [], [], [], [], []
+            for t_idx in range(n_trials):
+                rng_t = np.random.RandomState(seed + t_idx * 97)
+                rand_set = set(rng_t.permutation(n_samples)[:k_fine])
+                chosen_rand = [fine_preds[i] if i in rand_set else coarse_preds[i] for i in range(n_samples)]
+                sum_r = self._compute_4cls_cohort_summary(chosen_rand, gt_masks)
+                trial_mious.append(sum_r["mIoU_4cls"])
+                trial_mdices.append(sum_r["mDice_4cls"])
+                trial_fwious.append(sum_r["FwIoU"])
+                trial_pas.append(sum_r["Pixel_Accuracy"])
+                trial_bf1s.append(float(np.mean([bf1_fine[i] if i in rand_set else bf1_coarse[i] for i in range(n_samples)])))
 
-            summary_rand = eval_rand.get_summary_dict()
             random_results.append(
                 {
                     "budget_pct": beta * 100.0,
-                    "mIoU": summary_rand["mIoU"],
-                    "mDice": summary_rand["mDice"],
-                    "FwIoU": summary_rand["FwIoU"],
-                    "Pixel_Accuracy": summary_rand["Pixel_Accuracy"],
-                    "BF1": float(np.mean(bf1_rand_list)),
+                    "mIoU": float(np.mean(trial_mious)),
+                    "mIoU_4cls": float(np.mean(trial_mious)),
+                    "mIoU_std": float(np.std(trial_mious)),
+                    "mDice": float(np.mean(trial_mdices)),
+                    "mDice_4cls": float(np.mean(trial_mdices)),
+                    "FwIoU": float(np.mean(trial_fwious)),
+                    "Pixel_Accuracy": float(np.mean(trial_pas)),
+                    "BF1": float(np.mean(trial_bf1s)),
                     "effective_latency_ms": effective_latency,
                     "effective_fps": (1000.0 / effective_latency) if effective_latency > 0 else 0.0,
                     "compute_savings_pct": max(0.0, compute_savings),
+                }
+            )
+
+            # 3. Oracle Upper-Bound Routing Evaluation
+            chosen_oracle = [fine_preds[i] if i in fine_set_oracle else coarse_preds[i] for i in range(n_samples)]
+            summary_oracle = self._compute_4cls_cohort_summary(chosen_oracle, gt_masks)
+            oracle_results.append(
+                {
+                    "budget_pct": beta * 100.0,
+                    "mIoU": summary_oracle["mIoU_4cls"],
+                    "mIoU_4cls": summary_oracle["mIoU_4cls"],
+                    "mDice": summary_oracle["mDice_4cls"],
+                    "FwIoU": summary_oracle["FwIoU"],
                 }
             )
 
         adaptive_miou = [r["mIoU"] for r in adaptive_results]
         random_miou = [r["mIoU"] for r in random_results]
-        auc_adapt = float(np.trapezoid(adaptive_miou, budgets)) if hasattr(np, "trapezoid") else float(np.trapz(adaptive_miou, budgets))
-        auc_rand = float(np.trapezoid(random_miou, budgets)) if hasattr(np, "trapezoid") else float(np.trapz(random_miou, budgets))
+        oracle_miou = [r["mIoU"] for r in oracle_results]
+        trapz_fn = getattr(np, "trapezoid", getattr(np, "trapz", None))
+        auc_adapt = float(trapz_fn(adaptive_miou, budgets))
+        auc_rand = float(trapz_fn(random_miou, budgets))
+        auc_oracle = float(trapz_fn(oracle_miou, budgets))
         auc_gain = max(0.0, float(auc_adapt - auc_rand))
 
         return {
@@ -315,7 +422,12 @@ class CoarseToFineAdaptiveRouter:
             "budgets": budgets,
             "adaptive_routing": adaptive_results,
             "random_routing": random_results,
+            "oracle_routing": oracle_results,
             "adaptive_miou": adaptive_miou,
             "random_miou": random_miou,
+            "oracle_miou": oracle_miou,
+            "auc_adaptive": auc_adapt,
+            "auc_random": auc_rand,
+            "auc_oracle": auc_oracle,
             "auc_gain": auc_gain,
         }
