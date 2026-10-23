@@ -1,10 +1,21 @@
-# Medical-WSSS: Weakly-Supervised Semantic Segmentation on Histopathology Whole Slide Images
+# Coarse-to-Fine Weakly-Supervised Segmentation for Whole Slide Images
 
+[![Course: SE374.R11](https://img.shields.io/badge/UIT-SE374.R11-0052cc.svg)](https://www.uit.edu.vn/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![Dataset BCSS-WSSS](https://img.shields.io/badge/Dataset-BCSS--WSSS-success.svg)](https://github.com/PathologyDataScience/BCSS)
 [![Benchmark 70.53% mIoU](https://img.shields.io/badge/BCSS_mIoU-70.53%25-brightgreen.svg)](#benchmark-results)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+> **Môn học:** SE374.R11 - Phát triển phần mềm xử lý ảnh y khoa (Khoa Kỹ thuật Phần mềm, UIT - ĐHQG-HCM)  
+> **Tên đề tài chính thức:** `Coarse-to-Fine Weakly-Supervised Segmentation for Whole Slide Images`  
+> **Chủ đề nghiên cứu:** Topic 6 - Weakly-supervised segmentation for whole slide images  
+
+### Mô tả dự định đồ án (Project Scope & Objectives)
+- Xây dựng quy trình phân đoạn mô học ung thư vú giám sát yếu 2 giai đoạn (Net_CAM + DeepLabV3+) chỉ từ nhãn mức ảnh trên bộ dữ liệu BCSS.
+- Nghiên cứu và đối chuẩn các kỹ thuật cải tiến SOTA: Tăng cường suy luận (Multi-View D4 TTA), kim tự tháp đa tỷ lệ (Multi-Scale Pyramid) và hiệu chỉnh phân phối đuôi dài (Long-Tail Calibration).
+- Mở rộng thành hệ thống lâm sàng 2 pha: Quét nhanh góc rộng Low-Mag (5x) để sàng lọc vùng nghi ngờ, kết hợp zoom sâu High-Mag (40x) trên tiêu bản Gigapixel TCGA-BRCA.
+- Tự động trích xuất các dấu ấn sinh học lâm sàng (Viable Tumor Percentage - VTP, Tumor-Stroma Ratio - TSR) và tái cấu trúc bản đồ phân đoạn toàn tiêu bản.
 
 A state-of-the-art, weakly-supervised semantic segmentation (WSSS) framework designed for gigapixel breast cancer histopathology (TCGA-BRCA) Whole Slide Images (WSI). The system implements an end-to-end dual-stage pipeline combining **Stage-1 Multi-Layer Class Activation Maps (Net_CAM)** and **Stage-2 DeepLabV3+**, augmented by an advanced inference engine featuring Dihedral D4 Test-Time Augmentation, Multi-Scale Pyramid Fusion, Stage-1 Soft-Gating, and Histopathology Prior Refinement.
 
