@@ -67,16 +67,32 @@ DEFAULT_MAX_SANITY_SAMPLES: int = 150
 DEFAULT_MIN_SANITY_PATIENTS: int = 5
 
 
+def extract_patient_id(filename: str) -> str:
+    """Extracts the TCGA patient identifier (TCGA-XX-XXXX) from a patch filename (Invariant 08)."""
+    match = re.match(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", filename, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    return filename.split("_")[0]
+
+
 def resolve_split_dirs(
     base_search_dir: Union[str, Path] = Path("/content"),
     split: str = "test",
     min_images: int = 1,
+    min_patients: int = 1,
 ) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
     """Searches for dataset split/img and split/mask directories under base_search_dir.
 
-    Automatically ignores repository code folders (e.g., medical-wsss, sample_dataset,
-    SE374_WSSS_Drive_Code, repos) unless base_search_dir explicitly targets them,
-    and requires at least `min_images` PNG files so empty or toy folders are skipped.
+    Enforces strict patient-level and image-count validation (Invariant 08):
+    - Primary candidate directories must contain at least 10 images and at least 2 distinct
+      patient IDs to definitively exclude mock/sample datasets (such as the 2-image,
+      single-patient repo sample_dataset).
+    - Automatically ignores repository code folders (e.g., sample_dataset, medical-wsss,
+      medical_wsss_repo, se374_wsss_drive_code, repos) unless base_search_dir explicitly
+      targets a non-sample directory.
+    - If no primary cohort (>=10 images, >=2 patients) is found, falls back to non-repo
+      single-patient cohorts with at least `min_images` and `min_patients` to support
+      isolated unit test environments.
 
     Returns:
         Tuple of (root_dir, img_dir, mask_dir), or (None, None, None) if not found.
@@ -86,38 +102,87 @@ def resolve_split_dirs(
         return None, None, None
 
     split_aliases = [split, "valid"] if split == "val" else [split]
+    ignored_repo_dirs = {
+        "sample_dataset",
+        "medical-wsss",
+        "medical_wsss_repo",
+        "se374_wsss_drive_code",
+        "repos",
+    }
 
-    # Direct check if base_search_dir itself contains split/img
+    def _is_mock_path(p: Path) -> bool:
+        parts_l = {part.lower() for part in p.parts}
+        return "sample_dataset" in parts_l
+
+    def _is_repo_relative(p: Path, base: Path) -> bool:
+        try:
+            rel_parts = {part.lower() for part in p.relative_to(base).parts}
+            base_parts = {part.lower() for part in base.parts}
+            if not (base_parts & ignored_repo_dirs) and (rel_parts & ignored_repo_dirs):
+                return True
+        except ValueError:
+            pass
+        return False
+
+    def _get_dir_stats(p: Path) -> Tuple[int, int]:
+        pngs = list(p.glob("*.png"))
+        if not pngs:
+            return 0, 0
+        pids = {extract_patient_id(img_p.name) for img_p in pngs}
+        return len(pngs), len(pids)
+
+    # Collect candidate directories (direct children first, then recursive)
+    raw_candidates: List[Path] = []
     for sp in split_aliases:
         direct_img = base_path / sp / "img"
-        direct_mask = base_path / sp / "mask"
-        if direct_img.is_dir() and len(list(direct_img.glob("*.png"))) >= min_images:
-            return base_path, direct_img, direct_mask
+        if direct_img.is_dir():
+            raw_candidates.append(direct_img)
+        for cand in sorted(base_path.glob(f"**/{sp}/img")):
+            if cand not in raw_candidates:
+                raw_candidates.append(cand)
 
-    base_parts_lower = {p.lower() for p in base_path.parts}
-    ignored_repo_dirs = {"sample_dataset", "medical-wsss", "medical_wsss_repo", "se374_wsss_drive_code", "repos"}
+    # Filter out mock / sample / repo candidates
+    valid_candidates: List[Path] = []
+    for cand in raw_candidates:
+        if _is_mock_path(cand):
+            continue
+        if _is_repo_relative(cand, base_path):
+            continue
+        valid_candidates.append(cand)
 
-    for sp in split_aliases:
-        candidates = sorted(base_path.glob(f"**/{sp}/img"))
-        for img_dir in candidates:
-            rel_parts_lower = {p.lower() for p in img_dir.relative_to(base_path).parts}
-            # Skip repo/sample folders when searching from a parent root like /content
-            if not (base_parts_lower & ignored_repo_dirs) and (rel_parts_lower & ignored_repo_dirs):
-                continue
-            if len(list(img_dir.glob("*.png"))) < min_images:
-                continue
-            mask_dir = img_dir.parent / "mask"
-            root_dir = img_dir.parent.parent
-            return root_dir, img_dir, mask_dir
+    # Pass 1: Genuine dataset cohort (>=10 images and >=2 distinct patients)
+    req_images_p1 = max(min_images, 10)
+    req_patients_p1 = max(min_patients, 2)
+    for cand in valid_candidates:
+        n_img, n_pat = _get_dir_stats(cand)
+        if n_img >= req_images_p1 and n_pat >= req_patients_p1:
+            mask_dir = cand.parent / "mask"
+            root_dir = cand.parent.parent
+            return root_dir, cand, mask_dir
+
+    # Pass 2: Fallback for minimal test environments (non-mock, >= min_images, >= min_patients)
+    for cand in valid_candidates:
+        n_img, n_pat = _get_dir_stats(cand)
+        if n_img >= min_images and n_pat >= min_patients:
+            mask_dir = cand.parent / "mask"
+            root_dir = cand.parent.parent
+            return root_dir, cand, mask_dir
+
     return None, None, None
 
 
 def resolve_test_dirs(
     base_search_dir: Union[str, Path] = Path("/content"),
     min_images: int = 1,
+    min_patients: int = 1,
 ) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
     """Searches for BCSS-WSSS test/img and test/mask directories under base_search_dir."""
-    return resolve_split_dirs(base_search_dir=base_search_dir, split="test", min_images=min_images)
+    return resolve_split_dirs(
+        base_search_dir=base_search_dir,
+        split="test",
+        min_images=min_images,
+        min_patients=min_patients,
+    )
 
 
 def is_valid_zip_archive(
@@ -594,14 +659,6 @@ def download_bcss_whole_roi_cohort(
 
     print(f"[OK] Đã nạp {len(samples)} mẫu Whole-ROI BCSS đối sánh ground-truth tại: {t_dir.resolve()}")
     return samples
-
-
-def extract_patient_id(filename: str) -> str:
-    """Extracts the TCGA patient identifier (TCGA-XX-XXXX) from a patch filename (Invariant 08)."""
-    match = re.match(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", filename, re.IGNORECASE)
-    if match:
-        return match.group(1).upper()
-    return filename.split("_")[0]
 
 
 def select_patient_files(

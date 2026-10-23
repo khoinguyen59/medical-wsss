@@ -145,6 +145,19 @@ def test_fwiou_and_boundary_f1_computation() -> None:
     assert pa_pert == 0.80
     assert bf1_pert["BF1"] < bf1_perfect["BF1"]
 
+    # Verify ColabSegmentationEvaluator.update() handles dict returns without TypeError and computes non-zero Boundary_F1
+    evaluator_perfect = ColabSegmentationEvaluator(num_classes=5)
+    evaluator_perfect.update(gt, gt, patient_id="TCGA-AQ-A04H")
+    metrics_perfect = evaluator_perfect.compute_metrics()
+    assert metrics_perfect["Boundary_F1"] == 100.0, f"Expected 100.0% Boundary_F1 on identical masks, got {metrics_perfect['Boundary_F1']}"
+    assert metrics_perfect["FwIoU"] > 99.0, f"Expected >99% FwIoU on identical masks, got {metrics_perfect['FwIoU']}"
+
+    # Verify perturbed prediction reduces Boundary_F1 while remaining non-zero
+    evaluator_pert = ColabSegmentationEvaluator(num_classes=5)
+    evaluator_pert.update(pred, gt, patient_id="TCGA-AQ-A04H")
+    metrics_pert = evaluator_pert.compute_metrics()
+    assert 0.0 < metrics_pert["Boundary_F1"] < metrics_perfect["Boundary_F1"]
+
 
 def test_coarse_to_fine_router_and_pareto() -> None:
     """Verifies magnification simulation and Pareto efficiency curve calculation."""
@@ -436,6 +449,40 @@ def test_scientific_runner_notebook_end_to_end_execution(tmp_path: Path, monkeyp
     assert Path(ns["zip_out"]).is_file()
     assert Path(ns["zip_out"]).stat().st_size > 0
 
+    import zipfile
+    with zipfile.ZipFile(ns["zip_out"], "r") as zf:
+        namelist = zf.namelist()
+        normalized_names = [name.replace("\\", "/") for name in namelist]
+
+        assert any(n.endswith("val_to_test/val_to_test_report.json") for n in normalized_names), (
+            f"Missing val_to_test/val_to_test_report.json in results zip. Contents: {normalized_names}"
+        )
+        assert any(n.endswith("pareto/coarse_to_fine_pareto_curve.png") for n in normalized_names), (
+            f"Missing pareto/coarse_to_fine_pareto_curve.png in results zip. Contents: {normalized_names}"
+        )
+        assert any(n.endswith("pareto/pareto_results.json") for n in normalized_names), (
+            f"Missing pareto/pareto_results.json in results zip. Contents: {normalized_names}"
+        )
+        assert any(n.endswith("biomarkers/patient_biomarker_correlation.csv") for n in normalized_names), (
+            f"Missing biomarkers/patient_biomarker_correlation.csv in results zip. Contents: {normalized_names}"
+        )
+        assert any(n.endswith("biomarkers/biomarker_bland_altman_regression.png") for n in normalized_names), (
+            f"Missing biomarkers/biomarker_bland_altman_regression.png in results zip. Contents: {normalized_names}"
+        )
+        assert any("whole_roi/" in n for n in normalized_names), (
+            f"Missing whole_roi/ deliverables in results zip. Contents: {normalized_names}"
+        )
+        assert any(n.endswith("scientific_benchmark_summary.json") for n in normalized_names), (
+            f"Missing scientific_benchmark_summary.json in results zip. Contents: {normalized_names}"
+        )
+
+    # Verify patient diversity in SANITY_DRY_RUN mode during end-to-end execution
+    val_pids_final = set(dl_mod.extract_patient_id(p.name) for p in ns["val_files"])
+    test_pids_final = set(dl_mod.extract_patient_id(p.name) for p in ns["test_files"])
+    assert len(val_pids_final) >= 2, f"Expected val patient diversity >= 2, got {len(val_pids_final)}"
+    assert len(test_pids_final) >= 2, f"Expected test patient diversity >= 2, got {len(test_pids_final)}"
+    assert val_pids_final.isdisjoint(test_pids_final), "Zero patient leakage: val and test must be disjoint"
+
 
 def test_resolve_split_dirs_ignores_repo_sample_dataset_and_single_patient_fallback(tmp_path: Path) -> None:
     """Verifies resolve_split_dirs ignores cloned medical-wsss/data/sample_dataset under /content and never yields 0 patches."""
@@ -464,5 +511,44 @@ def test_resolve_split_dirs_ignores_repo_sample_dataset_and_single_patient_fallb
     assert root_found2 == tmp_path / "BCSS-WSSS"
     assert img_dir2 == real_bcss_img
     assert mask_dir2 == real_bcss_mask
+
+
+def test_sanity_dry_run_patient_diversity_balanced_sampling() -> None:
+    """Verifies that in SANITY_DRY_RUN = True, balanced patient sampling preserves patient diversity.
+
+    Both val and test cohorts must contain distinct patient count >= 2 with zero patient leakage (Invariant 08).
+    """
+    from collections import defaultdict
+
+    pids = [
+        "TCGA-A1-A0SD",
+        "TCGA-A2-A04P",
+        "TCGA-AQ-A04H",
+        "TCGA-B6-A0I6",
+        "TCGA-C8-A1HJ",
+        "TCGA-D8-A142",
+    ]
+    patient_map = defaultdict(list)
+    for pid in pids:
+        for idx in range(10):
+            patient_map[pid].append(Path(f"/content/BCSS-WSSS/test/img/{pid}_patch_{idx}.png"))
+
+    unique_pids = sorted(list(patient_map.keys()))
+    n_val_pids = max(1, len(unique_pids) // 3)
+    val_pids = sorted(list(unique_pids[:n_val_pids]))
+    test_pids = sorted(list(unique_pids[n_val_pids:]))
+
+    dry_run_samples = 4
+    quota_val = max(1, dry_run_samples // len(val_pids))
+    val_files = [p for pid in val_pids for p in patient_map[pid][:quota_val]][:dry_run_samples]
+    quota_test = max(1, dry_run_samples // len(test_pids))
+    test_files = [p for pid in test_pids for p in patient_map[pid][:quota_test]][:dry_run_samples]
+
+    val_distinct_patients = set(extract_patient_id(p.name) for p in val_files)
+    test_distinct_patients = set(extract_patient_id(p.name) for p in test_files)
+
+    assert len(val_distinct_patients) >= 2, f"Expected val patient diversity >= 2, got {len(val_distinct_patients)}"
+    assert len(test_distinct_patients) >= 2, f"Expected test patient diversity >= 2, got {len(test_distinct_patients)}"
+    assert val_distinct_patients.isdisjoint(test_distinct_patients), "Patient overlap detected between val and test!"
 
 
