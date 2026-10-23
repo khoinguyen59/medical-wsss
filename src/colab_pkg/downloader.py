@@ -70,8 +70,13 @@ DEFAULT_MIN_SANITY_PATIENTS: int = 5
 def resolve_split_dirs(
     base_search_dir: Union[str, Path] = Path("/content"),
     split: str = "test",
+    min_images: int = 1,
 ) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
     """Searches for dataset split/img and split/mask directories under base_search_dir.
+
+    Automatically ignores repository code folders (e.g., medical-wsss, sample_dataset,
+    SE374_WSSS_Drive_Code, repos) unless base_search_dir explicitly targets them,
+    and requires at least `min_images` PNG files so empty or toy folders are skipped.
 
     Returns:
         Tuple of (root_dir, img_dir, mask_dir), or (None, None, None) if not found.
@@ -80,25 +85,39 @@ def resolve_split_dirs(
     if not base_path.exists():
         return None, None, None
 
-    # Direct check if base_search_dir itself contains split/img
-    direct_img = base_path / split / "img"
-    if direct_img.is_dir():
-        return base_path, direct_img, base_path / split / "mask"
+    split_aliases = [split, "valid"] if split == "val" else [split]
 
-    candidates = sorted(base_path.glob(f"**/{split}/img"))
-    if candidates:
-        img_dir = candidates[0]
-        mask_dir = img_dir.parent / "mask"
-        root_dir = img_dir.parent.parent
-        return root_dir, img_dir, mask_dir
+    # Direct check if base_search_dir itself contains split/img
+    for sp in split_aliases:
+        direct_img = base_path / sp / "img"
+        direct_mask = base_path / sp / "mask"
+        if direct_img.is_dir() and len(list(direct_img.glob("*.png"))) >= min_images:
+            return base_path, direct_img, direct_mask
+
+    base_parts_lower = {p.lower() for p in base_path.parts}
+    ignored_repo_dirs = {"sample_dataset", "medical-wsss", "medical_wsss_repo", "se374_wsss_drive_code", "repos"}
+
+    for sp in split_aliases:
+        candidates = sorted(base_path.glob(f"**/{sp}/img"))
+        for img_dir in candidates:
+            rel_parts_lower = {p.lower() for p in img_dir.relative_to(base_path).parts}
+            # Skip repo/sample folders when searching from a parent root like /content
+            if not (base_parts_lower & ignored_repo_dirs) and (rel_parts_lower & ignored_repo_dirs):
+                continue
+            if len(list(img_dir.glob("*.png"))) < min_images:
+                continue
+            mask_dir = img_dir.parent / "mask"
+            root_dir = img_dir.parent.parent
+            return root_dir, img_dir, mask_dir
     return None, None, None
 
 
 def resolve_test_dirs(
     base_search_dir: Union[str, Path] = Path("/content"),
+    min_images: int = 1,
 ) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
     """Searches for BCSS-WSSS test/img and test/mask directories under base_search_dir."""
-    return resolve_split_dirs(base_search_dir=base_search_dir, split="test")
+    return resolve_split_dirs(base_search_dir=base_search_dir, split="test", min_images=min_images)
 
 
 def is_valid_zip_archive(
@@ -392,23 +411,25 @@ def ensure_checkpoints(
 def ensure_luad_dataset(
     data_root: Union[str, Path] = Path("/content/LUAD-HistoSeg"),
     zip_path: Union[str, Path] = Path("/content/LUAD-HistoSeg.zip"),
-    extract_dir: Union[str, Path] = Path("/content"),
+    extract_dir: Optional[Union[str, Path]] = None,
     drive_cache_dir: Optional[Union[str, Path]] = None,
     split: str = "test",
 ) -> Tuple[Path, Path, Path]:
     """Ensures the LUAD-HistoSeg dataset is downloaded and extracted, returning (root_dir, img_dir, mask_dir)."""
     data_root_p = Path(data_root)
-    extract_p = Path(extract_dir)
+    extract_p = Path(extract_dir) if extract_dir is not None else data_root_p
     zip_p = Path(zip_path)
 
     root_found, img_dir, mask_dir = resolve_split_dirs(data_root_p, split=split)
-    if root_found is None:
+    if root_found is None and extract_p != data_root_p:
         root_found, img_dir, mask_dir = resolve_split_dirs(extract_p, split=split)
 
     if root_found is None and drive_cache_dir is not None:
         drive_cache_p = Path(drive_cache_dir)
         if drive_cache_p.exists():
-            root_found, img_dir, mask_dir = resolve_split_dirs(drive_cache_p, split=split)
+            luad_sub = drive_cache_p / "LUAD-HistoSeg"
+            if luad_sub.exists():
+                root_found, img_dir, mask_dir = resolve_split_dirs(luad_sub, split=split)
             if root_found is None:
                 cached_zip = drive_cache_p / "LUAD-HistoSeg.zip"
                 if is_valid_zip_archive(cached_zip, min_valid_bytes=50 * 1024 * 1024):

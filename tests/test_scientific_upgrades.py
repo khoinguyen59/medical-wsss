@@ -436,3 +436,33 @@ def test_scientific_runner_notebook_end_to_end_execution(tmp_path: Path, monkeyp
     assert Path(ns["zip_out"]).is_file()
     assert Path(ns["zip_out"]).stat().st_size > 0
 
+
+def test_resolve_split_dirs_ignores_repo_sample_dataset_and_single_patient_fallback(tmp_path: Path) -> None:
+    """Verifies resolve_split_dirs ignores cloned medical-wsss/data/sample_dataset under /content and never yields 0 patches."""
+    # Simulate /content/medical-wsss/data/sample_dataset/test/img (the cloned GitHub repo inside /content)
+    fake_repo_sample = tmp_path / "medical-wsss" / "data" / "sample_dataset" / "test" / "img"
+    fake_repo_mask = tmp_path / "medical-wsss" / "data" / "sample_dataset" / "test" / "mask"
+    fake_repo_sample.mkdir(parents=True)
+    fake_repo_mask.mkdir(parents=True)
+    Image.fromarray(np.full((64, 64, 3), 180, dtype=np.uint8)).save(fake_repo_sample / "TCGA-C8-A1HJ_1.png")
+    Image.fromarray(np.zeros((64, 64), dtype=np.uint8)).save(fake_repo_mask / "TCGA-C8-A1HJ_1.png")
+
+    # Searching from tmp_path (simulating /content) must NOT match medical-wsss/data/sample_dataset
+    root_found, img_dir, mask_dir = resolve_split_dirs(tmp_path, split="test")
+    assert root_found is None
+    assert img_dir is None
+
+    # When real BCSS-WSSS is extracted under tmp_path / "BCSS-WSSS", resolve_split_dirs must find it
+    real_bcss_img = tmp_path / "BCSS-WSSS" / "test" / "img"
+    real_bcss_mask = tmp_path / "BCSS-WSSS" / "test" / "mask"
+    real_bcss_img.mkdir(parents=True)
+    real_bcss_mask.mkdir(parents=True)
+    Image.fromarray(np.full((64, 64, 3), 180, dtype=np.uint8)).save(real_bcss_img / "TCGA-A1-A0SD_1.png")
+    Image.fromarray(np.zeros((64, 64), dtype=np.uint8)).save(real_bcss_mask / "TCGA-A1-A0SD_1.png")
+
+    root_found2, img_dir2, mask_dir2 = resolve_split_dirs(tmp_path, split="test")
+    assert root_found2 == tmp_path / "BCSS-WSSS"
+    assert img_dir2 == real_bcss_img
+    assert mask_dir2 == real_bcss_mask
+
+

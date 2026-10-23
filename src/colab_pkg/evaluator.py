@@ -955,6 +955,40 @@ def run_val_to_test_scientific_protocol(
 ) -> Dict[str, Any]:
     """Scientific standard: Validates on validation split, searches & locks hyperparameters, then tests on held-out test split."""
     effective_method = method or method_key
+
+    # Self-heal if test_files is empty or accidentally resolved to the 2-image repo sample_dataset on Colab
+    if len(test_files) == 0 or (
+        Path("/content").is_dir()
+        and any("sample_dataset" in str(p) for p in (list(val_files) + list(test_files)))
+    ):
+        from .downloader import ensure_bcss_dataset, resolve_split_dirs
+
+        real_root, real_t_img, real_t_mask = ensure_bcss_dataset()
+        _, real_v_img, real_v_mask = resolve_split_dirs(real_root, split="val")
+        cap = max(len(val_files), 50)
+        if real_v_img is not None and real_v_img.is_dir() and len(list(real_v_img.glob("*.png"))) > 0 and real_v_img != real_t_img:
+            val_files[:] = sorted(real_v_img.glob("*.png"))[:cap]
+            test_files[:] = sorted(real_t_img.glob("*.png"))[:cap]
+            val_mask_dir = real_v_mask
+            test_mask_dir = real_t_mask
+        else:
+            all_real = sorted(real_t_img.glob("*.png"))
+            pmap: Dict[str, List[Path]] = defaultdict(list)
+            for p in all_real:
+                pmap[extract_patient_id(p.name)].append(p)
+            upids = sorted(pmap.keys())
+            if len(upids) >= 2:
+                nv = max(1, len(upids) // 3)
+                vp, tp = set(upids[:nv]), set(upids[nv:])
+                val_files[:] = [p for pid in vp for p in pmap[pid]][:cap]
+                test_files[:] = [p for pid in tp for p in pmap[pid]][:cap]
+            else:
+                mid = max(1, len(all_real) // 2)
+                val_files[:] = all_real[:mid][:cap]
+                test_files[:] = (all_real[mid:] if len(all_real) > 1 else all_real)[:cap]
+            val_mask_dir = real_t_mask
+            test_mask_dir = real_t_mask
+
     print("=" * 80)
     print("--> BƯỚC 1: Đánh giá tập Validation & Tìm kiếm khóa siêu tham số (Hyperparameter Lock)")
     print(f"    Số lượng mảng ảnh validation: {len(val_files)}")
@@ -1059,10 +1093,24 @@ def run_multimag_and_pareto_benchmark(
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """Evaluates multi-magnification degradation (5x, 10x, 20x, 40x) and computes Adaptive Pareto frontier."""
-    effective_files = test_files or patch_files
-    if effective_files is None:
-        raise ValueError("Phải cung cấp danh sách file ảnh (test_files hoặc patch_files).")
-    effective_mask_dir = test_mask_dir or mask_dir
+    effective_files = test_files if test_files is not None else patch_files
+    effective_mask_dir = test_mask_dir if test_mask_dir is not None else mask_dir
+
+    # Self-heal if effective_files is an empty list due to single-patient sample_dataset split
+    if isinstance(effective_files, list) and len(effective_files) == 0:
+        if Path("/content").is_dir():
+            from .downloader import ensure_bcss_dataset
+
+            _, real_t_img, real_t_mask = ensure_bcss_dataset()
+            effective_files[:] = sorted(real_t_img.glob("*.png"))[:50]
+            effective_mask_dir = real_t_mask
+        elif effective_mask_dir is not None:
+            cand_img_dir = Path(effective_mask_dir).parent / "img"
+            if cand_img_dir.is_dir():
+                effective_files[:] = sorted(cand_img_dir.glob("*.png"))[:50]
+
+    if effective_files is None or len(effective_files) == 0:
+        raise ValueError("Phải cung cấp danh sách file ảnh (test_files hoặc patch_files) không rỗng.")
     if effective_mask_dir is None:
         raise ValueError("Phải cung cấp thư mục mask (test_mask_dir hoặc mask_dir).")
 
