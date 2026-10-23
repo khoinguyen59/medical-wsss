@@ -40,36 +40,65 @@ HF_STAGE2_URL: str = (
     "stage2_checkpoint_trained_on_bcss.pth"
 )
 
+# Official LUAD-HistoSeg Dataset Mirrors (Lung Adenocarcinoma WSSS Benchmark)
+GDRIVE_LUAD_DATASET_ID: str = "1WyWfv-JHjLwkHOiN8blINhBOkKi--iA1"
+HF_LUAD_DATASET_URL: str = (
+    "https://huggingface.co/datasets/nttduc/wsss-pathology/resolve/main/LUAD-HistoSeg.zip"
+)
+
+# Official LUAD-HistoSeg Stage-1 and Stage-2 Checkpoint Mirrors
+GDRIVE_LUAD_STAGE1_ID: str = "1deVn06uUGHBHCWxurn4b005Mr7FgUp8o"
+HF_LUAD_STAGE1_URL: str = (
+    "https://huggingface.co/longcris04/pseduo_mask_wsss/resolve/main/"
+    "stage1_checkpoint_trained_on_luad.pth"
+)
+GDRIVE_LUAD_STAGE2_ID: str = "1HX-IrkKcaIjcOpe8fk9IMmjgaf4Ywk3D"
+HF_LUAD_STAGE2_URL: str = (
+    "https://huggingface.co/longcris04/pseduo_mask_wsss/resolve/main/"
+    "stage2_checkpoint_trained_on_luad.pth"
+)
+
+# BCSS Whole-ROI Dataset Mirror (Nabil et al., HuggingFace nabil-m/bcss)
+HF_BCSS_WHOLE_ROI_REPO: str = "nabil-m/bcss"
+
 # Default Patient-Level Sanity Sampling Configuration (Invariant 08)
 TARGET_PATIENTS: List[str] = ["TCGA-AQ-A04H", "TCGA-C8-A1HJ", "TCGA-AR-A0TQ"]
 DEFAULT_MAX_SANITY_SAMPLES: int = 150
 DEFAULT_MIN_SANITY_PATIENTS: int = 5
 
 
-def resolve_test_dirs(
+def resolve_split_dirs(
     base_search_dir: Union[str, Path] = Path("/content"),
+    split: str = "test",
 ) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
-    """Searches for BCSS-WSSS test/img and test/mask directories under base_search_dir.
+    """Searches for dataset split/img and split/mask directories under base_search_dir.
 
     Returns:
-        Tuple of (root_dir, test_img_dir, test_mask_dir), or (None, None, None) if not found.
+        Tuple of (root_dir, img_dir, mask_dir), or (None, None, None) if not found.
     """
     base_path = Path(base_search_dir)
     if not base_path.exists():
         return None, None, None
 
-    # Direct check if base_search_dir itself is the dataset root
-    direct_img = base_path / "test" / "img"
+    # Direct check if base_search_dir itself contains split/img
+    direct_img = base_path / split / "img"
     if direct_img.is_dir():
-        return base_path, direct_img, base_path / "test" / "mask"
+        return base_path, direct_img, base_path / split / "mask"
 
-    candidates = sorted(base_path.glob("**/test/img"))
+    candidates = sorted(base_path.glob(f"**/{split}/img"))
     if candidates:
         img_dir = candidates[0]
         mask_dir = img_dir.parent / "mask"
         root_dir = img_dir.parent.parent
         return root_dir, img_dir, mask_dir
     return None, None, None
+
+
+def resolve_test_dirs(
+    base_search_dir: Union[str, Path] = Path("/content"),
+) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
+    """Searches for BCSS-WSSS test/img and test/mask directories under base_search_dir."""
+    return resolve_split_dirs(base_search_dir=base_search_dir, split="test")
 
 
 def is_valid_zip_archive(
@@ -360,6 +389,158 @@ def ensure_checkpoints(
     }
 
 
+def ensure_luad_dataset(
+    data_root: Union[str, Path] = Path("/content/LUAD-HistoSeg"),
+    zip_path: Union[str, Path] = Path("/content/LUAD-HistoSeg.zip"),
+    extract_dir: Union[str, Path] = Path("/content"),
+    drive_cache_dir: Optional[Union[str, Path]] = None,
+    split: str = "test",
+) -> Tuple[Path, Path, Path]:
+    """Ensures the LUAD-HistoSeg dataset is downloaded and extracted, returning (root_dir, img_dir, mask_dir)."""
+    data_root_p = Path(data_root)
+    extract_p = Path(extract_dir)
+    zip_p = Path(zip_path)
+
+    root_found, img_dir, mask_dir = resolve_split_dirs(data_root_p, split=split)
+    if root_found is None:
+        root_found, img_dir, mask_dir = resolve_split_dirs(extract_p, split=split)
+
+    if root_found is None and drive_cache_dir is not None:
+        drive_cache_p = Path(drive_cache_dir)
+        if drive_cache_p.exists():
+            root_found, img_dir, mask_dir = resolve_split_dirs(drive_cache_p, split=split)
+            if root_found is None:
+                cached_zip = drive_cache_p / "LUAD-HistoSeg.zip"
+                if is_valid_zip_archive(cached_zip, min_valid_bytes=50 * 1024 * 1024):
+                    zip_p = cached_zip
+
+    if root_found is None:
+        download_dataset_resilient(
+            zip_path=zip_p,
+            hf_url=HF_LUAD_DATASET_URL,
+            gdrive_id=GDRIVE_LUAD_DATASET_ID,
+            min_valid_bytes=50 * 1024 * 1024,
+        )
+        if not zip_p.is_file():
+            raise FileNotFoundError(f"Không thể tải tệp nén LUAD-HistoSeg tại: {zip_p}")
+        print(f"--> Đang giải nén bộ dữ liệu LUAD-HistoSeg vào {extract_p}...")
+        extract_p.mkdir(parents=True, exist_ok=True)
+        try:
+            with zipfile.ZipFile(zip_p, "r") as zf:
+                zf.extractall(str(extract_p))
+        except zipfile.BadZipFile:
+            print(f"[CẢNH BÁO] Tệp nén {zip_p} bị hỏng khi giải nén. Đang xóa và tải lại...")
+            zip_p.unlink(missing_ok=True)
+            download_dataset_resilient(
+                zip_path=zip_p,
+                hf_url=HF_LUAD_DATASET_URL,
+                gdrive_id=GDRIVE_LUAD_DATASET_ID,
+                min_valid_bytes=50 * 1024 * 1024,
+            )
+            with zipfile.ZipFile(zip_p, "r") as zf:
+                zf.extractall(str(extract_p))
+        root_found, img_dir, mask_dir = resolve_split_dirs(data_root_p, split=split)
+        if root_found is None:
+            root_found, img_dir, mask_dir = resolve_split_dirs(extract_p, split=split)
+
+    if root_found is None or img_dir is None or mask_dir is None:
+        raise FileNotFoundError(f"Không tìm thấy thư mục {split}/img sau khi giải nén LUAD-HistoSeg!")
+
+    total_imgs = len(list(img_dir.glob("*.png")))
+    total_masks = len(list(mask_dir.glob("*.png"))) if mask_dir.exists() else 0
+    print(f"[OK] Thư mục gốc LUAD-HistoSeg: {root_found.resolve()}")
+    print(f"[OK] Thư mục ảnh ({split}): {img_dir.resolve()} ({total_imgs} ảnh)")
+    print(f"[OK] Thư mục mask ({split}): {mask_dir.resolve()} ({total_masks} mask)")
+
+    return root_found, img_dir, mask_dir
+
+
+def ensure_luad_checkpoints(
+    checkpoint_dir: Union[str, Path] = Path("/content/checkpoints"),
+    drive_cache_dir: Optional[Union[str, Path]] = None,
+    require_stage2: bool = True,
+    min_valid_bytes: int = 1024,
+) -> Dict[str, Optional[Path]]:
+    """Ensures both Stage-1 and Stage-2 checkpoints trained on LUAD-HistoSeg are available."""
+    ckpt_dir = Path(checkpoint_dir)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    stage1_file = ckpt_dir / "stage1_checkpoint_trained_on_luad.pth"
+    stage2_file = ckpt_dir / "stage2_checkpoint_trained_on_luad.pth"
+
+    if drive_cache_dir is not None:
+        drive_p = Path(drive_cache_dir)
+        for fname, dst in [
+            ("stage1_checkpoint_trained_on_luad.pth", stage1_file),
+            ("stage2_checkpoint_trained_on_luad.pth", stage2_file),
+        ]:
+            cached_candidate = drive_p / fname
+            if not is_valid_torch_checkpoint(dst, min_valid_bytes=min_valid_bytes) and is_valid_torch_checkpoint(
+                cached_candidate, min_valid_bytes=50 * 1024 * 1024
+            ):
+                shutil.copy2(cached_candidate, dst)
+
+    if not is_valid_torch_checkpoint(stage1_file, min_valid_bytes=min_valid_bytes):
+        download_checkpoint_resilient(
+            stage1_file,
+            HF_LUAD_STAGE1_URL,
+            [GDRIVE_LUAD_STAGE1_ID],
+            "Pretrained Checkpoint Stage 1 ResNet38d Net_CAM (LUAD)",
+        )
+
+    if not is_valid_torch_checkpoint(stage2_file, min_valid_bytes=min_valid_bytes):
+        download_checkpoint_resilient(
+            stage2_file,
+            HF_LUAD_STAGE2_URL,
+            [GDRIVE_LUAD_STAGE2_ID],
+            "Pretrained Checkpoint Stage 2 DeepLabV3+ (LUAD)",
+        )
+
+    if stage2_file.is_file():
+        sz2_mb = stage2_file.stat().st_size / (1024 * 1024)
+        print(f"[OK] Checkpoint Stage 2 LUAD đã sẵn sàng tại: {stage2_file.resolve()} ({sz2_mb:.2f} MB)")
+    elif require_stage2:
+        raise FileNotFoundError(
+            f"Không tìm thấy tệp checkpoint Stage 2 LUAD tại: {stage2_file.resolve()}"
+        )
+
+    return {
+        "stage1": stage1_file if stage1_file.is_file() else None,
+        "stage2": stage2_file if stage2_file.is_file() else None,
+    }
+
+
+def download_bcss_whole_roi_cohort(
+    target_dir: Union[str, Path] = Path("/content/bcss_whole_roi"),
+    repo_id: str = HF_BCSS_WHOLE_ROI_REPO,
+) -> Path:
+    """Downloads or verifies the BCSS Whole-ROI cohort (nabil-m/bcss) with ground truth masks and metadata."""
+    t_dir = Path(target_dir)
+    t_dir.mkdir(parents=True, exist_ok=True)
+
+    if (t_dir / "masks").is_dir() and (t_dir / "rgbs_colorNormalized").is_dir():
+        print(f"[OK] Đã tìm thấy BCSS Whole-ROI dataset tại: {t_dir.resolve()}")
+        return t_dir
+
+    print(f"--> Đang tải BCSS Whole-ROI dataset từ HuggingFace repository: {repo_id}...")
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=str(t_dir),
+            ignore_patterns=["*.git*", "README.md"],
+        )
+        print(f"[OK] Tải thành công BCSS Whole-ROI dataset vào: {t_dir.resolve()}")
+    except Exception as exc:
+        print(f"[THÔNG BÁO] Không thể tải snapshot qua huggingface_hub ({exc}). Tạo cấu trúc thư mục sẵn sàng.")
+        (t_dir / "masks").mkdir(parents=True, exist_ok=True)
+        (t_dir / "rgbs_colorNormalized").mkdir(parents=True, exist_ok=True)
+        (t_dir / "meta").mkdir(parents=True, exist_ok=True)
+
+    return t_dir
+
+
 def extract_patient_id(filename: str) -> str:
     """Extracts the TCGA patient identifier (TCGA-XX-XXXX) from a patch filename (Invariant 08)."""
     match = re.match(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", filename, re.IGNORECASE)
@@ -496,6 +677,23 @@ class ColabArtifactDownloader:
             Tuple of (ckpt_stage1_path, ckpt_stage2_path).
         """
         paths = ensure_checkpoints(
+            checkpoint_dir=self.checkpoint_dir,
+            drive_cache_dir=drive_cache_dir,
+            require_stage2=require_stage2,
+        )
+        return str(paths["stage1"]), str(paths["stage2"])
+
+    def download_luad_checkpoints(
+        self,
+        drive_cache_dir: Optional[Union[str, Path]] = None,
+        require_stage2: bool = True,
+    ) -> Tuple[str, str]:
+        """Downloads/verifies LUAD stage 1 and stage 2 checkpoints.
+
+        Returns:
+            Tuple of (ckpt_stage1_path, ckpt_stage2_path).
+        """
+        paths = ensure_luad_checkpoints(
             checkpoint_dir=self.checkpoint_dir,
             drive_cache_dir=drive_cache_dir,
             require_stage2=require_stage2,
