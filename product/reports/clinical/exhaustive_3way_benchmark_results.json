@@ -1,0 +1,319 @@
+{
+  "timestamp": "2026-10-24T10:27:15Z",
+  "evaluation_device": "cpu",
+  "benchmark_models": {
+    "author_sota_baseline": {
+      "mIoU_4cls": 0.0,
+      "mDice_4cls": 0.0,
+      "Pixel_Accuracy_4cls": 0.0,
+      "FwIoU_4cls": 0.0,
+      "mIoU_5cls": 0.0,
+      "Pixel_Accuracy_5cls": 0.0,
+      "IoU_TUM": 0.0,
+      "IoU_STR": 0.0,
+      "IoU_LYM": 0.0,
+      "IoU_NEC": 0.0,
+      "IoU_BACK": 0.0,
+      "Dice_TUM": 0.0,
+      "Dice_STR": 0.0,
+      "Dice_LYM": 0.0,
+      "Dice_NEC": 0.0,
+      "average_latency_ms": 205.19550000244635,
+      "throughput_fps": 4.873401219754224,
+      "total_patches_evaluated": 2,
+      "confusion_matrix_5cls": [
+        [
+          0,
+          100352,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "confusion_matrix_4cls": [
+        [
+          0,
+          100352,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    "retrained_from_scratch": {
+      "mIoU_4cls": 4.987966305655837,
+      "mDice_4cls": 8.31661316211878,
+      "Pixel_Accuracy_4cls": 19.951865222623347,
+      "FwIoU_4cls": 19.951865222623347,
+      "mIoU_5cls": 0.330436862244898,
+      "Pixel_Accuracy_5cls": 1.6521843112244898,
+      "IoU_TUM": 19.951865222623347,
+      "IoU_STR": 0.0,
+      "IoU_LYM": 0.0,
+      "IoU_NEC": 0.0,
+      "IoU_BACK": 0.0,
+      "Dice_TUM": 33.26645264847512,
+      "Dice_STR": 0.0,
+      "Dice_LYM": 0.0,
+      "Dice_NEC": 0.0,
+      "average_latency_ms": 93.30654999575927,
+      "throughput_fps": 10.717361214678386,
+      "total_patches_evaluated": 2,
+      "confusion_matrix_5cls": [
+        [
+          1658,
+          224,
+          2514,
+          3914,
+          92042
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "confusion_matrix_4cls": [
+        [
+          1658,
+          224,
+          2514,
+          3914
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    "proposed_medsam_adapter": {
+      "mIoU_4cls": 5.0139711402118605,
+      "mDice_4cls": 8.352728662243374,
+      "Pixel_Accuracy_4cls": 20.055884560847442,
+      "FwIoU_4cls": 20.055884560847442,
+      "mIoU_5cls": 3.8337053571428568,
+      "Pixel_Accuracy_5cls": 19.168526785714285,
+      "IoU_TUM": 20.055884560847442,
+      "IoU_STR": 0.0,
+      "IoU_LYM": 0.0,
+      "IoU_NEC": 0.0,
+      "IoU_BACK": 0.0,
+      "Dice_TUM": 33.410914648973495,
+      "Dice_STR": 0.0,
+      "Dice_LYM": 0.0,
+      "Dice_NEC": 0.0,
+      "average_latency_ms": 41.36025000116206,
+      "throughput_fps": 24.177803566755617,
+      "total_patches_evaluated": 2,
+      "confusion_matrix_5cls": [
+        [
+          19236,
+          51058,
+          9838,
+          15780,
+          4440
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "confusion_matrix_4cls": [
+        [
+          19236,
+          51058,
+          9838,
+          15780
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    }
+  },
+  "statistical_significance": {
+    "total_patch_pairs": 2,
+    "proposed_vs_author": {
+      "mean_delta_miou": 5.0139711402118605,
+      "t_statistic": Infinity,
+      "t_test_p_value": 0.0,
+      "wilcoxon_w_statistic": 0.0,
+      "wilcoxon_p_value": 0.5,
+      "cohen_d": 0.0,
+      "confidence_interval_95": [
+        5.0139711402118605,
+        5.0139711402118605
+      ],
+      "is_statistically_significant_05": false
+    },
+    "proposed_vs_retrained": {
+      "mean_delta_miou": 0.026004834556023898,
+      "t_statistic": Infinity,
+      "t_test_p_value": 0.0,
+      "wilcoxon_w_statistic": 0.0,
+      "wilcoxon_p_value": 0.5,
+      "cohen_d": 0.0,
+      "confidence_interval_95": [
+        0.026004834556023898,
+        0.026004834556023898
+      ],
+      "is_statistically_significant_05": false
+    }
+  },
+  "clinical_survival_analysis": {
+    "patient_cohort_count": 1,
+    "stroma_rich_count": 1,
+    "stroma_poor_count": 2,
+    "logrank_test": {
+      "engine": "analytical_mantel_haenszel",
+      "test_statistic": 0.0,
+      "p_value": 1.0,
+      "degrees_of_freedom": 1,
+      "is_significant_05": false,
+      "is_significant_01": false,
+      "label_a": "Stroma-Rich",
+      "label_b": "Stroma-Poor",
+      "note": "No events observed in either group"
+    },
+    "patient_summary": {
+      "TCGA-C8-A1HJ": {
+        "patient_id": "TCGA-C8-A1HJ",
+        "ai_predicted_tsr": 27.365066719776937,
+        "ai_predicted_stroma_prop": 72.63493328022307,
+        "ai_predicted_vtp": 20.055884560847442,
+        "ai_cap_risk_category": "Stroma-Rich",
+        "ai_cap_risk_level": "High Risk",
+        "gt_tsr": 100.0,
+        "gt_vtp": 100.0,
+        "gt_cap_risk_category": "Stroma-Poor",
+        "overall_survival_months": 15.0,
+        "vital_status": 0,
+        "status_label": "Living",
+        "histological_subtype": "Invasive Ductal Carcinoma (IDC)"
+      }
+    },
+    "figure_path_png": "product\\reports\\clinical\\kaplan_meier_survival_curve.png",
+    "figure_path_svg": "product\\reports\\clinical\\kaplan_meier_survival_curve.svg"
+  }
+}

@@ -98,7 +98,14 @@ def discover_thin_runner_notebooks(notebooks_dir: Path) -> List[Path]:
         return []
     candidates: List[Path] = []
     for nb_path in sorted(notebooks_dir.glob("*.ipynb")):
-        if nb_path.name not in LEGACY_NOTEBOOKS:
+        if nb_path.name in LEGACY_NOTEBOOKS:
+            continue
+        # Only include Thin Runner variants and bonus demo notebooks
+        if (
+            "ThinDriveRunner" in nb_path.name
+            or "Drive_Runner" in nb_path.name
+            or "BonusDemo" in nb_path.name
+        ):
             candidates.append(nb_path)
     return candidates
 

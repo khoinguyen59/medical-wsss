@@ -1,0 +1,2 @@
+patient_id,ai_predicted_tsr,ai_predicted_stroma_prop,ai_predicted_vtp,ai_cap_risk_category,ai_cap_risk_level,gt_tsr,gt_vtp,gt_cap_risk_category,overall_survival_months,vital_status,status_label,histological_subtype
+TCGA-C8-A1HJ,27.365066719776937,72.63493328022307,20.055884560847442,Stroma-Rich,High Risk,100.0,100.0,Stroma-Poor,15.0,0,Living,Invasive Ductal Carcinoma (IDC)

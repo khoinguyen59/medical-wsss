@@ -1,0 +1,17 @@
+{
+  "TCGA-C8-A1HJ": {
+    "patient_id": "TCGA-C8-A1HJ",
+    "ai_predicted_tsr": 27.365066719776937,
+    "ai_predicted_stroma_prop": 72.63493328022307,
+    "ai_predicted_vtp": 20.055884560847442,
+    "ai_cap_risk_category": "Stroma-Rich",
+    "ai_cap_risk_level": "High Risk",
+    "gt_tsr": 100.0,
+    "gt_vtp": 100.0,
+    "gt_cap_risk_category": "Stroma-Poor",
+    "overall_survival_months": 15.0,
+    "vital_status": 0,
+    "status_label": "Living",
+    "histological_subtype": "Invasive Ductal Carcinoma (IDC)"
+  }
+}
