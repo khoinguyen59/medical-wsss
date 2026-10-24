@@ -69,3 +69,7 @@ product/reports/*.log
 *.swo
 .DS_Store
 Thumbs.db
+
+# User Downloaded Execution Artifacts at Root
+/01_Train_Stage1_Classifier.ipynb
+
