@@ -113,7 +113,7 @@ def test_notebook_01_stage1_checkpoint_and_resume_specs():
     content = NOTEBOOKS["stage1"].read_text(encoding="utf-8")
     assert "stage1_latest.pth" in content, "Notebook 1 missing stage1_latest.pth checkpoint target"
     assert "stage1_retrained_best.pth" in content, "Notebook 1 missing stage1_retrained_best.pth target"
-    assert "/content/drive/MyDrive/SE374_WSSS_Checkpoints" in content, "Notebook 1 missing Drive checkpoint path"
+    assert "/content/checkpoints" in content, "Notebook 1 missing Colab VM local checkpoints path"
     assert "tqdm" in content, "Notebook 1 missing tqdm progress bar"
     assert "MultiLabelSoftMarginLoss" in content, "Notebook 1 missing multi-label classification loss"
     assert "SE374_Stage1_Training_Results.zip" in content, "Notebook 1 missing results ZIP export"
