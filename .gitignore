@@ -24,6 +24,7 @@ checkpoints/*
 !checkpoints/.gitkeep
 
 # Archive Files & Temp Drive Bundles
+data/BCSS-WSSS/
 *.zip
 *.tar
 *.gz

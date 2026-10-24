@@ -483,9 +483,12 @@ class DeepLabV3PlusWithCGM(nn.Module):
         cgm_penalty: float = -1e4,
         ignore_index: int = 255,
         dropout_rate: float = 0.5,
+        backbone: Optional[str] = "resnet101",
+        **kwargs: Any,
     ) -> None:
         super().__init__()
         self.num_classes = num_classes
+        self.backbone_name = backbone or "resnet101"
         self.in_channels = in_channels
         self.ignore_index = ignore_index
 
@@ -678,3 +681,7 @@ class DeepLabV3PlusWithCGM(nn.Module):
         """
         logits = self.forward(x, class_presence=class_presence)
         return F.softmax(logits, dim=1)
+
+
+# Canonical alias for seamless Stage 2 compatibility across all notebook tiers
+DeepLabV3Plus = DeepLabV3PlusWithCGM
