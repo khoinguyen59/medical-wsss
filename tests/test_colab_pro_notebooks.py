@@ -33,6 +33,7 @@ NOTEBOOKS = {
     "stage2_l4": Path("notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb"),
     "medsam_l4": Path("notebooks/03_Train_Proposed_MedSAM_L4.ipynb"),
     "benchmark_l4": Path("notebooks/04_Exhaustive_Benchmark_Survival_L4.ipynb"),
+    "stage2_t4_root": Path("02_Pseudo_Masks_Train_Stage2_T4.ipynb"),
 }
 
 
@@ -352,6 +353,157 @@ def test_device_and_amp_declared_before_usage(key, path):
         assert device_def_idx < first_device_use_idx, (
             f"Notebook {path.name} uses DEVICE at line {first_device_use_idx} before declaration at line {device_def_idx}"
         )
+
+
+def test_stage2_notebooks_detailed_specifications():
+    """Verify detailed requirements for Stage 2 notebooks (base, T4, L4, and root T4):
+    1. Batch sizes: T4 has batch_size 12, L4 has batch_size 24.
+    2. NUM_WORKERS: T4 has 2, L4 has 4.
+    3. Dataset path resolution checks 'training/' and 'val/mask' & 'val/img'.
+    4. Otsu gating 'apply_otsu_gating' with multi-layer 'PM_bn7', 'PM_b5_2', 'PM_b4_5'.
+    5. Local storage '/content/checkpoints' used without Google Drive popup requirement.
+    6. Root '02_Pseudo_Masks_Train_Stage2_T4.ipynb' is 100% identical to 'notebooks/02_Pseudo_Masks_Train_Stage2_T4.ipynb'.
+    """
+    t4_nb = Path("notebooks/02_Pseudo_Masks_Train_Stage2_T4.ipynb").read_text(encoding="utf-8")
+    l4_nb = Path("notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb").read_text(encoding="utf-8")
+    root_t4 = Path("02_Pseudo_Masks_Train_Stage2_T4.ipynb").read_text(encoding="utf-8")
+
+    # Synchronization
+    assert t4_nb == root_t4, "Root 02_Pseudo_Masks_Train_Stage2_T4.ipynb is out of sync with notebooks/"
+
+    # T4 specific configurations
+    assert "BATCH_SIZE = 12" in t4_nb, "T4 notebook missing BATCH_SIZE = 12"
+    assert "NUM_WORKERS = 2" in t4_nb, "T4 notebook missing NUM_WORKERS = 2"
+    assert "torch.float16" in t4_nb, "T4 notebook missing FP16 precision"
+
+    # L4 specific configurations
+    assert "BATCH_SIZE = 24" in l4_nb, "L4 notebook missing BATCH_SIZE = 24"
+    assert "NUM_WORKERS = 4" in l4_nb, "L4 notebook missing NUM_WORKERS = 4"
+    assert "torch.bfloat16" in l4_nb, "L4 notebook missing BF16 precision"
+
+    # Dataset path resolution
+    for content, name in [(t4_nb, "T4"), (l4_nb, "L4")]:
+        assert "'training'" in content or '"training"' in content, f"{name} notebook missing 'training' folder resolution"
+        assert "'val'" in content or '"val"' in content, f"{name} notebook missing 'val' folder resolution"
+        assert "'mask'" in content or '"mask"' in content, f"{name} notebook missing 'mask' folder resolution"
+        assert "resolve_split_path" in content, f"{name} notebook missing resolve_split_path"
+        assert "apply_otsu_gating" in content, f"{name} notebook missing apply_otsu_gating"
+        assert "gpu_affinity_refine" in content, f"{name} notebook missing gpu_affinity_refine"
+        assert "PM_bn7" in content and "PM_b5_2" in content and "PM_b4_5" in content, f"{name} notebook missing 3 pseudo-mask layers"
+        assert "/content/checkpoints" in content, f"{name} notebook missing local Colab checkpoints directory"
+        assert "drive.mount" not in content, f"{name} notebook has unwanted Google Drive popup requirement"
+        assert "SE374_Stage2_Training_Results.zip" in content, f"{name} notebook missing results ZIP packaging"
+
+
+def test_stage2_deeplabv3plus_instantiation_and_forward():
+    """Verify DeepLabV3Plus with backbone='resnet101' instantiates and executes forward pass."""
+    from src.models.deeplabv3plus import DeepLabV3Plus as DeepLab1
+    from src.models.wsss_inference_methods import DeepLabV3Plus as DeepLab2
+
+    for ModelClass in [DeepLab1, DeepLab2]:
+        m = ModelClass(num_classes=5, backbone="resnet101")
+        m.eval()
+        x = torch.randn(2, 3, 224, 224)
+        with torch.no_grad():
+            out = m(x)
+        assert out.shape == (2, 5, 224, 224), f"Expected shape (2, 5, 224, 224), got {out.shape}"
+        pred = torch.argmax(out, dim=1)
+        assert pred.shape == (2, 224, 224)
+
+
+def test_stage2_gpu_affinity_refine_zero_phantom_classes():
+    """Verify bilateral refinement on discrete boundary produces zero phantom classes."""
+    from scripts.build_t4_l4_notebook_suites import get_clean_cell_8_stage2
+
+    lines = get_clean_cell_8_stage2()
+    start = next(i for i, l in enumerate(lines) if "def gpu_affinity_refine" in l)
+    end = next(i for i, l in enumerate(lines) if "all_train_files" in l)
+    func_code = "import cv2\nimport numpy as np\n" + "".join(lines[start:end])
+    local_scope = {}
+    exec(func_code, local_scope)
+    refine_fn = local_scope["gpu_affinity_refine"]
+
+    # 1. Discrete 2D mask test with Tumor (0) and Background (4)
+    discrete_mask = np.zeros((64, 64), dtype=np.uint8)
+    discrete_mask[:, 32:] = 4
+    refined_discrete = refine_fn(discrete_mask)
+    unique_vals = set(np.unique(refined_discrete))
+    assert unique_vals.issubset({0, 4}), f"Phantom classes detected in refined discrete mask: {unique_vals}"
+
+    # 2. Continuous 3D CAM tensor test (5, 64, 64)
+    cam_continuous = np.random.rand(5, 64, 64).astype(np.float32)
+    refined_cam = refine_fn(cam_continuous)
+    assert refined_cam.shape == (5, 64, 64)
+    assert refined_cam.dtype == np.float32
+
+
+def test_stage2_resolve_split_path_fallback_resilience():
+    """Verify resolve_split_path returns valid Path without string division TypeError when sub is given."""
+    from scripts.build_t4_l4_notebook_suites import get_clean_cell_6_stage2
+
+    lines = get_clean_cell_6_stage2()
+    start = next(i for i, l in enumerate(lines) if "def resolve_split_path" in l)
+    end = next(i for i, l in enumerate(lines) if "TRAIN_DIR =" in l)
+    func_code = "from pathlib import Path\n" + "".join(lines[start:end])
+    local_scope = {}
+    exec(func_code, local_scope)
+    resolve_fn = local_scope["resolve_split_path"]
+
+    dummy_base = Path("/nonexistent_medical_test_dir")
+    # Test fallback path when no candidate directories have images (exercises the string division fix)
+    custom_path = resolve_fn(dummy_base, split="custom_split", sub="custom_sub")
+    assert isinstance(custom_path, Path)
+    assert custom_path == dummy_base / "custom_split" / "custom_sub"
+
+    train_custom = resolve_fn(dummy_base, split="custom_split")
+    assert isinstance(train_custom, Path)
+    assert train_custom == dummy_base / "custom_split"
+
+    # Test that valid sub path resolution returns a Path ending with sub
+    val_img = resolve_fn(dummy_base, split="val", sub="img")
+    assert isinstance(val_img, Path)
+    assert val_img.name == "img"
+
+
+def test_stage2_mlps_loss_gradient_flow():
+    """Verify MLPSLoss correctly weights 3 pseudo-mask layers and gradients flow back to logits."""
+    from scripts.build_t4_l4_notebook_suites import get_clean_cell_10_stage2
+
+    lines = get_clean_cell_10_stage2()
+    start = next(i for i, l in enumerate(lines) if "class MLPSLoss" in l)
+    end = next(i for i, l in enumerate(lines) if "criterion_s2 =" in l)
+    func_code = "import torch\n" + "".join(lines[start:end])
+    local_scope = {}
+    exec(func_code, local_scope)
+    mlps_class = local_scope["MLPSLoss"]
+
+    criterion = mlps_class(w_main=1.0, w_aux1=0.4, w_aux2=0.2)
+    logits = torch.randn(2, 5, 64, 64, requires_grad=True)
+    t_main = torch.randint(0, 5, (2, 64, 64), dtype=torch.long)
+    t_aux1 = torch.randint(0, 5, (2, 64, 64), dtype=torch.long)
+    t_aux2 = torch.randint(0, 5, (2, 64, 64), dtype=torch.long)
+
+    loss = criterion(logits, t_main, t_aux1, t_aux2)
+    assert loss.item() > 0.0
+    loss.backward()
+    assert logits.grad is not None
+    assert not torch.isnan(logits.grad).any()
+
+
+def test_stage2_cell_4_dry_run_and_workers_declared():
+    """Verify DRY_RUN and NUM_WORKERS are present in Cell 4 across all Stage 2 notebooks."""
+    stage2_keys = ["stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"]
+    for k in stage2_keys:
+        nb_path = NOTEBOOKS[k]
+        with open(nb_path, "r", encoding="utf-8") as f:
+            nb_data = json.load(f)
+        c4_source = "".join(nb_data["cells"][4]["source"])
+        assert "DRY_RUN = False" in c4_source, f"Notebook {nb_path} missing DRY_RUN declaration in Cell 4"
+        assert "NUM_WORKERS =" in c4_source, f"Notebook {nb_path} missing NUM_WORKERS declaration in Cell 4"
+        assert "DEVICE =" in c4_source, f"Notebook {nb_path} missing DEVICE declaration in Cell 4"
+        assert "AMP_DTYPE =" in c4_source, f"Notebook {nb_path} missing AMP_DTYPE declaration in Cell 4"
+
+
 
 
 

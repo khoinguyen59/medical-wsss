@@ -335,9 +335,16 @@ class Decoder(nn.Module):
 class DeepLabV3Plus(nn.Module):
     """DeepLabV3+ with ResNet-101 backbone and ASPP (59,339,940 parameters, MedIA 2022 SOTA)."""
 
-    def __init__(self, num_classes: int = 4, output_stride: int = 16) -> None:
+    def __init__(
+        self,
+        num_classes: int = 4,
+        output_stride: int = 16,
+        backbone: str = "resnet101",
+        **kwargs: Any,
+    ) -> None:
         super().__init__()
         self.num_classes = num_classes
+        self.backbone_name = backbone
         self.backbone = ResNet101(output_stride=output_stride)
         self.aspp = ASPP(output_stride=output_stride)
         self.decoder = Decoder(num_classes=num_classes)

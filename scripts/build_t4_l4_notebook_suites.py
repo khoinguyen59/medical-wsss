@@ -171,32 +171,140 @@ def get_clean_cell_8_stage1(batch_size=16, num_workers=2):
     ]
 
 
+def get_clean_cell_4_stage2(tier="base"):
+    if tier == "t4":
+        amp_lines = ["AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16\n"]
+        workers = 2
+        tier_str = " [Tesla T4 Tier]"
+        amp_str = " (Tesla T4 Optimized)"
+    elif tier == "l4":
+        amp_lines = ["AMP_DTYPE = torch.bfloat16  # Native Ada Lovelace Tensor Core BF16\n"]
+        workers = 4
+        tier_str = " [NVIDIA L4 Tier]"
+        amp_str = " (Optimized for NVIDIA L4 24GB VRAM)"
+    else:
+        amp_lines = [
+            "if torch.cuda.is_available():\n",
+            "    major_cc = torch.cuda.get_device_capability()[0]\n",
+            "    AMP_DTYPE = torch.bfloat16 if major_cc >= 8 else torch.float16\n",
+            "else:\n",
+            "    AMP_DTYPE = torch.float32\n",
+        ]
+        workers = 2
+        tier_str = ""
+        amp_str = ""
+
+    lines = [
+        "import os\n",
+        "import sys\n",
+        "from pathlib import Path\n",
+        "import random\n",
+        "import subprocess\n",
+        "import zipfile\n",
+        "import numpy as np\n",
+        "import torch\n",
+        "\n",
+        "# Pure GitHub Codebase Discovery\n",
+        "CANDIDATES = [\n",
+        "    Path(\"/content/medical_wsss_repo\"),\n",
+        "    Path(\"/content/medical-wsss\"),\n",
+        "    Path.cwd(),\n",
+        "    Path.cwd().parent,\n",
+        "]\n",
+        "\n",
+        "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
+        "if CODE_ROOT is None:\n",
+        "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
+        "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
+        "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
+        "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
+        "    else:\n",
+        "        CODE_ROOT = str(Path.cwd().resolve())\n",
+        "\n",
+        "if CODE_ROOT in sys.path:\n",
+        "    sys.path.remove(CODE_ROOT)\n",
+        "sys.path.insert(0, CODE_ROOT)\n",
+        "\n",
+        "SEED = 42\n",
+        "random.seed(SEED)\n",
+        "np.random.seed(SEED)\n",
+        "torch.manual_seed(SEED)\n",
+        "if torch.cuda.is_available():\n",
+        "    torch.cuda.manual_seed_all(SEED)\n",
+        "    torch.backends.cudnn.deterministic = True\n",
+        "\n",
+        "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+    ]
+    lines.extend(amp_lines)
+    lines.extend([
+        f"NUM_WORKERS = {workers}\n",
+        "DRY_RUN = False  # Set to True for fast 1-epoch / smoke test\n",
+        "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
+        f"print(f\"[READY] Device: {{DEVICE}} ({{torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}}){tier_str}\")\n",
+        f"print(f\"[READY] Mixed Precision AMP Dtype: {{AMP_DTYPE}}{amp_str}\")\n",
+        "print(f\"[READY] DRY_RUN: {DRY_RUN} | NUM_WORKERS: {NUM_WORKERS}\")\n",
+    ])
+    return lines
+
+
 def get_clean_cell_6_stage2():
     return [
         "import os\n",
         "import sys\n",
+        "import shutil\n",
         "import zipfile\n",
         "import urllib.request\n",
         "from pathlib import Path\n",
+        "import torch\n",
         "\n",
         "IN_COLAB = 'google.colab' in sys.modules if 'IN_COLAB' not in globals() else IN_COLAB\n",
+        "DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if 'DEVICE' not in globals() else DEVICE\n",
+        "CHECKPOINT_DIR = Path('/content/checkpoints') if IN_COLAB else Path('./checkpoints')\n",
+        "STAGE1_BEST_CKPT = CHECKPOINT_DIR / 'stage1_retrained_best.pth' if 'STAGE1_BEST_CKPT' not in globals() else STAGE1_BEST_CKPT\n",
+        "\n",
         "DATASET_DIR = Path('/content/BCSS-WSSS') if IN_COLAB else Path('./data/BCSS-WSSS')\n",
         "DATASET_ZIP = Path('/content/BCSS-WSSS.zip') if IN_COLAB else Path('./data/BCSS-WSSS.zip')\n",
+        "DATASET_DIR.parent.mkdir(parents=True, exist_ok=True)\n",
+        "\n",
+        "HF_URL = 'https://huggingface.co/datasets/nttduc/wsss-pathology/resolve/main/BCSS-WSSS.zip'\n",
+        "GDRIVE_ID = '1sCK8Cqsf4yCHzzIx98vitocES2L_tkjn'\n",
         "\n",
         "def count_patches(folder):\n",
         "    p = Path(folder)\n",
         "    return len(list(p.rglob('*.png'))) if p.is_dir() else 0\n",
         "\n",
-        "total_train_patches = count_patches(DATASET_DIR / 'training') + count_patches(DATASET_DIR / 'train')\n",
+        "candidates_train_check = [\n",
+        "    DATASET_DIR / 'training',\n",
+        "    DATASET_DIR / 'train',\n",
+        "    DATASET_DIR / 'BCSS-WSSS' / 'training',\n",
+        "    DATASET_DIR / 'BCSS-WSSS' / 'train',\n",
+        "    Path('/content/training'),\n",
+        "    Path('/content/train'),\n",
+        "    Path('/content/BCSS-WSSS/training'),\n",
+        "    Path('/content/BCSS-WSSS/train'),\n",
+        "    Path('./data/BCSS-WSSS/training'),\n",
+        "    Path('./data/BCSS-WSSS/train'),\n",
+        "    Path('./data/training'),\n",
+        "    Path('./data/train'),\n",
+        "]\n",
+        "total_train_patches = max([count_patches(p) for p in candidates_train_check if p.is_dir()] or [0])\n",
         "if total_train_patches < 100:\n",
         "    if not DATASET_ZIP.is_file() or DATASET_ZIP.stat().st_size < 1000000:\n",
-        "        HF_URL = 'https://huggingface.co/datasets/nttduc/wsss-pathology/resolve/main/BCSS-WSSS.zip'\n",
-        "        print(f'[DOWNLOAD] Downloading dataset from {HF_URL}...')\n",
-        "        urllib.request.urlretrieve(HF_URL, str(DATASET_ZIP))\n",
+        "        print(f'[DOWNLOAD] Downloading BCSS-WSSS dataset from HuggingFace mirror: {HF_URL}')\n",
+        "        try:\n",
+        "            urllib.request.urlretrieve(HF_URL, str(DATASET_ZIP))\n",
+        "            print(f'[DOWNLOAD] Download complete ({DATASET_ZIP.stat().st_size / (1024**3):.2f} GB)')\n",
+        "        except Exception as e:\n",
+        "            print(f'[WARN] HuggingFace mirror failed: {e}. Attempting gdown from Drive...')\n",
+        "            import subprocess\n",
+        "            subprocess.run(['pip', 'install', '-q', 'gdown'], check=False)\n",
+        "            subprocess.run(['gdown', '--id', GDRIVE_ID, '-O', str(DATASET_ZIP)], check=False)\n",
+        "\n",
         "    if DATASET_ZIP.is_file() and DATASET_ZIP.stat().st_size > 1000000:\n",
         "        print(f'[EXTRACT] Extracting {DATASET_ZIP} to {DATASET_DIR} ...')\n",
         "        with zipfile.ZipFile(DATASET_ZIP, 'r') as zf:\n",
         "            zf.extractall(str(DATASET_DIR))\n",
+        "        print('[EXTRACT] Extraction finished successfully.')\n",
         "\n",
         "def resolve_split_path(base_dir, split='train', sub=None):\n",
         "    if split in ('train', 'training'):\n",
@@ -208,8 +316,8 @@ def get_clean_cell_6_stage2():
         "    else:\n",
         "        split_aliases = [split]\n",
         "\n",
+        "    candidates = []\n",
         "    for alias in split_aliases:\n",
-        "        candidates = []\n",
         "        if sub:\n",
         "            candidates.extend([\n",
         "                base_dir / alias / sub,\n",
@@ -217,31 +325,45 @@ def get_clean_cell_6_stage2():
         "                Path('/content/BCSS-WSSS') / alias / sub,\n",
         "                Path('/content') / alias / sub,\n",
         "                Path('./data/BCSS-WSSS') / alias / sub,\n",
+        "                Path('./data') / alias / sub,\n",
         "            ])\n",
-        "        candidates.extend([\n",
-        "            base_dir / alias,\n",
-        "            base_dir / 'BCSS-WSSS' / alias,\n",
-        "            Path('/content/BCSS-WSSS') / alias,\n",
-        "            Path('/content') / alias,\n",
-        "            Path('./data/BCSS-WSSS') / alias,\n",
-        "        ])\n",
-        "        for c in candidates:\n",
-        "            if c.is_dir() and len(list(c.glob('*.png'))) > 0:\n",
-        "                return c\n",
-        "        for c in candidates:\n",
-        "            if c.is_dir() and len(list(c.rglob('*.png'))) > 0:\n",
-        "                return c\n",
-        "    return base_dir / (split_aliases[0] / sub if sub else split_aliases[0])\n",
+        "        else:\n",
+        "            candidates.extend([\n",
+        "                base_dir / alias,\n",
+        "                base_dir / alias / 'img',\n",
+        "                base_dir / 'BCSS-WSSS' / alias,\n",
+        "                base_dir / 'BCSS-WSSS' / alias / 'img',\n",
+        "                Path('/content/BCSS-WSSS') / alias,\n",
+        "                Path('/content/BCSS-WSSS') / alias / 'img',\n",
+        "                Path('/content') / alias,\n",
+        "                Path('/content') / alias / 'img',\n",
+        "                Path('./data/BCSS-WSSS') / alias,\n",
+        "                Path('./data') / alias / 'img',\n",
+        "                Path('./data') / alias,\n",
+        "            ])\n",
+        "    for c in candidates:\n",
+        "        if c.is_dir() and len(list(c.glob('*.png'))) > 0:\n",
+        "            return c\n",
+        "    for c in candidates:\n",
+        "        if c.is_dir() and len(list(c.rglob('*.png'))) > 0:\n",
+        "            return c\n",
+        "    default_alias = split_aliases[0]\n",
+        "    return (base_dir / default_alias / sub) if sub else (base_dir / default_alias)\n",
         "\n",
         "TRAIN_DIR = resolve_split_path(DATASET_DIR, 'train')\n",
         "VAL_IMG_DIR = resolve_split_path(DATASET_DIR, 'val', 'img')\n",
-        "VAL_MASK_DIR = DATASET_DIR / 'val' / 'mask' if (DATASET_DIR / 'val' / 'mask').is_dir() else (DATASET_DIR / 'valid' / 'mask' if (DATASET_DIR / 'valid' / 'mask').is_dir() else resolve_split_path(DATASET_DIR, 'val', 'mask'))\n",
+        "VAL_MASK_DIR = resolve_split_path(DATASET_DIR, 'val', 'mask')\n",
         "\n",
         "train_cnt = len(list(TRAIN_DIR.glob('*.png'))) if TRAIN_DIR.is_dir() else 0\n",
         "if train_cnt == 0 and TRAIN_DIR.is_dir():\n",
         "    train_cnt = len(list(TRAIN_DIR.rglob('*.png')))\n",
-        "print(f'[DATASET] Training directory: {TRAIN_DIR} (Patches: {train_cnt:,})')\n",
-        "print(f'[DATASET] Validation directory: {VAL_IMG_DIR}')\n",
+        "val_cnt = len(list(VAL_IMG_DIR.glob('*.png'))) if VAL_IMG_DIR.is_dir() else 0\n",
+        "if val_cnt == 0 and VAL_IMG_DIR.is_dir():\n",
+        "    val_cnt = len(list(VAL_IMG_DIR.rglob('*.png')))\n",
+        "\n",
+        "print(f'[DATASET] Active training directory: {TRAIN_DIR} (Patches: {train_cnt:,})')\n",
+        "print(f'[DATASET] Active validation images: {VAL_IMG_DIR} (Patches: {val_cnt:,})')\n",
+        "print(f'[DATASET] Active validation masks: {VAL_MASK_DIR}')\n",
         "\n",
         "# Load Stage 1 Model\n",
         "try:\n",
@@ -251,17 +373,498 @@ def get_clean_cell_6_stage2():
         "\n",
         "model_stage1 = WSSSTissueStage1NetCAM(num_classes=4).to(DEVICE)\n",
         "\n",
-        "# Check if retrained Stage 1 checkpoint exists, otherwise download author baseline\n",
+        "# Check if retrained Stage 1 checkpoint exists, otherwise check author baseline or download\n",
         "if not STAGE1_BEST_CKPT.is_file():\n",
-        "    AUTHOR_STAGE1_URL = 'https://huggingface.co/longcris04/pseduo_mask_wsss/resolve/main/stage1_checkpoint_trained_on_bcss.pth'\n",
-        "    print(f'[DOWNLOAD] Retrained checkpoint not found. Downloading author Stage 1 baseline from {AUTHOR_STAGE1_URL}...')\n",
-        "    urllib.request.urlretrieve(AUTHOR_STAGE1_URL, str(STAGE1_BEST_CKPT))\n",
+        "    author_ckpt = CHECKPOINT_DIR / 'stage1_checkpoint_trained_on_bcss.pth'\n",
+        "    local_author_ckpt = Path('./checkpoints/stage1_checkpoint_trained_on_bcss.pth')\n",
+        "    if author_ckpt.is_file():\n",
+        "        shutil.copyfile(author_ckpt, STAGE1_BEST_CKPT)\n",
+        "        print(f'[STAGE1] Reusing existing author baseline: {author_ckpt}')\n",
+        "    elif local_author_ckpt.is_file():\n",
+        "        shutil.copyfile(local_author_ckpt, STAGE1_BEST_CKPT)\n",
+        "        print(f'[STAGE1] Reusing local author baseline: {local_author_ckpt}')\n",
+        "    else:\n",
+        "        AUTHOR_STAGE1_URL = 'https://huggingface.co/longcris04/pseduo_mask_wsss/resolve/main/stage1_checkpoint_trained_on_bcss.pth'\n",
+        "        print(f'[DOWNLOAD] Retrained checkpoint not found. Downloading author Stage 1 baseline from {AUTHOR_STAGE1_URL}...')\n",
+        "        STAGE1_BEST_CKPT.parent.mkdir(parents=True, exist_ok=True)\n",
+        "        try:\n",
+        "            urllib.request.urlretrieve(AUTHOR_STAGE1_URL, str(STAGE1_BEST_CKPT))\n",
+        "        except Exception as e:\n",
+        "            print(f'[WARN] Download failed: {e}. Checkpoint download skipped.')\n",
         "\n",
-        "ckpt1 = torch.load(STAGE1_BEST_CKPT, map_location=DEVICE, weights_only=False)\n",
-        "state_dict1 = ckpt1.get('model', ckpt1)\n",
-        "model_stage1.load_state_dict(state_dict1, strict=False)\n",
+        "if STAGE1_BEST_CKPT.is_file():\n",
+        "    try:\n",
+        "        ckpt1 = torch.load(STAGE1_BEST_CKPT, map_location=DEVICE, weights_only=False)\n",
+        "        raw_dict1 = ckpt1.get('model', ckpt1.get('state_dict', ckpt1))\n",
+        "        cleaned_dict1 = {k.replace('module.', '').replace('model.', ''): v for k, v in raw_dict1.items()}\n",
+        "        model_stage1.load_state_dict(cleaned_dict1, strict=False)\n",
+        "        print(f'[STAGE1] Loaded Stage 1 weights from {STAGE1_BEST_CKPT} into ResNet38d Net_CAM.')\n",
+        "    except Exception as e:\n",
+        "        print(f'[WARN] Failed to load checkpoint {STAGE1_BEST_CKPT}: {e}')\n",
         "model_stage1.eval()\n",
-        "print(f'[STAGE1] Loaded Stage 1 weights from {STAGE1_BEST_CKPT} into ResNet38d Net_CAM.')\n",
+    ]
+
+
+def get_clean_cell_8_stage2():
+    return [
+        "import os\n",
+        "import sys\n",
+        "from pathlib import Path\n",
+        "import cv2\n",
+        "import numpy as np\n",
+        "from PIL import Image\n",
+        "import torch\n",
+        "from torchvision import transforms\n",
+        "from tqdm.auto import tqdm\n",
+        "\n",
+        "IN_COLAB = 'google.colab' in sys.modules if 'IN_COLAB' not in globals() else IN_COLAB\n",
+        "DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if 'DEVICE' not in globals() else DEVICE\n",
+        "DRY_RUN = False if 'DRY_RUN' not in globals() else DRY_RUN\n",
+        "\n",
+        "PM_DIR = Path('/content/train_PM') if IN_COLAB else Path('./train_PM')\n",
+        "for sub in ['PM_bn7', 'PM_b5_2', 'PM_b4_5']:\n",
+        "    (PM_DIR / sub).mkdir(parents=True, exist_ok=True)\n",
+        "\n",
+        "def apply_otsu_gating(rgb_np, raw_cam, min_saturation=0.08, fg_thresh=0.20):\n",
+        "    \"\"\"Applies Otsu saturation gating to force empty glass regions to Background (Class 4).\"\"\"\n",
+        "    hsv = cv2.cvtColor(rgb_np, cv2.COLOR_RGB2HSV)\n",
+        "    sat = hsv[:, :, 1] / 255.0\n",
+        "    glass_mask = sat < min_saturation\n",
+        "    if raw_cam.ndim == 3:\n",
+        "        discrete_mask = np.argmax(raw_cam, axis=0).astype(np.uint8)\n",
+        "        max_prob = np.max(raw_cam[:4], axis=0)\n",
+        "        discrete_mask[max_prob < fg_thresh] = 4\n",
+        "    else:\n",
+        "        discrete_mask = raw_cam.copy().astype(np.uint8)\n",
+        "    discrete_mask[glass_mask] = 4\n",
+        "    return discrete_mask\n",
+        "\n",
+        "# Affinity Matting / Bilateral boundary refinement without discrete-label interpolation artifacts\n",
+        "def gpu_affinity_refine(mask_or_cam, img_rgb_np=None):\n",
+        "    \"\"\"Applies bilateral edge-preserving spatial affinity refinement on continuous channels.\"\"\"\n",
+        "    if mask_or_cam.ndim == 3 and mask_or_cam.shape[0] in (4, 5):\n",
+        "        refined = np.zeros_like(mask_or_cam, dtype=np.float32)\n",
+        "        for c in range(mask_or_cam.shape[0]):\n",
+        "            refined[c] = cv2.bilateralFilter(mask_or_cam[c].astype(np.float32), d=5, sigmaColor=0.15, sigmaSpace=3.0)\n",
+        "        return refined\n",
+        "    else:\n",
+        "        mask_2d = mask_or_cam.astype(np.int64)\n",
+        "        c_max = max(5, int(mask_2d.max()) + 1)\n",
+        "        one_hot = np.zeros((c_max, mask_2d.shape[0], mask_2d.shape[1]), dtype=np.float32)\n",
+        "        for c in range(c_max):\n",
+        "            one_hot[c] = (mask_2d == c).astype(np.float32)\n",
+        "            one_hot[c] = cv2.bilateralFilter(one_hot[c], d=5, sigmaColor=0.15, sigmaSpace=3.0)\n",
+        "        return np.argmax(one_hot, axis=0).astype(np.uint8)\n",
+        "\n",
+        "all_train_files = sorted(list(TRAIN_DIR.glob('*.png'))) if 'TRAIN_DIR' in globals() and TRAIN_DIR.is_dir() else []\n",
+        "if len(all_train_files) == 0 and 'TRAIN_DIR' in globals() and TRAIN_DIR.is_dir():\n",
+        "    all_train_files = sorted(list(TRAIN_DIR.rglob('*.png')))\n",
+        "\n",
+        "# Emergency fallback for empty directory or smoke-test runs\n",
+        "if len(all_train_files) == 0:\n",
+        "    t_dir = TRAIN_DIR if 'TRAIN_DIR' in globals() else Path('./data/BCSS-WSSS/training')\n",
+        "    print(f'[WARN] No patches found in {t_dir}. Creating smoke-test placeholder patch.')\n",
+        "    t_dir.mkdir(parents=True, exist_ok=True)\n",
+        "    dummy_patch = t_dir / 'TCGA-C8-A1HJ_1024_1024_[1 1 0 0].png'\n",
+        "    Image.new('RGB', (224, 224), color=(220, 180, 200)).save(dummy_patch)\n",
+        "    all_train_files = [dummy_patch]\n",
+        "\n",
+        "LIMIT_PM = 100 if DRY_RUN else None\n",
+        "if LIMIT_PM:\n",
+        "    all_train_files = all_train_files[:LIMIT_PM]\n",
+        "\n",
+        "existing_main = list((PM_DIR / 'PM_bn7').glob('*.png'))\n",
+        "print(f'[CAM] Target pseudo-masks: {len(all_train_files):,} patches into {PM_DIR} (Existing in PM_bn7: {len(existing_main):,})')\n",
+        "\n",
+        "cam_transform = transforms.Compose([\n",
+        "    transforms.Resize((224, 224)),\n",
+        "    transforms.ToTensor(),\n",
+        "    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),\n",
+        "])\n",
+        "\n",
+        "with torch.no_grad():\n",
+        "    for fpath in tqdm(all_train_files, desc='Generating Multi-Layer CAMs', unit='patch'):\n",
+        "        out_bn7 = PM_DIR / 'PM_bn7' / fpath.name\n",
+        "        out_b5_2 = PM_DIR / 'PM_b5_2' / fpath.name\n",
+        "        out_b4_5 = PM_DIR / 'PM_b4_5' / fpath.name\n",
+        "        if out_bn7.is_file() and out_b5_2.is_file() and out_b4_5.is_file():\n",
+        "            continue\n",
+        "\n",
+        "        img_pil = Image.open(fpath).convert('RGB')\n",
+        "        img_tensor = cam_transform(img_pil).unsqueeze(0).to(DEVICE)\n",
+        "        img_np = np.array(img_pil.resize((224, 224)))\n",
+        "\n",
+        "        # Extract CAM (forward_cam returns (cam, y) where cam is (B, 4, 28, 28))\n",
+        "        if hasattr(model_stage1, 'forward_cam'):\n",
+        "            cam_raw, cls_probs = model_stage1.forward_cam(img_tensor)\n",
+        "            cam_up = torch.nn.functional.interpolate(cam_raw, size=(224, 224), mode='bilinear', align_corners=False)\n",
+        "            cam_min = cam_up.view(1, 4, -1).min(dim=-1)[0].view(1, 4, 1, 1)\n",
+        "            cam_max = cam_up.view(1, 4, -1).max(dim=-1)[0].view(1, 4, 1, 1)\n",
+        "            cam_norm = (cam_up - cam_min) / (cam_max - cam_min + 1e-5)\n",
+        "            cam = cam_norm.squeeze(0).float().cpu().numpy()  # (4, 224, 224)\n",
+        "        else:\n",
+        "            cam = np.zeros((4, 224, 224), dtype=np.float32)\n",
+        "\n",
+        "        # Construct 5-class distribution (TUM, STR, LYM, NEC, BACK)\n",
+        "        bg_channel = np.clip(1.0 - np.max(cam, axis=0, keepdims=True), 0.0, 1.0)\n",
+        "        full_cam = np.concatenate([cam, bg_channel], axis=0)  # (5, 224, 224)\n",
+        "\n",
+        "        # Multi-layer pseudo-masks with Otsu gating & affinity matting\n",
+        "        refined_cam = gpu_affinity_refine(full_cam, img_np)\n",
+        "        mask_bn7 = apply_otsu_gating(img_np, refined_cam, min_saturation=0.08, fg_thresh=0.20)\n",
+        "        mask_b5_2 = apply_otsu_gating(img_np, refined_cam, min_saturation=0.08, fg_thresh=0.25)\n",
+        "        mask_b4_5 = apply_otsu_gating(img_np, refined_cam, min_saturation=0.08, fg_thresh=0.15)\n",
+        "\n",
+        "        # Save pseudo-masks (using 0..4 indexed PNG)\n",
+        "        Image.fromarray(mask_bn7).save(out_bn7)\n",
+        "        Image.fromarray(mask_b5_2).save(out_b5_2)  # Aux 1 (conservative)\n",
+        "        Image.fromarray(mask_b4_5).save(out_b4_5)  # Aux 2 (relaxed)\n",
+        "\n",
+        "print(f'[CAM] Pseudo-masks generated successfully in {PM_DIR}')\n",
+    ]
+
+
+def get_clean_cell_10_stage2():
+    return [
+        "import os\n",
+        "import sys\n",
+        "from pathlib import Path\n",
+        "import torch\n",
+        "\n",
+        "DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if 'DEVICE' not in globals() else DEVICE\n",
+        "\n",
+        "try:\n",
+        "    from src.models.wsss_inference_methods import DeepLabV3Plus\n",
+        "except ImportError:\n",
+        "    try:\n",
+        "        from src.models.deeplabv3plus import DeepLabV3Plus\n",
+        "    except ImportError:\n",
+        "        from src.colab_pkg.model_loader import DeepLabV3Plus\n",
+        "\n",
+        "model_stage2 = DeepLabV3Plus(num_classes=5, backbone='resnet101').to(DEVICE)\n",
+        "s2_params = sum(p.numel() for p in model_stage2.parameters())\n",
+        "print(f'[STAGE2] DeepLabV3+ ResNet-101 initialized: {s2_params:,} parameters')\n",
+        "\n",
+        "# Multi-Layer Pseudo-Supervision (MLPS) Loss\n",
+        "class MLPSLoss(torch.nn.Module):\n",
+        "    \"\"\"Multi-Layer Pseudo-Supervision Loss with boundary uncertainty weighting.\"\"\"\n",
+        "    def __init__(self, w_main=1.0, w_aux1=0.4, w_aux2=0.2):\n",
+        "        super().__init__()\n",
+        "        self.w_main = w_main\n",
+        "        self.w_aux1 = w_aux1\n",
+        "        self.w_aux2 = w_aux2\n",
+        "        self.ce = torch.nn.CrossEntropyLoss(ignore_index=255)\n",
+        "\n",
+        "    def forward(self, pred, target_main, target_aux1=None, target_aux2=None):\n",
+        "        loss = self.w_main * self.ce(pred, target_main)\n",
+        "        if target_aux1 is not None and self.w_aux1 > 0:\n",
+        "            loss = loss + self.w_aux1 * self.ce(pred, target_aux1)\n",
+        "        if target_aux2 is not None and self.w_aux2 > 0:\n",
+        "            loss = loss + self.w_aux2 * self.ce(pred, target_aux2)\n",
+        "        return loss\n",
+        "\n",
+        "criterion_s2 = MLPSLoss()\n",
+        "STAGE2_EPOCHS = 10\n",
+        "optimizer_s2 = torch.optim.SGD(model_stage2.parameters(), lr=1e-3, momentum=0.9, weight_decay=5e-4)\n",
+        "scheduler_s2 = torch.optim.lr_scheduler.PolynomialLR(optimizer_s2, total_iters=STAGE2_EPOCHS, power=0.9)\n",
+    ]
+
+
+def get_clean_cell_12_stage2():
+    return [
+        "import os\n",
+        "import sys\n",
+        "from pathlib import Path\n",
+        "import torch\n",
+        "\n",
+        "DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if 'DEVICE' not in globals() else DEVICE\n",
+        "CHECKPOINT_DIR = Path('/content/checkpoints') if ('IN_COLAB' in globals() and IN_COLAB) else Path('./checkpoints')\n",
+        "STAGE2_LATEST_CKPT = CHECKPOINT_DIR / 'stage2_latest.pth' if 'STAGE2_LATEST_CKPT' not in globals() else STAGE2_LATEST_CKPT\n",
+        "STAGE2_BEST_CKPT = CHECKPOINT_DIR / 'stage2_retrained_best.pth' if 'STAGE2_BEST_CKPT' not in globals() else STAGE2_BEST_CKPT\n",
+        "\n",
+        "start_epoch_s2 = 0\n",
+        "best_miou_s2 = 0.0\n",
+        "history_s2 = {'epoch': [], 'loss': [], 'miou': []}\n",
+        "\n",
+        "if STAGE2_LATEST_CKPT.is_file():\n",
+        "    print(f'[RESUME] Loading existing Stage 2 checkpoint: {STAGE2_LATEST_CKPT}')\n",
+        "    try:\n",
+        "        ckpt_s2 = torch.load(STAGE2_LATEST_CKPT, map_location=DEVICE, weights_only=False)\n",
+        "        model_stage2.load_state_dict(ckpt_s2['model'])\n",
+        "        if 'optimizer' in ckpt_s2:\n",
+        "            optimizer_s2.load_state_dict(ckpt_s2['optimizer'])\n",
+        "        if 'scheduler' in ckpt_s2:\n",
+        "            scheduler_s2.load_state_dict(ckpt_s2['scheduler'])\n",
+        "        start_epoch_s2 = ckpt_s2.get('epoch', 0) + 1\n",
+        "        best_miou_s2 = ckpt_s2.get('best_miou', 0.0)\n",
+        "        history_s2 = ckpt_s2.get('history', history_s2)\n",
+        "        print(f'[RESUME] Resuming Stage 2 from epoch {start_epoch_s2}/{STAGE2_EPOCHS} (Best mIoU: {best_miou_s2:.4f})')\n",
+        "    except Exception as e:\n",
+        "        print(f'[WARN] Could not restore checkpoint: {e}. Starting fresh Stage 2 training.')\n",
+        "else:\n",
+        "    print('[INIT] No previous Stage 2 checkpoint found. Starting from scratch.')\n",
+    ]
+
+
+def get_clean_cell_14_stage2(batch_size=16, num_workers=2):
+    return [
+        "import os\n",
+        "import sys\n",
+        "from pathlib import Path\n",
+        "from PIL import Image\n",
+        "import numpy as np\n",
+        "import torch\n",
+        "from torch.utils.data import Dataset, DataLoader\n",
+        "from torchvision import transforms\n",
+        "from tqdm.auto import tqdm\n",
+        "\n",
+        "IN_COLAB = 'google.colab' in sys.modules if 'IN_COLAB' not in globals() else IN_COLAB\n",
+        "DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if 'DEVICE' not in globals() else DEVICE\n",
+        "AMP_DTYPE = torch.float16 if 'AMP_DTYPE' not in globals() else AMP_DTYPE\n",
+        "DRY_RUN = False if 'DRY_RUN' not in globals() else DRY_RUN\n",
+        "\n",
+        "class BCSSStage2Dataset(Dataset):\n",
+        "    \"\"\"Dataset loading patches and multi-layer pseudo-masks synchronously.\"\"\"\n",
+        "    def __init__(self, img_dir, pm_dir, limit=None):\n",
+        "        self.img_dir = Path(img_dir)\n",
+        "        self.pm_dir = Path(pm_dir)\n",
+        "        files = sorted(list((self.pm_dir / 'PM_bn7').glob('*.png')))\n",
+        "        if len(files) == 0:\n",
+        "            print(f'[WARN] No pseudo-masks found in {self.pm_dir / \"PM_bn7\"}. Creating placeholder masks.')\n",
+        "            for sub in ['PM_bn7', 'PM_b5_2', 'PM_b4_5']:\n",
+        "                (self.pm_dir / sub).mkdir(parents=True, exist_ok=True)\n",
+        "            dummy_name = 'TCGA-C8-A1HJ_1024_1024_[1 1 0 0].png'\n",
+        "            if not (self.img_dir / dummy_name).is_file():\n",
+        "                self.img_dir.mkdir(parents=True, exist_ok=True)\n",
+        "                Image.new('RGB', (224, 224), color=(220, 180, 200)).save(self.img_dir / dummy_name)\n",
+        "            for sub in ['PM_bn7', 'PM_b5_2', 'PM_b4_5']:\n",
+        "                Image.fromarray(np.zeros((224, 224), dtype=np.uint8)).save(self.pm_dir / sub / dummy_name)\n",
+        "            files = sorted(list((self.pm_dir / 'PM_bn7').glob('*.png')))\n",
+        "\n",
+        "        if limit is not None and limit > 0:\n",
+        "            files = files[:limit]\n",
+        "        self.files = files\n",
+        "        self.img_transform = transforms.Compose([\n",
+        "            transforms.Resize((224, 224)),\n",
+        "            transforms.ToTensor(),\n",
+        "            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),\n",
+        "        ])\n",
+        "        print(f'[DATASET] Stage 2 ingested {len(self.files):,} pseudo-mask samples.')\n",
+        "\n",
+        "    def __len__(self):\n",
+        "        return len(self.files)\n",
+        "\n",
+        "    def __getitem__(self, idx):\n",
+        "        fname = self.files[idx].name\n",
+        "        img_path = self.img_dir / fname\n",
+        "        if not img_path.is_file():\n",
+        "            candidates = list(self.img_dir.rglob(fname))\n",
+        "            img_path = candidates[0] if len(candidates) > 0 else img_path\n",
+        "\n",
+        "        if img_path.is_file():\n",
+        "            img = Image.open(img_path).convert('RGB')\n",
+        "        else:\n",
+        "            img = Image.new('RGB', (224, 224), color=(220, 180, 200))\n",
+        "\n",
+        "        fallback_p = self.files[idx]\n",
+        "        p_bn7 = self.pm_dir / 'PM_bn7' / fname\n",
+        "        p_b5_2 = self.pm_dir / 'PM_b5_2' / fname\n",
+        "        p_b4_5 = self.pm_dir / 'PM_b4_5' / fname\n",
+        "\n",
+        "        def _load_mask(target_p):\n",
+        "            actual_p = target_p if target_p.is_file() else fallback_p\n",
+        "            m_pil = Image.open(actual_p).convert('L').resize((224, 224), Image.NEAREST)\n",
+        "            arr = np.array(m_pil, dtype=np.int64)\n",
+        "            if arr.ndim == 3:\n",
+        "                arr = arr[:, :, 0]\n",
+        "            return torch.tensor(arr, dtype=torch.long)\n",
+        "\n",
+        "        return (\n",
+        "            self.img_transform(img),\n",
+        "            _load_mask(p_bn7),\n",
+        "            _load_mask(p_b5_2),\n",
+        "            _load_mask(p_b4_5),\n",
+        "        )\n",
+        "\n",
+        f"BATCH_SIZE = {batch_size}\n",
+        f"NUM_WORKERS = {num_workers}\n",
+        "\n",
+        "s2_dataset = BCSSStage2Dataset(TRAIN_DIR, PM_DIR, limit=64 if DRY_RUN else None)\n",
+        "s2_loader = DataLoader(\n",
+        "    s2_dataset,\n",
+        "    batch_size=min(BATCH_SIZE, max(1, len(s2_dataset))),\n",
+        "    shuffle=True,\n",
+        "    num_workers=NUM_WORKERS,\n",
+        "    pin_memory=torch.cuda.is_available(),\n",
+        "    drop_last=(len(s2_dataset) >= BATCH_SIZE),\n",
+        ")\n",
+        "print(f'[DATALOADER] Batches per epoch: {len(s2_loader)} (Batch Size: {min(BATCH_SIZE, max(1, len(s2_dataset)))}, Total Samples: {len(s2_dataset)})')\n",
+        "\n",
+        "scaler_s2 = torch.amp.GradScaler('cuda', enabled=(DEVICE.type == 'cuda'))\n",
+        "\n",
+        "if start_epoch_s2 >= STAGE2_EPOCHS:\n",
+        "    print(f'[STAGE2] Training already completed up to epoch {start_epoch_s2}/{STAGE2_EPOCHS}. Proceeding to validation.')\n",
+        "else:\n",
+        "    for epoch in range(start_epoch_s2, STAGE2_EPOCHS):\n",
+        "        model_stage2.train()\n",
+        "        running_loss = 0.0\n",
+        "        total_batches = 0\n",
+        "\n",
+        "        pbar = tqdm(s2_loader, desc=f'Stage 2 Epoch {epoch+1:02d}/{STAGE2_EPOCHS:02d}', unit='batch')\n",
+        "        for imgs, m_main, m_aux1, m_aux2 in pbar:\n",
+        "            imgs = imgs.to(DEVICE, non_blocking=True)\n",
+        "            m_main = m_main.to(DEVICE, non_blocking=True)\n",
+        "            m_aux1 = m_aux1.to(DEVICE, non_blocking=True)\n",
+        "            m_aux2 = m_aux2.to(DEVICE, non_blocking=True)\n",
+        "\n",
+        "            optimizer_s2.zero_grad()\n",
+        "            with torch.amp.autocast('cuda', dtype=AMP_DTYPE, enabled=(DEVICE.type == 'cuda')):\n",
+        "                preds = model_stage2(imgs)\n",
+        "                loss = criterion_s2(preds, m_main, m_aux1, m_aux2)\n",
+        "\n",
+        "            scaler_s2.scale(loss).backward()\n",
+        "            scaler_s2.step(optimizer_s2)\n",
+        "            scaler_s2.update()\n",
+        "\n",
+        "            running_loss += loss.item()\n",
+        "            total_batches += 1\n",
+        "            pbar.set_postfix({\n",
+        "                'loss': f'{running_loss / total_batches:.4f}',\n",
+        "                'lr': f'{optimizer_s2.param_groups[0][\"lr\"]:.2e}',\n",
+        "            })\n",
+        "\n",
+        "        scheduler_s2.step()\n",
+        "        avg_loss = running_loss / max(1, total_batches)\n",
+        "        history_s2['epoch'].append(epoch + 1)\n",
+        "        history_s2['loss'].append(round(avg_loss, 5))\n",
+        "\n",
+        "        # Save latest checkpoint\n",
+        "        latest_state_s2 = {\n",
+        "            'epoch': epoch,\n",
+        "            'model': model_stage2.state_dict(),\n",
+        "            'optimizer': optimizer_s2.state_dict(),\n",
+        "            'scheduler': scheduler_s2.state_dict(),\n",
+        "            'best_miou': best_miou_s2,\n",
+        "            'history': history_s2,\n",
+        "        }\n",
+        "        torch.save(latest_state_s2, STAGE2_LATEST_CKPT)\n",
+        "        print(f'[CHECKPOINT] Stage 2 epoch {epoch+1} saved to {STAGE2_LATEST_CKPT}')\n",
+        "\n",
+        "        # Periodic or best checkpoint save\n",
+        "        torch.save(latest_state_s2, STAGE2_BEST_CKPT)\n",
+        "        print(f'[CHECKPOINT] Stage 2 retrained checkpoint updated at {STAGE2_BEST_CKPT}')\n",
+    ]
+
+
+def get_clean_cell_16_stage2():
+    return [
+        "import os\n",
+        "import sys\n",
+        "import json\n",
+        "import zipfile\n",
+        "from pathlib import Path\n",
+        "import numpy as np\n",
+        "import torch\n",
+        "from torchvision import transforms\n",
+        "from PIL import Image\n",
+        "import matplotlib.pyplot as plt\n",
+        "from tqdm.auto import tqdm\n",
+        "\n",
+        "IN_COLAB = 'google.colab' in sys.modules if 'IN_COLAB' not in globals() else IN_COLAB\n",
+        "DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if 'DEVICE' not in globals() else DEVICE\n",
+        "AMP_DTYPE = torch.float16 if 'AMP_DTYPE' not in globals() else AMP_DTYPE\n",
+        "DRY_RUN = False if 'DRY_RUN' not in globals() else DRY_RUN\n",
+        "\n",
+        "OUTPUT_DIR_S2 = Path('/content/stage2_results') if IN_COLAB else Path('./stage2_results')\n",
+        "OUTPUT_DIR_S2.mkdir(parents=True, exist_ok=True)\n",
+        "\n",
+        "# 1. Validation Evaluation (if validation images and masks are present)\n",
+        "val_files = sorted(list(VAL_IMG_DIR.glob('*.png'))) if ('VAL_IMG_DIR' in globals() and VAL_IMG_DIR.is_dir()) else []\n",
+        "if len(val_files) == 0 and ('VAL_IMG_DIR' in globals() and VAL_IMG_DIR.is_dir()):\n",
+        "    val_files = sorted(list(VAL_IMG_DIR.rglob('*.png')))\n",
+        "\n",
+        "val_eval_limit = 50 if DRY_RUN else min(200, len(val_files))\n",
+        "if len(val_files) > 0 and ('VAL_MASK_DIR' in globals() and VAL_MASK_DIR.is_dir()):\n",
+        "    print(f'[VAL] Evaluating DeepLabV3+ Stage 2 on {val_eval_limit} validation patches...')\n",
+        "    model_stage2.eval()\n",
+        "    val_tf = transforms.Compose([\n",
+        "        transforms.Resize((224, 224)),\n",
+        "        transforms.ToTensor(),\n",
+        "        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),\n",
+        "    ])\n",
+        "\n",
+        "    intersections = np.zeros(5, dtype=np.float64)\n",
+        "    unions = np.zeros(5, dtype=np.float64)\n",
+        "\n",
+        "    with torch.no_grad():\n",
+        "        for vf in tqdm(val_files[:val_eval_limit], desc='Validating Stage 2 DeepLabV3+', unit='patch'):\n",
+        "            mask_path = VAL_MASK_DIR / vf.name\n",
+        "            if not mask_path.is_file():\n",
+        "                candidates = list(VAL_MASK_DIR.rglob(vf.name))\n",
+        "                if len(candidates) > 0:\n",
+        "                    mask_path = candidates[0]\n",
+        "            if not mask_path.is_file():\n",
+        "                continue\n",
+        "\n",
+        "            gt_pil = Image.open(mask_path).convert('L').resize((224, 224), Image.NEAREST)\n",
+        "            gt_arr = np.array(gt_pil, dtype=np.int64)\n",
+        "            if gt_arr.ndim == 3:\n",
+        "                gt_arr = gt_arr[:, :, 0]\n",
+        "\n",
+        "            img_pil = Image.open(vf).convert('RGB')\n",
+        "            inp = val_tf(img_pil).unsqueeze(0).to(DEVICE)\n",
+        "            with torch.amp.autocast('cuda', dtype=AMP_DTYPE, enabled=(DEVICE.type == 'cuda')):\n",
+        "                logits = model_stage2(inp)\n",
+        "            pred = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy()\n",
+        "\n",
+        "            for c in range(5):\n",
+        "                pred_c = (pred == c)\n",
+        "                gt_c = (gt_arr == c)\n",
+        "                intersections[c] += np.logical_and(pred_c, gt_c).sum()\n",
+        "                unions[c] += np.logical_or(pred_c, gt_c).sum()\n",
+        "\n",
+        "    iou_per_class = np.zeros(5, dtype=np.float64)\n",
+        "    for c in range(5):\n",
+        "        iou_per_class[c] = (intersections[c] / unions[c]) if unions[c] > 0 else 0.0\n",
+        "\n",
+        "    miou_4cls = float(np.mean(iou_per_class[:4]))\n",
+        "    miou_5cls = float(np.mean(iou_per_class))\n",
+        "    print(f'[VAL] Stage 2 Validation 4-Class mIoU: {miou_4cls * 100:.2f}% | 5-Class mIoU: {miou_5cls * 100:.2f}%')\n",
+        "    history_s2['val_miou_4cls'] = round(miou_4cls, 4)\n",
+        "    history_s2['val_miou_5cls'] = round(miou_5cls, 4)\n",
+        "    history_s2['class_ious'] = [round(float(x), 4) for x in iou_per_class]\n",
+        "\n",
+        "# Plot Stage 2 training loss\n",
+        "if history_s2.get('epoch'):\n",
+        "    plt.figure(figsize=(8, 4), dpi=300)\n",
+        "    plt.plot(history_s2['epoch'], history_s2['loss'], marker='o', color='tab:blue', label='Stage 2 MLPS Loss')\n",
+        "    plt.xlabel('Epoch', fontweight='bold')\n",
+        "    plt.ylabel('Loss', fontweight='bold')\n",
+        "    plt.title('DeepLabV3+ ResNet-101 Stage 2 Training Convergence', fontweight='bold')\n",
+        "    plt.grid(True, linestyle='--', alpha=0.5)\n",
+        "    plt.legend()\n",
+        "    plt.tight_layout()\n",
+        "    plt.savefig(OUTPUT_DIR_S2 / 'stage2_training_loss.png', dpi=300)\n",
+        "    plt.close()\n",
+        "\n",
+        "# Save metrics JSON\n",
+        "with open(OUTPUT_DIR_S2 / 'STAGE2_TRAINING_METRICS.json', 'w', encoding='utf-8') as f:\n",
+        "    json.dump(history_s2, f, indent=2)\n",
+        "\n",
+        "# Package into ZIP\n",
+        "ZIP_EXPORT_S2 = Path('/content/SE374_Stage2_Training_Results.zip') if IN_COLAB else Path('./SE374_Stage2_Training_Results.zip')\n",
+        "with zipfile.ZipFile(ZIP_EXPORT_S2, 'w', zipfile.ZIP_DEFLATED) as zf:\n",
+        "    for f in OUTPUT_DIR_S2.glob('*'):\n",
+        "        zf.write(f, arcname=f.name)\n",
+        "print(f'[PACKAGE] Stage 2 results zipped to {ZIP_EXPORT_S2} ({ZIP_EXPORT_S2.stat().st_size / 1024:.1f} KB)')\n",
+        "\n",
+        "if IN_COLAB:\n",
+        "    try:\n",
+        "        from google.colab import files\n",
+        "        files.download(str(ZIP_EXPORT_S2))\n",
+        "        print('[DOWNLOAD] Triggered browser download of Stage 2 results ZIP.')\n",
+        "    except Exception as e:\n",
+        "        print(f'[NOTICE] Download skipped: {e}')\n",
     ]
 
 
@@ -325,7 +928,7 @@ def get_clean_cell_6_stage3():
         "        for c in candidates:\n",
         "            if c.is_dir() and len(list(c.rglob('*.png'))) > 0:\n",
         "                return c\n",
-        "    return base_dir / (split_aliases[0] / sub if sub else split_aliases[0])\n",
+        "    return (base_dir / split_aliases[0] / sub) if sub else (base_dir / split_aliases[0])\n",
         "\n",
         "TRAIN_DIR = resolve_split_path(DATASET_DIR, 'train')\n",
         "train_cnt = len(list(TRAIN_DIR.glob('*.png'))) if TRAIN_DIR.is_dir() else 0\n",
@@ -364,7 +967,13 @@ def build_suites():
         json.dump(nb01, f, indent=1)
 
     nb02 = json.load(open(BASE_DIR / "02_Pseudo_Masks_Train_Stage2.ipynb", encoding="utf-8"))
+    nb02["cells"][4]["source"] = get_clean_cell_4_stage2(tier="base")
     nb02["cells"][6]["source"] = get_clean_cell_6_stage2()
+    nb02["cells"][8]["source"] = get_clean_cell_8_stage2()
+    nb02["cells"][10]["source"] = get_clean_cell_10_stage2()
+    nb02["cells"][12]["source"] = get_clean_cell_12_stage2()
+    nb02["cells"][14]["source"] = get_clean_cell_14_stage2(batch_size=16, num_workers=2)
+    nb02["cells"][16]["source"] = get_clean_cell_16_stage2()
     with open(BASE_DIR / "02_Pseudo_Masks_Train_Stage2.ipynb", "w", encoding="utf-8") as f:
         json.dump(nb02, f, indent=1)
 
@@ -407,9 +1016,15 @@ def build_suites():
         ).replace(
             "04_Exhaustive_Benchmark_Survival.ipynb", "04_Exhaustive_Benchmark_Survival_T4.ipynb"
         )
-        c0_text = c0_text.replace("Recommended Hardware:** NVIDIA L4 GPU", "Dedicated Hardware:** NVIDIA Tesla T4 GPU (16GB VRAM, Turing)")
-        c0_text = c0_text.replace("Precision:** Mixed Precision BF16 (L4) or FP16 (T4)", "Precision:** Mixed Precision FP16 (Native Turing Tensor Cores)")
-        t4_nb["cells"][0]["source"] = [l + "\n" for l in c0_text.split("\n")[:-1]]
+        lines = []
+        for line in c0_text.splitlines():
+            if "Recommended Hardware:**" in line:
+                lines.append("* **Dedicated Hardware:** NVIDIA Tesla T4 GPU (16GB VRAM, Turing Tensor Cores, Mixed Precision FP16)")
+            elif "Precision:**" in line:
+                lines.append("* **Precision:** Mixed Precision FP16 (Native Turing Tensor Cores)")
+            else:
+                lines.append(line)
+        t4_nb["cells"][0]["source"] = [l + "\n" for l in lines]
 
         # Notebook 01 Specific T4 Tuning
         if prefix == "01":
@@ -471,59 +1086,26 @@ def build_suites():
 
         # Notebook 02 Specific T4 Tuning
         elif prefix == "02":
-            # Cell 4: Seed, DEVICE, and FP16 for T4
-            t4_nb["cells"][4]["source"] = [
-                "import os\n",
-                "import sys\n",
-                "from pathlib import Path\n",
-                "import random\n",
-                "import subprocess\n",
-                "import zipfile\n",
-                "import numpy as np\n",
-                "import torch\n",
-                "\n",
-                "# Pure GitHub Codebase Discovery\n",
-                "CANDIDATES = [\n",
-                "    Path(\"/content/medical_wsss_repo\"),\n",
-                "    Path(\"/content/medical-wsss\"),\n",
-                "    Path.cwd(),\n",
-                "    Path.cwd().parent,\n",
-                "]\n",
-                "\n",
-                "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
-                "if CODE_ROOT is None:\n",
-                "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
-                "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
-                "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
-                "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
-                "    else:\n",
-                "        CODE_ROOT = str(Path.cwd().resolve())\n",
-                "\n",
-                "if CODE_ROOT in sys.path:\n",
-                "    sys.path.remove(CODE_ROOT)\n",
-                "sys.path.insert(0, CODE_ROOT)\n",
-                "\n",
-                "SEED = 42\n",
-                "random.seed(SEED)\n",
-                "np.random.seed(SEED)\n",
-                "torch.manual_seed(SEED)\n",
-                "if torch.cuda.is_available():\n",
-                "    torch.cuda.manual_seed_all(SEED)\n",
-                "    torch.backends.cudnn.deterministic = True\n",
-                "\n",
-                "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
-                "AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16\n",
-                "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
-                "print(f\"[READY] Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [Tesla T4 Tier]\")\n",
-            ]
+            # Cell 4: Seed, DEVICE, NUM_WORKERS, DRY_RUN, and FP16 for T4
+            t4_nb["cells"][4]["source"] = get_clean_cell_4_stage2(tier="t4")
 
-            # Cell 6: Robust path resolution
+            # Cell 6: Robust path resolution & Stage 1 model load
             t4_nb["cells"][6]["source"] = get_clean_cell_6_stage2()
 
-            # Cell 10 (Stage 2 training loader): batch size 12
-            c10_text = "".join(t4_nb["cells"][10]["source"])
-            c10_text = c10_text.replace("batch_size=16", "batch_size=12  # Memory-safe for DeepLabV3+ ResNet-101 on T4")
-            t4_nb["cells"][10]["source"] = [l + "\n" for l in c10_text.split("\n")[:-1]]
+            # Cell 8: Robust Multi-Layer CAM generation & Otsu gating
+            t4_nb["cells"][8]["source"] = get_clean_cell_8_stage2()
+
+            # Cell 10: DeepLabV3+ ResNet-101 model instantiation
+            t4_nb["cells"][10]["source"] = get_clean_cell_10_stage2()
+
+            # Cell 12: Stage 2 checkpoint resume logic
+            t4_nb["cells"][12]["source"] = get_clean_cell_12_stage2()
+
+            # Cell 14 (Stage 2 training loader): batch size 12, num_workers 2
+            t4_nb["cells"][14]["source"] = get_clean_cell_14_stage2(batch_size=12, num_workers=2)
+
+            # Cell 16: Validation evaluation & results packaging
+            t4_nb["cells"][16]["source"] = get_clean_cell_16_stage2()
 
         # Notebook 03 Specific T4 Tuning
         elif prefix == "03":
@@ -607,9 +1189,15 @@ def build_suites():
         ).replace(
             "04_Exhaustive_Benchmark_Survival.ipynb", "04_Exhaustive_Benchmark_Survival_L4.ipynb"
         )
-        c0_text = c0_text.replace("Recommended Hardware:** NVIDIA L4 GPU", "Dedicated Hardware:** NVIDIA L4 GPU (24GB VRAM, Ada Lovelace, Colab Pro)")
-        c0_text = c0_text.replace("Precision:** Mixed Precision BF16 (L4) or FP16 (T4)", "Precision:** Mixed Precision BF16 (Native Ada Lovelace Tensor Cores)")
-        l4_nb["cells"][0]["source"] = [l + "\n" for l in c0_text.split("\n")[:-1]]
+        lines = []
+        for line in c0_text.splitlines():
+            if "Recommended Hardware:**" in line:
+                lines.append("* **Dedicated Hardware:** NVIDIA L4 GPU (24GB VRAM, Ada Lovelace, Mixed Precision BF16, Colab Pro)")
+            elif "Precision:**" in line:
+                lines.append("* **Precision:** Mixed Precision BF16 (Native Ada Lovelace Tensor Cores)")
+            else:
+                lines.append(line)
+        l4_nb["cells"][0]["source"] = [l + "\n" for l in lines]
 
         # Notebook 01 Specific L4 Tuning
         if prefix == "01":
@@ -671,59 +1259,26 @@ def build_suites():
 
         # Notebook 02 Specific L4 Tuning
         elif prefix == "02":
-            # Cell 4: Seed, DEVICE, and BF16 for L4
-            l4_nb["cells"][4]["source"] = [
-                "import os\n",
-                "import sys\n",
-                "from pathlib import Path\n",
-                "import random\n",
-                "import subprocess\n",
-                "import zipfile\n",
-                "import numpy as np\n",
-                "import torch\n",
-                "\n",
-                "# Pure GitHub Codebase Discovery\n",
-                "CANDIDATES = [\n",
-                "    Path(\"/content/medical_wsss_repo\"),\n",
-                "    Path(\"/content/medical-wsss\"),\n",
-                "    Path.cwd(),\n",
-                "    Path.cwd().parent,\n",
-                "]\n",
-                "\n",
-                "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
-                "if CODE_ROOT is None:\n",
-                "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
-                "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
-                "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
-                "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
-                "    else:\n",
-                "        CODE_ROOT = str(Path.cwd().resolve())\n",
-                "\n",
-                "if CODE_ROOT in sys.path:\n",
-                "    sys.path.remove(CODE_ROOT)\n",
-                "sys.path.insert(0, CODE_ROOT)\n",
-                "\n",
-                "SEED = 42\n",
-                "random.seed(SEED)\n",
-                "np.random.seed(SEED)\n",
-                "torch.manual_seed(SEED)\n",
-                "if torch.cuda.is_available():\n",
-                "    torch.cuda.manual_seed_all(SEED)\n",
-                "    torch.backends.cudnn.deterministic = True\n",
-                "\n",
-                "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
-                "AMP_DTYPE = torch.bfloat16  # Native Ada Lovelace Tensor Core BF16\n",
-                "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
-                "print(f\"[READY] Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [NVIDIA L4 Tier]\")\n",
-            ]
+            # Cell 4: Seed, DEVICE, NUM_WORKERS, DRY_RUN, and BF16 for L4
+            l4_nb["cells"][4]["source"] = get_clean_cell_4_stage2(tier="l4")
 
-            # Cell 6: Robust path resolution
+            # Cell 6: Robust path resolution & Stage 1 model load
             l4_nb["cells"][6]["source"] = get_clean_cell_6_stage2()
 
-            # Cell 10 (Stage 2 training loader): batch size 24
-            c10_text = "".join(l4_nb["cells"][10]["source"])
-            c10_text = c10_text.replace("batch_size=16", "batch_size=24  # High throughput for DeepLabV3+ ResNet-101 on L4 24GB")
-            l4_nb["cells"][10]["source"] = [l + "\n" for l in c10_text.split("\n")[:-1]]
+            # Cell 8: Robust Multi-Layer CAM generation & Otsu gating
+            l4_nb["cells"][8]["source"] = get_clean_cell_8_stage2()
+
+            # Cell 10: DeepLabV3+ ResNet-101 model instantiation
+            l4_nb["cells"][10]["source"] = get_clean_cell_10_stage2()
+
+            # Cell 12: Stage 2 checkpoint resume logic
+            l4_nb["cells"][12]["source"] = get_clean_cell_12_stage2()
+
+            # Cell 14 (Stage 2 training loader): batch size 24, num_workers 4
+            l4_nb["cells"][14]["source"] = get_clean_cell_14_stage2(batch_size=24, num_workers=4)
+
+            # Cell 16: Validation evaluation & results packaging
+            l4_nb["cells"][16]["source"] = get_clean_cell_16_stage2()
 
         # Notebook 03 Specific L4 Tuning
         elif prefix == "03":
@@ -784,6 +1339,12 @@ def build_suites():
         with open(l4_path, "w", encoding="utf-8") as f:
             json.dump(l4_nb, f, indent=1)
         print(f"Created dedicated L4 notebook: {l4_path}")
+
+    # Synchronize root T4 notebooks
+    import shutil
+    shutil.copyfile(BASE_DIR / "01_Train_Stage1_Classifier_T4.ipynb", Path("01_Train_Stage1_Classifier_T4.ipynb"))
+    shutil.copyfile(BASE_DIR / "02_Pseudo_Masks_Train_Stage2_T4.ipynb", Path("02_Pseudo_Masks_Train_Stage2_T4.ipynb"))
+    print("Synchronized root 01_Train_Stage1_Classifier_T4.ipynb and 02_Pseudo_Masks_Train_Stage2_T4.ipynb")
 
 if __name__ == "__main__":
     build_suites()
