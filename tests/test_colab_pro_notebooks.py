@@ -263,3 +263,52 @@ def test_clinical_biomarkers_mathematical_consistency():
     total_tissue = tum_area + str_area + lym_area + nec_area
     vtp = (tum_area / total_tissue) * 100.0
     assert abs(vtp - 26.315) < 0.01, f"Expected VTP ~26.32%, got {vtp}%"
+
+
+def test_notebook_forward_pass_tensor_shapes_and_loss():
+    """Verify Stage 1 forward_stage1_with_pda outputs (B, 4) logits matching MultiLabelSoftMarginLoss."""
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.models.sam_wsss_adapter import CAM_Prompt_Generator
+
+    model = WSSSTissueStage1NetCAM(num_classes=4)
+    model.eval()
+    images = torch.randn(2, 3, 224, 224)
+    targets = torch.tensor([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]])
+
+    # 1. Forward with PDA (Notebook 01 logic)
+    conv6 = model.forward_backbone(images)
+    cam = torch.nn.functional.conv2d(conv6, model.fc8.weight)
+    cam_flat = cam.view(cam.size(0), cam.size(1), -1)
+    cam_max = cam_flat.max(dim=-1, keepdim=True)[0].unsqueeze(-1)
+    cam_norm = torch.nn.functional.relu(cam) / (cam_max + 1e-5)
+    salient_mask = (cam_norm.max(dim=1, keepdim=True)[0] > 0.7).float()
+    keep_prob = 1.0 - 0.5 * salient_mask
+    dropout_mask = torch.bernoulli(keep_prob)
+    conv6_pda = conv6 * dropout_mask
+
+    x = model.dropout7(conv6_pda)
+    x = model.pool(x)
+    logits = model.fc8(x).view(x.size(0), -1)
+    assert logits.shape == (2, 4), f"Expected logits shape (2, 4), got {logits.shape}"
+
+    criterion = torch.nn.MultiLabelSoftMarginLoss()
+    loss = criterion(logits, targets)
+    assert not torch.isnan(loss) and not torch.isinf(loss)
+    assert loss.item() > 0.0
+
+    # 2. Forward CAM for Notebook 02 and 03
+    cam_raw, cls_probs = model.forward_cam(images)
+    assert cam_raw.shape == (2, 4, 28, 28), f"Expected cam_raw shape (2, 4, 28, 28), got {cam_raw.shape}"
+    assert cls_probs.shape == (2, 4), f"Expected cls_probs shape (2, 4), got {cls_probs.shape}"
+
+    cam_up = torch.nn.functional.interpolate(cam_raw, size=(224, 224), mode="bilinear", align_corners=False)
+    assert cam_up.shape == (2, 4, 224, 224)
+
+    prompt_gen = CAM_Prompt_Generator(num_classes=4)
+    prompt_dict = prompt_gen(cam_up, cls_probs)
+    assert 0 in prompt_dict
+    assert prompt_dict[0]["point_coords"] is not None
+    assert prompt_dict[0]["point_labels"] is not None
+    assert prompt_dict[0]["point_coords"].shape[0] == 2
+
+
