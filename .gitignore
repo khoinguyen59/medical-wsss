@@ -72,4 +72,6 @@ Thumbs.db
 
 # User Downloaded Execution Artifacts at Root
 /01_Train_Stage1_Classifier.ipynb
+/01_Train_Stage1_Classifier_v2.ipynb
+
 
