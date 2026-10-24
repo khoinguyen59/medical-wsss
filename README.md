@@ -6,8 +6,15 @@
 [![Dataset BCSS-WSSS](https://img.shields.io/badge/Dataset-BCSS--WSSS-success.svg)](https://github.com/PathologyDataScience/BCSS)
 [![Benchmark 70.53% mIoU](https://img.shields.io/badge/BCSS_mIoU-70.53%25-brightgreen.svg)](#benchmark-results)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Open In Colab: Scientific Benchmark Runner](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/SE374_Colab_Scientific_Research_Runner.ipynb)
-[![Open In Colab: WSI Clinical Demo](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/SE374_Colab_WSI_LowMag_HighMag_BonusDemo.ipynb)
+
+### 🚀 Google Colab Pro One-Click Execution Suite (Bộ 4 Notebooks Chạy Trực Tiếp)
+
+| Notebook | Tác vụ chính | GPU Khuyên Dùng | Thời Gian | One-Click Launch |
+| :--- | :--- | :---: | :---: | :---: |
+| **01. Train Stage 1 Classifier** | Huấn luyện ResNet38 trên 23,422 ảnh BCSS với Asymmetric Loss & PDA | **NVIDIA L4** (24GB) | ~1.5h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/01_Train_Stage1_Classifier.ipynb) |
+| **02. Pseudo Masks & Stage 2** | Sinh CAM, tinh chỉnh GPU Affinity Matting & Train DeepLabV3+ từ đầu | **NVIDIA L4** (24GB) | ~2.0h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/02_Pseudo_Masks_Train_Stage2.ipynb) |
+| **03. Train Proposed MedSAM** | Đóng băng ViT-B, train LoRA Mask Decoder với CAM-Guided Prompts | **NVIDIA L4** (24GB) | ~45m | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/03_Train_Proposed_MedSAM.ipynb) |
+| **04. Exhaustive Benchmark & Survival** | Đánh giá quét 100% 4,986 test patches đối đầu 3 bên + Kaplan-Meier CAP | **L4 hoặc T4** | ~20m | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/04_Exhaustive_Benchmark_Survival.ipynb) |
 
 > **Môn học:** SE374.R11 - Phát triển phần mềm xử lý ảnh y khoa (Khoa Kỹ thuật Phần mềm, UIT - ĐHQG-HCM)  
 > **Tên đề tài chính thức:** `Coarse-to-Fine Weakly-Supervised Segmentation for Whole Slide Images`  
