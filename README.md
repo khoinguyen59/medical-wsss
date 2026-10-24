@@ -7,14 +7,30 @@
 [![Benchmark 70.53% mIoU](https://img.shields.io/badge/BCSS_mIoU-70.53%25-brightgreen.svg)](#benchmark-results)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-### 🚀 Google Colab Pro One-Click Execution Suite (Bộ 4 Notebooks Chạy Trực Tiếp)
+### 🚀 Google Colab Execution Suites (Bộ Notebooks Độc Lập Cho Từng Loại GPU)
 
-| Notebook | Tác vụ chính | GPU Khuyên Dùng | Thời Gian | One-Click Launch |
+Tất cả các notebook đều chạy trực tiếp 100% trên đĩa cục bộ Colab VM (`/content/checkpoints/`), tự động kéo code từ GitHub, **không yêu cầu cấp quyền Google Drive** và tự động xuất file ZIP kết quả về máy:
+
+#### ⚡ 1. NVIDIA L4 Suite (Colab Pro - 24GB VRAM, Mixed Precision BF16, Batch Size 32)
+*Tối ưu hóa tốc độ và băng thông tối đa cho tài khoản Colab Pro với GPU thế hệ Ada Lovelace.*
+
+| Notebook | Tác vụ chính | Cấu hình L4 | Thời gian | One-Click Launch (L4) |
 | :--- | :--- | :---: | :---: | :---: |
-| **01. Train Stage 1 Classifier** | Huấn luyện ResNet38 trên 23,422 ảnh BCSS với Asymmetric Loss & PDA | **NVIDIA L4** (24GB) | ~1.5h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/01_Train_Stage1_Classifier.ipynb) |
-| **02. Pseudo Masks & Stage 2** | Sinh CAM, tinh chỉnh GPU Affinity Matting & Train DeepLabV3+ từ đầu | **NVIDIA L4** (24GB) | ~2.0h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/02_Pseudo_Masks_Train_Stage2.ipynb) |
-| **03. Train Proposed MedSAM** | Đóng băng ViT-B, train LoRA Mask Decoder với CAM-Guided Prompts | **NVIDIA L4** (24GB) | ~45m | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/03_Train_Proposed_MedSAM.ipynb) |
-| **04. Exhaustive Benchmark & Survival** | Đánh giá quét 100% 4,986 test patches đối đầu 3 bên + Kaplan-Meier CAP | **L4 hoặc T4** | ~20m | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/04_Exhaustive_Benchmark_Survival.ipynb) |
+| **01. Train Stage 1 Classifier** | Train ResNet38d trên 23,422 ảnh với PDA | BF16, Batch 32, 4 Workers | ~1.2h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/01_Train_Stage1_Classifier_L4.ipynb) |
+| **02. Pseudo Masks & Stage 2** | Sinh CAM, GPU Affinity Matting & Train DeepLabV3+ | BF16, Batch 24, 4 Workers | ~1.8h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb) |
+| **03. Train Proposed MedSAM** | Fine-tune LoRA Mask Decoder với CAM Prompts | BF16, Batch 16, 4 Workers | ~40m | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/03_Train_Proposed_MedSAM_L4.ipynb) |
+| **04. Exhaustive Benchmark & Survival** | Đánh giá 4,986 test patches + Kaplan-Meier CAP | High-RAM Batch Evaluation | ~15m | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/04_Exhaustive_Benchmark_Survival_L4.ipynb) |
+
+#### 🔋 2. Tesla T4 Suite (Standard / Tiết Kiệm Compute Units - 16GB VRAM, Mixed Precision FP16)
+*Tối ưu hóa bộ nhớ cho GPU Tesla T4 (Turing) với bộ tích lũy gradient (Gradient Accumulation), chống OOM và tiết kiệm chi phí.*
+
+| Notebook | Tác vụ chính | Cấu hình T4 | Thời gian | One-Click Launch (T4) |
+| :--- | :--- | :---: | :---: | :---: |
+| **01. Train Stage 1 Classifier** | Train ResNet38d trên 23,422 ảnh với PDA | FP16, Batch 16, 2 Workers | ~2.5h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/01_Train_Stage1_Classifier_T4.ipynb) |
+| **02. Pseudo Masks & Stage 2** | Sinh CAM, GPU Affinity Matting & Train DeepLabV3+ | FP16, Batch 12, 2 Workers | ~3.0h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/02_Pseudo_Masks_Train_Stage2_T4.ipynb) |
+| **03. Train Proposed MedSAM** | Fine-tune LoRA Mask Decoder với CAM Prompts | FP16, Batch 8, 2 Workers | ~1.0h | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/03_Train_Proposed_MedSAM_T4.ipynb) |
+| **04. Exhaustive Benchmark & Survival** | Đánh giá 4,986 test patches + Kaplan-Meier CAP | Standard Batch Evaluation | ~25m | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/04_Exhaustive_Benchmark_Survival_T4.ipynb) |
+
 
 > **Môn học:** SE374.R11 - Phát triển phần mềm xử lý ảnh y khoa (Khoa Kỹ thuật Phần mềm, UIT - ĐHQG-HCM)  
 > **Tên đề tài chính thức:** `Coarse-to-Fine Weakly-Supervised Segmentation for Whole Slide Images`  
