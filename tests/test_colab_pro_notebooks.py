@@ -321,3 +321,37 @@ def test_notebook_forward_pass_tensor_shapes_and_loss():
     assert prompt_dict[0]["point_coords"].shape[0] == 2
 
 
+@pytest.mark.parametrize("key,path", list(NOTEBOOKS.items()))
+def test_device_and_amp_declared_before_usage(key, path):
+    """Verify that DEVICE is declared before any usage/print in the setup cells of every notebook."""
+    with open(path, "r", encoding="utf-8") as f:
+        nb_data = json.load(f)
+
+    # Check the setup code cells (first 6 cells)
+    setup_code = ""
+    for cell in nb_data["cells"][:6]:
+        if cell["cell_type"] == "code":
+            setup_code += "".join(cell.get("source", [])) + "\n"
+
+    lines = setup_code.splitlines()
+    device_def_idx = None
+    first_device_use_idx = None
+
+    for idx, line in enumerate(lines):
+        # Look for DEVICE = assignment (excluding comments)
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if "DEVICE =" in line and device_def_idx is None:
+            device_def_idx = idx
+        if ("{DEVICE}" in line or "to(DEVICE)" in line) and first_device_use_idx is None:
+            first_device_use_idx = idx
+
+    assert device_def_idx is not None, f"Notebook {path.name} missing DEVICE assignment in setup cells"
+    if first_device_use_idx is not None:
+        assert device_def_idx < first_device_use_idx, (
+            f"Notebook {path.name} uses DEVICE at line {first_device_use_idx} before declaration at line {device_def_idx}"
+        )
+
+
+

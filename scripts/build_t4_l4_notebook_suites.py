@@ -1,5 +1,4 @@
 import json
-import re
 from pathlib import Path
 
 BASE_DIR = Path("notebooks")
@@ -17,9 +16,9 @@ def build_suites():
         with open(base_path, "r", encoding="utf-8") as f:
             base_nb = json.load(f)
 
-        # -------------------------------------------------------------
+        # =============================================================
         # 1. BUILD T4 DEDICATED NOTEBOOK
-        # -------------------------------------------------------------
+        # =============================================================
         t4_nb = json.loads(json.dumps(base_nb))
         t4_name = base_name.replace(".ipynb", "_T4.ipynb")
         t4_path = BASE_DIR / t4_name
@@ -45,13 +44,55 @@ def build_suites():
 
         # Notebook 01 Specific T4 Tuning
         if prefix == "01":
-            # Cell 4: Force FP16 on T4
-            c4_text = "".join(t4_nb["cells"][4]["source"])
-            t4_amp_code = """AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16 acceleration
-print(f"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
-print(f"[READY] Mixed Precision AMP Dtype: {AMP_DTYPE} (Optimized for Tesla T4 16GB VRAM)")"""
-            c4_text = re.sub(r"if torch\.cuda\.is_available\(\):.*?print\(f\"\[READY\] Mixed Precision AMP Dtype: \{AMP_DTYPE\}\"\)", t4_amp_code, c4_text, flags=re.DOTALL)
-            t4_nb["cells"][4]["source"] = [l + "\n" for l in c4_text.split("\n")[:-1]]
+            # Cell 4: Seed, DEVICE, and FP16 for T4
+            t4_nb["cells"][4]["source"] = [
+                "import os\n",
+                "import sys\n",
+                "from pathlib import Path\n",
+                "import random\n",
+                "import subprocess\n",
+                "import zipfile\n",
+                "import numpy as np\n",
+                "import torch\n",
+                "\n",
+                "# Search candidates for codebase root\n",
+                "# Pure GitHub Codebase Discovery\n",
+                "CANDIDATES = [\n",
+                "    Path(\"/content/medical_wsss_repo\"),\n",
+                "    Path(\"/content/medical-wsss\"),\n",
+                "    Path.cwd(),\n",
+                "    Path.cwd().parent,\n",
+                "]\n",
+                "\n",
+                "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
+                "if CODE_ROOT is None:\n",
+                "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
+                "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
+                "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
+                "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
+                "    else:\n",
+                "        CODE_ROOT = str(Path.cwd().resolve())\n",
+                "\n",
+                "if CODE_ROOT in sys.path:\n",
+                "    sys.path.remove(CODE_ROOT)\n",
+                "sys.path.insert(0, CODE_ROOT)\n",
+                "\n",
+                "# Set reproducible seed\n",
+                "SEED = 42\n",
+                "random.seed(SEED)\n",
+                "np.random.seed(SEED)\n",
+                "torch.manual_seed(SEED)\n",
+                "if torch.cuda.is_available():\n",
+                "    torch.cuda.manual_seed_all(SEED)\n",
+                "    torch.backends.cudnn.deterministic = True\n",
+                "    torch.backends.cudnn.benchmark = False\n",
+                "\n",
+                "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+                "AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16 acceleration for Tesla T4\n",
+                "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
+                "print(f\"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})\")\n",
+                "print(f\"[READY] Mixed Precision AMP Dtype: {AMP_DTYPE} (Tesla T4 Optimized)\")\n",
+            ]
 
             # Cell 8: T4 Batch Size 16, num_workers 2
             c8_text = "".join(t4_nb["cells"][8]["source"])
@@ -61,12 +102,51 @@ print(f"[READY] Mixed Precision AMP Dtype: {AMP_DTYPE} (Optimized for Tesla T4 1
 
         # Notebook 02 Specific T4 Tuning
         elif prefix == "02":
-            # Cell 4: Force FP16
-            c4_text = "".join(t4_nb["cells"][4]["source"])
-            t4_amp_code = """AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16
-print(f"[READY] Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [Tesla T4 Tier]")"""
-            c4_text = re.sub(r"if torch\.cuda\.is_available\(\):.*?print\(f\"\[READY\] Device: \{DEVICE\}.*?\"\)", t4_amp_code, c4_text, flags=re.DOTALL)
-            t4_nb["cells"][4]["source"] = [l + "\n" for l in c4_text.split("\n")[:-1]]
+            # Cell 4: Seed, DEVICE, and FP16 for T4
+            t4_nb["cells"][4]["source"] = [
+                "import os\n",
+                "import sys\n",
+                "from pathlib import Path\n",
+                "import random\n",
+                "import subprocess\n",
+                "import zipfile\n",
+                "import numpy as np\n",
+                "import torch\n",
+                "\n",
+                "# Pure GitHub Codebase Discovery\n",
+                "CANDIDATES = [\n",
+                "    Path(\"/content/medical_wsss_repo\"),\n",
+                "    Path(\"/content/medical-wsss\"),\n",
+                "    Path.cwd(),\n",
+                "    Path.cwd().parent,\n",
+                "]\n",
+                "\n",
+                "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
+                "if CODE_ROOT is None:\n",
+                "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
+                "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
+                "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
+                "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
+                "    else:\n",
+                "        CODE_ROOT = str(Path.cwd().resolve())\n",
+                "\n",
+                "if CODE_ROOT in sys.path:\n",
+                "    sys.path.remove(CODE_ROOT)\n",
+                "sys.path.insert(0, CODE_ROOT)\n",
+                "\n",
+                "SEED = 42\n",
+                "random.seed(SEED)\n",
+                "np.random.seed(SEED)\n",
+                "torch.manual_seed(SEED)\n",
+                "if torch.cuda.is_available():\n",
+                "    torch.cuda.manual_seed_all(SEED)\n",
+                "    torch.backends.cudnn.deterministic = True\n",
+                "\n",
+                "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+                "AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16\n",
+                "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
+                "print(f\"[READY] Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [Tesla T4 Tier]\")\n",
+            ]
 
             # Cell 10 (Stage 2 training loader): batch size 12
             c10_text = "".join(t4_nb["cells"][10]["source"])
@@ -75,12 +155,51 @@ print(f"[READY] Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.i
 
         # Notebook 03 Specific T4 Tuning
         elif prefix == "03":
-            # Cell 4: Force FP16
-            c4_text = "".join(t4_nb["cells"][4]["source"])
-            t4_amp_code = """AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16
-print(f"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [Tesla T4 Tier]")"""
-            c4_text = re.sub(r"if torch\.cuda\.is_available\(\):.*?print\(f\"\[READY\] Compute Device: \{DEVICE\}.*?\"\)", t4_amp_code, c4_text, flags=re.DOTALL)
-            t4_nb["cells"][4]["source"] = [l + "\n" for l in c4_text.split("\n")[:-1]]
+            # Cell 4: Seed, DEVICE, and FP16 for T4
+            t4_nb["cells"][4]["source"] = [
+                "import os\n",
+                "import sys\n",
+                "from pathlib import Path\n",
+                "import random\n",
+                "import subprocess\n",
+                "import zipfile\n",
+                "import numpy as np\n",
+                "import torch\n",
+                "\n",
+                "# Pure GitHub Codebase Discovery\n",
+                "CANDIDATES = [\n",
+                "    Path(\"/content/medical_wsss_repo\"),\n",
+                "    Path(\"/content/medical-wsss\"),\n",
+                "    Path.cwd(),\n",
+                "    Path.cwd().parent,\n",
+                "]\n",
+                "\n",
+                "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
+                "if CODE_ROOT is None:\n",
+                "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
+                "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
+                "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
+                "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
+                "    else:\n",
+                "        CODE_ROOT = str(Path.cwd().resolve())\n",
+                "\n",
+                "if CODE_ROOT in sys.path:\n",
+                "    sys.path.remove(CODE_ROOT)\n",
+                "sys.path.insert(0, CODE_ROOT)\n",
+                "\n",
+                "SEED = 42\n",
+                "random.seed(SEED)\n",
+                "np.random.seed(SEED)\n",
+                "torch.manual_seed(SEED)\n",
+                "if torch.cuda.is_available():\n",
+                "    torch.cuda.manual_seed_all(SEED)\n",
+                "    torch.backends.cudnn.deterministic = True\n",
+                "\n",
+                "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+                "AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16\n",
+                "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
+                "print(f\"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [Tesla T4 Tier]\")\n",
+            ]
 
             # Cell 12: batch size 8 for MedSAM on T4
             c12_text = "".join(t4_nb["cells"][12]["source"])
@@ -91,9 +210,9 @@ print(f"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torc
             json.dump(t4_nb, f, indent=1)
         print(f"Created dedicated T4 notebook: {t4_path}")
 
-        # -------------------------------------------------------------
+        # =============================================================
         # 2. BUILD L4 DEDICATED NOTEBOOK
-        # -------------------------------------------------------------
+        # =============================================================
         l4_nb = json.loads(json.dumps(base_nb))
         l4_name = base_name.replace(".ipynb", "_L4.ipynb")
         l4_path = BASE_DIR / l4_name
@@ -119,13 +238,55 @@ print(f"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torc
 
         # Notebook 01 Specific L4 Tuning
         if prefix == "01":
-            # Cell 4: Force BF16 on L4
-            c4_text = "".join(l4_nb["cells"][4]["source"])
-            l4_amp_code = """AMP_DTYPE = torch.bfloat16  # Native Ada Lovelace Tensor Core BF16 acceleration
-print(f"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
-print(f"[READY] Mixed Precision AMP Dtype: {AMP_DTYPE} (Optimized for NVIDIA L4 24GB VRAM)")"""
-            c4_text = re.sub(r"if torch\.cuda\.is_available\(\):.*?print\(f\"\[READY\] Mixed Precision AMP Dtype: \{AMP_DTYPE\}\"\)", l4_amp_code, c4_text, flags=re.DOTALL)
-            l4_nb["cells"][4]["source"] = [l + "\n" for l in c4_text.split("\n")[:-1]]
+            # Cell 4: Seed, DEVICE, and BF16 for L4
+            l4_nb["cells"][4]["source"] = [
+                "import os\n",
+                "import sys\n",
+                "from pathlib import Path\n",
+                "import random\n",
+                "import subprocess\n",
+                "import zipfile\n",
+                "import numpy as np\n",
+                "import torch\n",
+                "\n",
+                "# Search candidates for codebase root\n",
+                "# Pure GitHub Codebase Discovery\n",
+                "CANDIDATES = [\n",
+                "    Path(\"/content/medical_wsss_repo\"),\n",
+                "    Path(\"/content/medical-wsss\"),\n",
+                "    Path.cwd(),\n",
+                "    Path.cwd().parent,\n",
+                "]\n",
+                "\n",
+                "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
+                "if CODE_ROOT is None:\n",
+                "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
+                "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
+                "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
+                "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
+                "    else:\n",
+                "        CODE_ROOT = str(Path.cwd().resolve())\n",
+                "\n",
+                "if CODE_ROOT in sys.path:\n",
+                "    sys.path.remove(CODE_ROOT)\n",
+                "sys.path.insert(0, CODE_ROOT)\n",
+                "\n",
+                "# Set reproducible seed\n",
+                "SEED = 42\n",
+                "random.seed(SEED)\n",
+                "np.random.seed(SEED)\n",
+                "torch.manual_seed(SEED)\n",
+                "if torch.cuda.is_available():\n",
+                "    torch.cuda.manual_seed_all(SEED)\n",
+                "    torch.backends.cudnn.deterministic = True\n",
+                "    torch.backends.cudnn.benchmark = False\n",
+                "\n",
+                "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+                "AMP_DTYPE = torch.bfloat16  # Native Ada Lovelace Tensor Core BF16 acceleration for NVIDIA L4\n",
+                "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
+                "print(f\"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})\")\n",
+                "print(f\"[READY] Mixed Precision AMP Dtype: {AMP_DTYPE} (Optimized for NVIDIA L4 24GB VRAM)\")\n",
+            ]
 
             # Cell 8: L4 Batch Size 32, num_workers 4
             c8_text = "".join(l4_nb["cells"][8]["source"])
@@ -135,12 +296,51 @@ print(f"[READY] Mixed Precision AMP Dtype: {AMP_DTYPE} (Optimized for NVIDIA L4 
 
         # Notebook 02 Specific L4 Tuning
         elif prefix == "02":
-            # Cell 4: Force BF16
-            c4_text = "".join(l4_nb["cells"][4]["source"])
-            l4_amp_code = """AMP_DTYPE = torch.bfloat16  # Native Ada Lovelace Tensor Core BF16
-print(f"[READY] Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [NVIDIA L4 Tier]")"""
-            c4_text = re.sub(r"if torch\.cuda\.is_available\(\):.*?print\(f\"\[READY\] Device: \{DEVICE\}.*?\"\)", l4_amp_code, c4_text, flags=re.DOTALL)
-            l4_nb["cells"][4]["source"] = [l + "\n" for l in c4_text.split("\n")[:-1]]
+            # Cell 4: Seed, DEVICE, and BF16 for L4
+            l4_nb["cells"][4]["source"] = [
+                "import os\n",
+                "import sys\n",
+                "from pathlib import Path\n",
+                "import random\n",
+                "import subprocess\n",
+                "import zipfile\n",
+                "import numpy as np\n",
+                "import torch\n",
+                "\n",
+                "# Pure GitHub Codebase Discovery\n",
+                "CANDIDATES = [\n",
+                "    Path(\"/content/medical_wsss_repo\"),\n",
+                "    Path(\"/content/medical-wsss\"),\n",
+                "    Path.cwd(),\n",
+                "    Path.cwd().parent,\n",
+                "]\n",
+                "\n",
+                "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
+                "if CODE_ROOT is None:\n",
+                "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
+                "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
+                "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
+                "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
+                "    else:\n",
+                "        CODE_ROOT = str(Path.cwd().resolve())\n",
+                "\n",
+                "if CODE_ROOT in sys.path:\n",
+                "    sys.path.remove(CODE_ROOT)\n",
+                "sys.path.insert(0, CODE_ROOT)\n",
+                "\n",
+                "SEED = 42\n",
+                "random.seed(SEED)\n",
+                "np.random.seed(SEED)\n",
+                "torch.manual_seed(SEED)\n",
+                "if torch.cuda.is_available():\n",
+                "    torch.cuda.manual_seed_all(SEED)\n",
+                "    torch.backends.cudnn.deterministic = True\n",
+                "\n",
+                "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+                "AMP_DTYPE = torch.bfloat16  # Native Ada Lovelace Tensor Core BF16\n",
+                "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
+                "print(f\"[READY] Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [NVIDIA L4 Tier]\")\n",
+            ]
 
             # Cell 10 (Stage 2 training loader): batch size 24
             c10_text = "".join(l4_nb["cells"][10]["source"])
@@ -149,12 +349,51 @@ print(f"[READY] Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.i
 
         # Notebook 03 Specific L4 Tuning
         elif prefix == "03":
-            # Cell 4: Force BF16
-            c4_text = "".join(l4_nb["cells"][4]["source"])
-            l4_amp_code = """AMP_DTYPE = torch.bfloat16  # Native Ada Lovelace Tensor Core BF16
-print(f"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [NVIDIA L4 Tier]")"""
-            c4_text = re.sub(r"if torch\.cuda\.is_available\(\):.*?print\(f\"\[READY\] Compute Device: \{DEVICE\}.*?\"\)", l4_amp_code, c4_text, flags=re.DOTALL)
-            l4_nb["cells"][4]["source"] = [l + "\n" for l in c4_text.split("\n")[:-1]]
+            # Cell 4: Seed, DEVICE, and BF16 for L4
+            l4_nb["cells"][4]["source"] = [
+                "import os\n",
+                "import sys\n",
+                "from pathlib import Path\n",
+                "import random\n",
+                "import subprocess\n",
+                "import zipfile\n",
+                "import numpy as np\n",
+                "import torch\n",
+                "\n",
+                "# Pure GitHub Codebase Discovery\n",
+                "CANDIDATES = [\n",
+                "    Path(\"/content/medical_wsss_repo\"),\n",
+                "    Path(\"/content/medical-wsss\"),\n",
+                "    Path.cwd(),\n",
+                "    Path.cwd().parent,\n",
+                "]\n",
+                "\n",
+                "CODE_ROOT = next((str(p.resolve()) for p in CANDIDATES if (p / \"src\" / \"models\").is_dir()), None)\n",
+                "if CODE_ROOT is None:\n",
+                "    print(\"[GIT] Cloning official repository https://github.com/khoinguyen59/medical-wsss.git ...\")\n",
+                "    subprocess.run([\"git\", \"clone\", \"--depth\", \"1\", \"https://github.com/khoinguyen59/medical-wsss.git\", \"/content/medical_wsss_repo\"], check=False)\n",
+                "    if Path(\"/content/medical_wsss_repo/src/models\").is_dir():\n",
+                "        CODE_ROOT = str(Path(\"/content/medical_wsss_repo\").resolve())\n",
+                "    else:\n",
+                "        CODE_ROOT = str(Path.cwd().resolve())\n",
+                "\n",
+                "if CODE_ROOT in sys.path:\n",
+                "    sys.path.remove(CODE_ROOT)\n",
+                "sys.path.insert(0, CODE_ROOT)\n",
+                "\n",
+                "SEED = 42\n",
+                "random.seed(SEED)\n",
+                "np.random.seed(SEED)\n",
+                "torch.manual_seed(SEED)\n",
+                "if torch.cuda.is_available():\n",
+                "    torch.cuda.manual_seed_all(SEED)\n",
+                "    torch.backends.cudnn.deterministic = True\n",
+                "\n",
+                "DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+                "AMP_DTYPE = torch.bfloat16  # Native Ada Lovelace Tensor Core BF16\n",
+                "print(f\"[READY] Code root: {CODE_ROOT}\")\n",
+                "print(f\"[READY] Compute Device: {DEVICE} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}) [NVIDIA L4 Tier]\")\n",
+            ]
 
             # Cell 12: batch size 16 for MedSAM on L4
             c12_text = "".join(l4_nb["cells"][12]["source"])
