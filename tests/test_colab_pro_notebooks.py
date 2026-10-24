@@ -25,7 +25,16 @@ NOTEBOOKS = {
     "stage2": Path("notebooks/02_Pseudo_Masks_Train_Stage2.ipynb"),
     "medsam": Path("notebooks/03_Train_Proposed_MedSAM.ipynb"),
     "benchmark": Path("notebooks/04_Exhaustive_Benchmark_Survival.ipynb"),
+    "stage1_t4": Path("notebooks/01_Train_Stage1_Classifier_T4.ipynb"),
+    "stage2_t4": Path("notebooks/02_Pseudo_Masks_Train_Stage2_T4.ipynb"),
+    "medsam_t4": Path("notebooks/03_Train_Proposed_MedSAM_T4.ipynb"),
+    "benchmark_t4": Path("notebooks/04_Exhaustive_Benchmark_Survival_T4.ipynb"),
+    "stage1_l4": Path("notebooks/01_Train_Stage1_Classifier_L4.ipynb"),
+    "stage2_l4": Path("notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb"),
+    "medsam_l4": Path("notebooks/03_Train_Proposed_MedSAM_L4.ipynb"),
+    "benchmark_l4": Path("notebooks/04_Exhaustive_Benchmark_Survival_L4.ipynb"),
 }
+
 
 FORBIDDEN_DASHES = [
     ("\u2014", "em-dash"),
