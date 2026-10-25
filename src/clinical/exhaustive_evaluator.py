@@ -623,13 +623,18 @@ class ExhaustiveBenchmarkEvaluator:
             gt_vtp = compute_viable_tumor_percentage(gt_cnt["tum"], gt_cnt["tot"])
             gt_cap = stratify_cap_risk(gt_tsr)
 
-            # Clinical survival info
-            surv_info = clinical_manifest.get(pid, {
-                "overall_survival_months": 15.0,
-                "vital_status": 0,
-                "status_label": "Living",
-                "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-            })
+            # Clinical survival info (Strict zero-mockup: do not fabricate default 15.0 months)
+            surv_info = clinical_manifest.get(pid, None)
+            if surv_info is not None:
+                surv_months = surv_info.get("overall_survival_months", None)
+                v_status = surv_info.get("vital_status", None)
+                status_lbl = surv_info.get("status_label", "Recorded")
+                hist_sub = surv_info.get("histological_subtype", "Invasive Ductal Carcinoma (IDC)")
+            else:
+                surv_months = None
+                v_status = None
+                status_lbl = "Unrecorded"
+                hist_sub = "Unknown"
 
             patient_summary[pid] = {
                 "patient_id": pid,
@@ -641,48 +646,49 @@ class ExhaustiveBenchmarkEvaluator:
                 "gt_tsr": gt_tsr,
                 "gt_vtp": gt_vtp,
                 "gt_cap_risk_category": gt_cap["risk_group"],
-                "overall_survival_months": surv_info["overall_survival_months"],
-                "vital_status": surv_info["vital_status"],
-                "status_label": surv_info["status_label"],
-                "histological_subtype": surv_info["histological_subtype"],
+                "overall_survival_months": surv_months,
+                "vital_status": v_status,
+                "status_label": status_lbl,
+                "histological_subtype": hist_sub,
             }
 
-            # Stratify into survival groups
-            surv_months = surv_info["overall_survival_months"]
-            v_status = surv_info["vital_status"]
-            if cap_risk["is_stroma_rich"]:
-                durations_rich.append(surv_months)
-                events_rich.append(v_status)
-            else:
-                durations_poor.append(surv_months)
-                events_poor.append(v_status)
+            # Stratify into survival groups only if valid survival data exists
+            if surv_months is not None and v_status is not None:
+                if cap_risk["is_stroma_rich"]:
+                    durations_rich.append(float(surv_months))
+                    events_rich.append(int(v_status))
+                else:
+                    durations_poor.append(float(surv_months))
+                    events_poor.append(int(v_status))
 
-        # Ensure both groups have at least 1 observation for KM curve
-        if len(durations_rich) == 0:
-            durations_rich = [7.85, 8.74]
-            events_rich = [1, 1]
-        if len(durations_poor) == 0:
-            durations_poor = [15.0, 20.0]
-            events_poor = [0, 0]
-
-        # Dual-engine Kaplan-Meier estimation
+        # Scientific standard: Do NOT fabricate dummy patients if a group is empty (Invariant 07: Zero Mockup)
         km_engine = KaplanMeierSurvivalAnalysis()
-        fit_rich = km_engine.fit(durations_rich, events_rich, label="Stroma-Rich (High Risk, TSR <= 50%)")
-        fit_poor = km_engine.fit(durations_poor, events_poor, label="Stroma-Poor (Low Risk, TSR > 50%)")
-        logrank_res = km_engine.logrank_test(
-            durations_rich, events_rich, durations_poor, events_poor,
-            label_a="Stroma-Rich", label_b="Stroma-Poor",
-        )
-
-        # Render and save publication figure
-        plot_path = self.output_dir / "kaplan_meier_survival_curve.png"
-        km_engine.plot_survival_curves(
-            fit_rich, fit_poor,
-            durations_rich, events_rich, durations_poor, events_poor,
-            output_path=plot_path,
-            logrank_res=logrank_res,
-            title="Kaplan-Meier Survival Stratification by AI-Predicted TSR (TCGA-BRCA)",
-        )
+        if len(durations_rich) > 0 and len(durations_poor) > 0:
+            fit_rich = km_engine.fit(durations_rich, events_rich, label="Stroma-Rich (High Risk, TSR <= 50%)")
+            fit_poor = km_engine.fit(durations_poor, events_poor, label="Stroma-Poor (Low Risk, TSR > 50%)")
+            logrank_res = km_engine.logrank_test(
+                durations_rich, events_rich, durations_poor, events_poor,
+                label_a="Stroma-Rich", label_b="Stroma-Poor",
+            )
+            plot_path = self.output_dir / "kaplan_meier_survival_curve.png"
+            km_engine.plot_survival_curves(
+                fit_rich, fit_poor,
+                durations_rich, events_rich, durations_poor, events_poor,
+                output_path=plot_path,
+                logrank_res=logrank_res,
+                title="Kaplan-Meier Survival Stratification by AI-Predicted TSR (TCGA-BRCA)",
+            )
+            fig_png = str(plot_path)
+            fig_svg = str(plot_path.with_suffix(".svg"))
+        else:
+            print(f"[EVALUATOR] Notice: Insufficient survival events for 2-cohort logrank comparison (Rich: {len(durations_rich)}, Poor: {len(durations_poor)}). Zero dummy patients injected.")
+            logrank_res = {
+                "p_value": None,
+                "test_statistic": None,
+                "status": "Insufficient stratified cohorts for logrank test; no dummy patients injected.",
+            }
+            fig_png = None
+            fig_svg = None
 
         # Bland-Altman agreement plot
         self._plot_bland_altman(patient_summary)
@@ -693,8 +699,8 @@ class ExhaustiveBenchmarkEvaluator:
             "stroma_poor_count": len(durations_poor),
             "logrank_test": logrank_res,
             "patient_summary": patient_summary,
-            "figure_path_png": str(plot_path),
-            "figure_path_svg": str(plot_path.with_suffix(".svg")),
+            "figure_path_png": fig_png,
+            "figure_path_svg": fig_svg,
         }
 
     def _plot_bland_altman(self, patient_summary: Dict[str, Dict[str, Any]]) -> None:

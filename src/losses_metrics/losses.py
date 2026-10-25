@@ -71,7 +71,8 @@ class MultiLayerPseudoSupervisionLoss(nn.Module):
                     )
                 else:
                     scaled_logits = pred_logits
-                loss = self.ce(scaled_logits, target_mask.long())
+                target_clamped = target_mask.long().clamp(0, scaled_logits.shape[1] - 1)
+                loss = self.ce(scaled_logits, target_clamped)
                 total_loss = total_loss + weight * loss
 
         return total_loss

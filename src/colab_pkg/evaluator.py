@@ -1092,12 +1092,23 @@ def run_val_to_test_scientific_protocol(
         f"mDice: {test_metrics['mDice']:.2f}% | FwIoU: {test_metrics['FwIoU']:.2f}%"
     )
 
-    gen_gap = float(best_val_metrics["mIoU"] - test_metrics["mIoU"])
-    protocol_passed = abs(gen_gap) <= 5.0
+    val_cm = best_val_metrics.get("confusion_matrix", np.zeros((5, 5)))
+    test_cm = test_metrics.get("confusion_matrix", np.zeros((5, 5)))
+    val_pixels = float(val_cm.sum()) if hasattr(val_cm, "sum") else 0.0
+    test_pixels = float(test_cm.sum()) if hasattr(test_cm, "sum") else 0.0
 
-    print("=" * 80)
-    print(f"[KẾT LUẬN GIAO THỨC VAL-TO-TEST]: Generalization Gap: {gen_gap:+.2f}% | Hợp lệ (<= 5%): {protocol_passed}")
-    print("=" * 80)
+    if val_pixels <= 0.0 or test_pixels <= 0.0:
+        gen_gap = float("nan")
+        protocol_passed = False
+        print("=" * 80)
+        print(f"[CẢNH BÁO GIAO THỨC VAL-TO-TEST]: 0 pixel được đánh giá (Val: {val_pixels:.0f}, Test: {test_pixels:.0f})! Giao thức THẤT BẠI (protocol_passed=False).")
+        print("=" * 80)
+    else:
+        gen_gap = float(best_val_metrics["mIoU"] - test_metrics["mIoU"])
+        protocol_passed = abs(gen_gap) <= 5.0
+        print("=" * 80)
+        print(f"[KẾT LUẬN GIAO THỨC VAL-TO-TEST]: Generalization Gap: {gen_gap:+.2f}% | Hợp lệ (<= 5%): {protocol_passed}")
+        print("=" * 80)
 
     result_dict = {
         "locked_hyperparameter": {

@@ -315,7 +315,14 @@ class BCSSStage2MultiMaskDataset(Dataset):
         mask_path = mask_dir / filename
         if mask_path.exists():
             mask_img = Image.open(mask_path)
-            return np.array(mask_img, dtype=np.int64)
+            if mask_img.mode == "P":
+                arr = np.array(mask_img, dtype=np.int64)
+            else:
+                arr = np.array(mask_img.convert("L"), dtype=np.int64)
+            if arr.ndim == 3:
+                arr = arr[:, :, 0]
+            arr = np.clip(arr, 0, 4)
+            return arr
         elif self.fallback_mask:
             # Fallback to zeros (class 0 or background) if layer mask is missing
             return np.zeros((224, 224), dtype=np.int64)
@@ -441,7 +448,13 @@ class BCSSEvalDataset(Dataset):
         mask_path = self.mask_dir / img_path.name
         if mask_path.exists():
             mask_img = Image.open(mask_path)
-            mask_np = np.array(mask_img, dtype=np.int64)
+            if mask_img.mode == "P":
+                mask_np = np.array(mask_img, dtype=np.int64)
+            else:
+                mask_np = np.array(mask_img.convert("L"), dtype=np.int64)
+            if mask_np.ndim == 3:
+                mask_np = mask_np[:, :, 0]
+            mask_np = np.clip(mask_np, 0, 4)
         else:
             # Fallback zero mask if mask folder is absent
             mask_np = np.zeros((224, 224), dtype=np.int64)
@@ -465,8 +478,27 @@ def create_stage1_dataloaders(
     Ensures 0.0% patient-level leakage between train and val splits.
     """
     data_path = Path(data_dir)
-    train_dir = data_path / "train" if (data_path / "train").exists() else data_path
-    val_dir = data_path / "val" / "img" if (data_path / "val" / "img").exists() else None
+    if (data_path / "training").exists():
+        train_dir = data_path / "training"
+    elif (data_path / "train").exists():
+        train_dir = data_path / "train"
+    elif (data_path / "BCSS-WSSS" / "training").exists():
+        train_dir = data_path / "BCSS-WSSS" / "training"
+    elif (data_path / "BCSS-WSSS" / "train").exists():
+        train_dir = data_path / "BCSS-WSSS" / "train"
+    else:
+        train_dir = data_path
+
+    val_dir = None
+    for cand in [
+        data_path / "val" / "img",
+        data_path / "valid" / "img",
+        data_path / "BCSS-WSSS" / "val" / "img",
+        data_path / "BCSS-WSSS" / "valid" / "img",
+    ]:
+        if cand.exists():
+            val_dir = cand
+            break
 
     splits = load_bcss_patient_splits(splits_config)
     train_patients = set(splits.get("train", []))
