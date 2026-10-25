@@ -350,6 +350,80 @@ def get_clean_cell_14_stage1():
     ]
 
 
+def get_clean_cell_16_stage1():
+    return [
+        "import os\n",
+        "import sys\n",
+        "import json\n",
+        "import shutil\n",
+        "import zipfile\n",
+        "from pathlib import Path\n",
+        "import matplotlib.pyplot as plt\n",
+        "\n",
+        "IN_COLAB = 'google.colab' in sys.modules if 'IN_COLAB' not in globals() else IN_COLAB\n",
+        "CHECKPOINT_DIR = Path('/content/checkpoints') if IN_COLAB else Path('./checkpoints')\n",
+        "STAGE1_BEST_CKPT = CHECKPOINT_DIR / 'stage1_retrained_best.pth' if 'STAGE1_BEST_CKPT' not in globals() else STAGE1_BEST_CKPT\n",
+        "STAGE1_LATEST_CKPT = CHECKPOINT_DIR / 'stage1_latest.pth' if 'STAGE1_LATEST_CKPT' not in globals() else STAGE1_LATEST_CKPT\n",
+        "\n",
+        "OUTPUT_DIR = Path('/content/stage1_results') if IN_COLAB else Path('./stage1_results')\n",
+        "OUTPUT_DIR.mkdir(parents=True, exist_ok=True)\n",
+        "\n",
+        "# Scientific standard: Bundle trained model checkpoints into output package\n",
+        "if STAGE1_BEST_CKPT.is_file():\n",
+        "    shutil.copy(STAGE1_BEST_CKPT, OUTPUT_DIR / STAGE1_BEST_CKPT.name)\n",
+        "    print(f'[PACKAGE] Bundled best checkpoint {STAGE1_BEST_CKPT.name} ({STAGE1_BEST_CKPT.stat().st_size / (1024**2):.1f} MB)')\n",
+        "if STAGE1_LATEST_CKPT.is_file():\n",
+        "    shutil.copy(STAGE1_LATEST_CKPT, OUTPUT_DIR / STAGE1_LATEST_CKPT.name)\n",
+        "    print(f'[PACKAGE] Bundled latest checkpoint {STAGE1_LATEST_CKPT.name}')\n",
+        "\n",
+        "# Plot training curves\n",
+        "if history.get('epoch'):\n",
+        "    fig, ax1 = plt.subplots(figsize=(9, 5), dpi=300)\n",
+        "    color = 'tab:red'\n",
+        "    ax1.set_xlabel('Epoch', fontweight='bold')\n",
+        "    ax1.set_ylabel('Loss', color=color, fontweight='bold')\n",
+        "    ax1.plot(history['epoch'], history['loss'], color=color, marker='o', label='Training Loss')\n",
+        "    ax1.tick_params(axis='y', labelcolor=color)\n",
+        "    ax1.grid(True, linestyle='--', alpha=0.5)\n",
+        "    \n",
+        "    ax2 = ax1.twinx()\n",
+        "    color = 'tab:blue'\n",
+        "    ax2.set_ylabel('Accuracy / Exact Match', color=color, fontweight='bold')\n",
+        "    ax2.plot(history['epoch'], history['acc'], color=color, marker='s', label='Mean Acc')\n",
+        "    ax2.plot(history['epoch'], history['em'], color='tab:green', marker='^', label='Exact Match')\n",
+        "    ax2.tick_params(axis='y', labelcolor=color)\n",
+        "    \n",
+        "    plt.title('SE374.R11 Stage 1 ResNet38d Training Convergence', fontweight='bold')\n",
+        "    fig.tight_layout()\n",
+        "    plot_path = OUTPUT_DIR / 'stage1_training_curves.png'\n",
+        "    plt.savefig(plot_path, dpi=300)\n",
+        "    plt.close()\n",
+        "    print(f'[VISUALIZATION] Saved training plot to {plot_path}')\n",
+        "\n",
+        "# Save metrics JSON\n",
+        "metrics_path = OUTPUT_DIR / 'STAGE1_TRAINING_METRICS.json'\n",
+        "with open(metrics_path, 'w', encoding='utf-8') as f:\n",
+        "    json.dump({'best_accuracy': best_acc, 'history': history}, f, indent=2)\n",
+        "print(f'[METRICS] Saved metrics JSON to {metrics_path}')\n",
+        "\n",
+        "# Compress results and trigger download in Colab\n",
+        "ZIP_EXPORT = Path('/content/SE374_Stage1_Training_Results.zip') if IN_COLAB else Path('./SE374_Stage1_Training_Results.zip')\n",
+        "with zipfile.ZipFile(ZIP_EXPORT, 'w', zipfile.ZIP_DEFLATED) as zf:\n",
+        "    for f in OUTPUT_DIR.glob('*'):\n",
+        "        if f.is_file():\n",
+        "            zf.write(f, arcname=f.name)\n",
+        "print(f'[PACKAGE] Compressed results to {ZIP_EXPORT} ({ZIP_EXPORT.stat().st_size / (1024**2):.1f} MB)')\n",
+        "\n",
+        "if IN_COLAB:\n",
+        "    try:\n",
+        "        from google.colab import files\n",
+        "        files.download(str(ZIP_EXPORT))\n",
+        "        print('[DOWNLOAD] Triggered browser download of results ZIP.')\n",
+        "    except Exception as e:\n",
+        "        print(f'[NOTICE] Browser download skipped: {e}')\n",
+    ]
+
+
 def get_clean_cell_4_stage2(tier="base"):
     if tier == "t4":
         amp_lines = ["AMP_DTYPE = torch.float16  # Native Turing Tensor Core FP16\n"]
@@ -951,6 +1025,7 @@ def get_clean_cell_16_stage2():
         "import os\n",
         "import sys\n",
         "import json\n",
+        "import shutil\n",
         "import zipfile\n",
         "from pathlib import Path\n",
         "import numpy as np\n",
@@ -1043,6 +1118,14 @@ def get_clean_cell_16_stage2():
         "# Save metrics JSON\n",
         "with open(OUTPUT_DIR_S2 / 'STAGE2_TRAINING_METRICS.json', 'w', encoding='utf-8') as f:\n",
         "    json.dump(history_s2, f, indent=2)\n",
+        "\n",
+        "# Scientific standard: Bundle trained model checkpoints into output package\n",
+        "if STAGE2_BEST_CKPT.is_file():\n",
+        "    shutil.copy(STAGE2_BEST_CKPT, OUTPUT_DIR_S2 / STAGE2_BEST_CKPT.name)\n",
+        "    print(f'[PACKAGE] Bundled best checkpoint {STAGE2_BEST_CKPT.name} ({STAGE2_BEST_CKPT.stat().st_size / (1024**2):.1f} MB)')\n",
+        "if STAGE2_LATEST_CKPT.is_file():\n",
+        "    shutil.copy(STAGE2_LATEST_CKPT, OUTPUT_DIR_S2 / STAGE2_LATEST_CKPT.name)\n",
+        "    print(f'[PACKAGE] Bundled latest checkpoint {STAGE2_LATEST_CKPT.name}')\n",
         "\n",
         "# Package into ZIP\n",
         "ZIP_EXPORT_S2 = Path('/content/SE374_Stage2_Training_Results.zip') if IN_COLAB else Path('./SE374_Stage2_Training_Results.zip')\n",
@@ -1884,6 +1967,7 @@ def build_suites():
     nb01["cells"][10]["source"] = get_clean_cell_10_stage1()
     nb01["cells"][12]["source"] = get_clean_cell_12_stage1()
     nb01["cells"][14]["source"] = get_clean_cell_14_stage1()
+    nb01["cells"][16]["source"] = get_clean_cell_16_stage1()
     with open(BASE_DIR / "01_Train_Stage1_Classifier.ipynb", "w", encoding="utf-8") as f:
         json.dump(nb01, f, indent=1)
 
@@ -2018,10 +2102,11 @@ def build_suites():
             # Cell 8: T4 Batch Size 16, num_workers 2
             t4_nb["cells"][8]["source"] = get_clean_cell_8_stage1(batch_size=16, num_workers=2)
 
-            # Cell 10, 12, 14: Self-healing fallbacks
+            # Cell 10, 12, 14, 16: Self-healing fallbacks and packaging
             t4_nb["cells"][10]["source"] = get_clean_cell_10_stage1()
             t4_nb["cells"][12]["source"] = get_clean_cell_12_stage1()
             t4_nb["cells"][14]["source"] = get_clean_cell_14_stage1()
+            t4_nb["cells"][16]["source"] = get_clean_cell_16_stage1()
 
         # Notebook 02 Specific T4 Tuning
         elif prefix == "02":
@@ -2207,10 +2292,11 @@ def build_suites():
             # Cell 8: L4 Batch Size 32, num_workers 4
             l4_nb["cells"][8]["source"] = get_clean_cell_8_stage1(batch_size=32, num_workers=4)
 
-            # Cell 10, 12, 14: Self-healing fallbacks
+            # Cell 10, 12, 14, 16: Self-healing fallbacks and packaging
             l4_nb["cells"][10]["source"] = get_clean_cell_10_stage1()
             l4_nb["cells"][12]["source"] = get_clean_cell_12_stage1()
             l4_nb["cells"][14]["source"] = get_clean_cell_14_stage1()
+            l4_nb["cells"][16]["source"] = get_clean_cell_16_stage1()
 
         # Notebook 02 Specific L4 Tuning
         elif prefix == "02":
