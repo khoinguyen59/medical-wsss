@@ -293,7 +293,16 @@ def generate_pseudo_masks_pipeline(
     """Orchestrate multi-layer pseudo-mask generation for training dataset."""
     device = torch.device(device_str if device_str else ("cuda" if torch.cuda.is_available() else "cpu"))
     data_path = Path(data_dir)
-    train_dir = data_path / "train" if (data_path / "train").exists() else data_path
+    if (data_path / "training").exists():
+        train_dir = data_path / "training"
+    elif (data_path / "train").exists():
+        train_dir = data_path / "train"
+    elif (data_path / "BCSS-WSSS" / "training").exists():
+        train_dir = data_path / "BCSS-WSSS" / "training"
+    elif (data_path / "BCSS-WSSS" / "train").exists():
+        train_dir = data_path / "BCSS-WSSS" / "train"
+    else:
+        train_dir = data_path
 
     if output_dir is None:
         pm_root = train_dir.parent / "train_PM"

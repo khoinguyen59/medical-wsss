@@ -263,9 +263,29 @@ def train_stage2_pipeline(
     checkpoint_path.mkdir(parents=True, exist_ok=True)
 
     data_path = Path(data_dir)
-    train_img_dir = data_path / "train" if (data_path / "train").exists() else data_path
-    val_img_dir = data_path / "val" / "img" if (data_path / "val" / "img").exists() else None
-    val_mask_dir = data_path / "val" / "mask" if (data_path / "val" / "mask").exists() else None
+    if (data_path / "training").exists():
+        train_img_dir = data_path / "training"
+    elif (data_path / "train").exists():
+        train_img_dir = data_path / "train"
+    elif (data_path / "BCSS-WSSS" / "training").exists():
+        train_img_dir = data_path / "BCSS-WSSS" / "training"
+    elif (data_path / "BCSS-WSSS" / "train").exists():
+        train_img_dir = data_path / "BCSS-WSSS" / "train"
+    else:
+        train_img_dir = data_path
+
+    val_img_dir = None
+    val_mask_dir = None
+    for cand_v, cand_m in [
+        (data_path / "val" / "img", data_path / "val" / "mask"),
+        (data_path / "valid" / "img", data_path / "valid" / "mask"),
+        (data_path / "BCSS-WSSS" / "val" / "img", data_path / "BCSS-WSSS" / "val" / "mask"),
+        (data_path / "BCSS-WSSS" / "valid" / "img", data_path / "BCSS-WSSS" / "valid" / "mask"),
+    ]:
+        if cand_v.exists():
+            val_img_dir = cand_v
+            val_mask_dir = cand_m if cand_m.exists() else None
+            break
 
     # Load patient splits for strict separation
     splits = load_bcss_patient_splits()

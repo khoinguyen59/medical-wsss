@@ -739,18 +739,17 @@ class WSILowMagHighMagPipeline:
             gt_arr, pred_mask=pred_resized, label_convention=label_convention
         )
 
-        roi_valid = (standardized_gt >= 0) & (standardized_gt < 4)
-        cm4 = np.zeros((4, 4), dtype=np.int64)
-        if np.any(roi_valid):
-            t4 = standardized_gt[roi_valid]
-            p4 = np.clip(pred_resized[roi_valid], 0, 3)
-            encoded = t4 * 4 + p4
-            counts = np.bincount(encoded, minlength=16).reshape((4, 4))
-            cm4 += counts
+        valid = (standardized_gt >= 0) & (standardized_gt < 5) & (pred_resized >= 0) & (pred_resized < 5)
+        cm5 = np.zeros((5, 5), dtype=np.int64)
+        if np.any(valid):
+            t_v = standardized_gt[valid].astype(np.int64)
+            p_v = pred_resized[valid].astype(np.int64)
+            cm5 = np.bincount(t_v * 5 + p_v, minlength=25).reshape((5, 5))
 
-        tp = np.diag(cm4).astype(np.float64)
-        fp = cm4.sum(axis=0) - tp
-        fn = cm4.sum(axis=1) - tp
+        # 4 foreground tissue classes: strictly preserve Class 4 Background false positives and false negatives
+        tp = np.diag(cm5[:4, :4]).astype(np.float64)
+        fp = cm5[:, :4].sum(axis=0).astype(np.float64) - tp
+        fn = cm5[:4, :].sum(axis=1).astype(np.float64) - tp
         denom_iou = tp + fp + fn
         denom_dice = 2.0 * tp + fp + fn
         v_iou = denom_iou > 0
@@ -759,10 +758,10 @@ class WSILowMagHighMagPipeline:
         miou_4cls = float(np.mean(tp[v_iou] / denom_iou[v_iou]) * 100.0) if np.any(v_iou) else 0.0
         mdice_4cls = float(np.mean((2.0 * tp[v_dice]) / denom_dice[v_dice]) * 100.0) if np.any(v_dice) else 0.0
 
-        total_valid_px = float(np.sum(cm4))
+        total_valid_px = float(np.sum(cm5[:4, :]))
         if total_valid_px > 0:
             pa = float(np.sum(tp) / total_valid_px * 100.0)
-            freq = cm4.sum(axis=1).astype(np.float64)
+            freq = cm5[:4, :].sum(axis=1).astype(np.float64)
             fwiou = float(np.sum((freq[v_iou] / total_valid_px) * (tp[v_iou] / denom_iou[v_iou])) * 100.0) if np.any(v_iou) else 0.0
         else:
             pa = float(compute_pixel_accuracy(pred_resized, standardized_gt) * 100.0)

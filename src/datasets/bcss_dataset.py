@@ -33,7 +33,7 @@ class BCSSDataset(Dataset):
         transform: Optional[Callable] = None,
     ) -> None:
         super().__init__()
-        assert split in ["train", "valid", "test"], f"Invalid split: {split}"
+        assert split in ["train", "valid", "test", "val", "training"], f"Invalid split: {split}"
         self.root_dir = root_dir
         self.split = split
         self.transform = transform
@@ -46,8 +46,11 @@ class BCSSDataset(Dataset):
         self._load_dataset()
 
     def _load_dataset(self) -> None:
-        if self.split == "train":
-            train_dir = os.path.join(self.root_dir, "train")
+        is_train_split = self.split in ["train", "training"]
+        if is_train_split:
+            train_dir = os.path.join(self.root_dir, "training")
+            if not os.path.isdir(train_dir):
+                train_dir = os.path.join(self.root_dir, "train")
             pattern = os.path.join(train_dir, "*.png")
             self.image_paths = sorted(glob.glob(pattern))
 
@@ -57,8 +60,14 @@ class BCSSDataset(Dataset):
                 label = self._extract_weak_label(path)
                 self.labels.append(label)
         else:
-            img_dir = os.path.join(self.root_dir, self.split, "img")
-            mask_dir = os.path.join(self.root_dir, self.split, "mask")
+            split_name = "val" if self.split in ["val", "valid"] else self.split
+            img_dir = os.path.join(self.root_dir, split_name, "img")
+            mask_dir = os.path.join(self.root_dir, split_name, "mask")
+            if not os.path.isdir(img_dir) and self.split in ["val", "valid"]:
+                alt_name = "valid" if split_name == "val" else "val"
+                if os.path.isdir(os.path.join(self.root_dir, alt_name, "img")):
+                    img_dir = os.path.join(self.root_dir, alt_name, "img")
+                    mask_dir = os.path.join(self.root_dir, alt_name, "mask")
             pattern = os.path.join(img_dir, "*.png")
             self.image_paths = sorted(glob.glob(pattern))
 
@@ -73,13 +82,13 @@ class BCSSDataset(Dataset):
     def _extract_weak_label(path: str) -> np.ndarray:
         """Parse multi-hot foreground label [y0 y1 y2 y3] from filename."""
         basename = os.path.basename(path)
-        bracket_match = re.search(r"\[([0-9\s]+)\]", basename)
+        bracket_match = re.search(r"\[([0-9\s,]+)\]", basename)
         if bracket_match:
-            tokens = bracket_match.group(1).strip().split()
-            if len(tokens) == 4:
-                return np.array([int(t) for t in tokens], dtype=np.float32)
-            elif len(tokens) == 1 and len(tokens[0]) == 4:
-                return np.array([int(c) for c in tokens[0]], dtype=np.float32)
+            raw_tokens = bracket_match.group(1).replace(",", " ").strip().split()
+            if len(raw_tokens) == 4:
+                return np.array([int(t) for t in raw_tokens], dtype=np.float32)
+            elif len(raw_tokens) == 1 and len(raw_tokens[0]) == 4:
+                return np.array([int(c) for c in raw_tokens[0]], dtype=np.float32)
         return np.zeros(4, dtype=np.float32)
 
     def __len__(self) -> int:
@@ -104,7 +113,7 @@ class BCSSDataset(Dataset):
             # Transpose HWC -> CHW
             img_tensor = torch.from_numpy(img_np).permute(2, 0, 1)
 
-        if self.split == "train":
+        if self.split in ["train", "training"]:
             label_np = self.labels[index]
             label_tensor = torch.from_numpy(label_np)
             return img_tensor, label_tensor, os.path.basename(img_path)
@@ -112,7 +121,13 @@ class BCSSDataset(Dataset):
             mask_path = self.mask_paths[index]
             if os.path.exists(mask_path):
                 mask = Image.open(mask_path)
-                mask_np = np.array(mask, dtype=np.int64)
+                if mask.mode == "P":
+                    mask_np = np.array(mask, dtype=np.int64)
+                else:
+                    mask_np = np.array(mask.convert("L"), dtype=np.int64)
+                if mask_np.ndim == 3:
+                    mask_np = mask_np[:, :, 0]
+                mask_np = np.clip(mask_np, 0, 4)
                 mask_tensor = torch.from_numpy(mask_np)
             else:
                 mask_tensor = torch.zeros((img_np.shape[0], img_np.shape[1]), dtype=torch.int64)

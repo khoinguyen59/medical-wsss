@@ -521,6 +521,19 @@ def stratify_cap_risk(
     Dict[str, Any]
         Risk classification dictionary with group, level, assessment, and guidelines.
     """
+    if tsr is None or (isinstance(tsr, float) and np.isnan(tsr)) or (tsr == 0.0 and stroma_proportion == 0.0):
+        return {
+            "risk_group": "Indeterminate",
+            "risk_level": "Unmeasurable",
+            "risk_code": -1,
+            "tsr": 0.0 if tsr is not None else None,
+            "stroma_proportion": 0.0 if stroma_proportion is not None else None,
+            "threshold": float(threshold),
+            "is_stroma_rich": False,
+            "clinical_assessment": "Unmeasurable tumor-stroma ratio due to absence of diagnostic tumor and stroma tissue in specimen.",
+            "guideline_authority": "College of American Pathologists (CAP) / International TSR Guidelines",
+        }
+
     if stroma_proportion is None:
         str_prop = max(0.0, 100.0 - tsr)
     else:

@@ -17,6 +17,7 @@ import ast
 import json
 from pathlib import Path
 import numpy as np
+from PIL import Image
 import pytest
 import torch
 
@@ -502,6 +503,87 @@ def test_stage2_cell_4_dry_run_and_workers_declared():
         assert "NUM_WORKERS =" in c4_source, f"Notebook {nb_path} missing NUM_WORKERS declaration in Cell 4"
         assert "DEVICE =" in c4_source, f"Notebook {nb_path} missing DEVICE declaration in Cell 4"
         assert "AMP_DTYPE =" in c4_source, f"Notebook {nb_path} missing AMP_DTYPE declaration in Cell 4"
+
+
+def test_paletted_mode_p_mask_preserves_class_indices():
+    """Verify paletted mode 'P' masks retain discrete class indices [0..4] without luminance distortion."""
+    # 1. Synthetic paletted image with BCSS RGB palette
+    palette = [
+        0, 0, 0,        # Class 0: Background/Other
+        228, 26, 28,    # Class 1: Tumor (Red)
+        55, 126, 184,   # Class 2: Stroma (Blue)
+        77, 175, 74,    # Class 3: Lymphocytic Infiltrate (Green)
+        152, 78, 163,   # Class 4: Necrosis (Purple)
+    ] + [0] * (256 * 3 - 15)
+
+    raw_indices = np.array([
+        [0, 1, 2],
+        [3, 4, 1],
+        [2, 0, 3]
+    ], dtype=np.uint8)
+
+    p_img = Image.fromarray(raw_indices, mode="P")
+    p_img.putpalette(palette)
+
+    # Calling .convert('L') directly causes luminance corruption:
+    corrupted_arr = np.array(p_img.convert("L"), dtype=np.int64)
+    # Class 1 (Red 228, 26, 28) converts to Y ~ 68 != 1
+    assert not np.array_equal(corrupted_arr, raw_indices)
+
+    # Safe loader logic preserving mode 'P' indices:
+    mask_img = p_img
+    if mask_img.mode != "P":
+        mask_img = mask_img.convert("L")
+    gt_pil = mask_img.resize((224, 224), Image.NEAREST)
+    gt_arr = np.array(gt_pil, dtype=np.int64)
+
+    assert set(np.unique(gt_arr)).issubset({0, 1, 2, 3, 4})
+    assert (gt_arr < 5).sum() == gt_arr.size
+    assert (gt_arr < 5).sum() > 0
+
+    # 2. Empirical test on real BCSS paletted mask on disk if present
+    bcss_mask_path = Path("data/BCSS-WSSS/val/mask/TCGA-S3-AA15-DX1_xmin55486_ymin28926_MPP-0.2500+0.png")
+    if bcss_mask_path.is_file():
+        real_img = Image.open(bcss_mask_path)
+        assert real_img.mode == "P", f"Expected BCSS mask to be mode 'P', got {real_img.mode}"
+        if real_img.mode != "P":
+            real_img = real_img.convert("L")
+        gt_real_pil = real_img.resize((224, 224), Image.NEAREST)
+        gt_real_arr = np.array(gt_real_pil, dtype=np.int64)
+
+        # Confirm all valid class pixels fall in [0, 4] and are non-empty
+        valid_mask = (gt_real_arr >= 0) & (gt_real_arr < 5)
+        assert valid_mask.sum() > 0, "Real BCSS mask should have positive valid pixels < 5"
+        unique_vals = np.unique(gt_real_arr)
+        # Class indices present in this patch: 1 (Tumor), 2 (Stroma), 4 (Background)
+        assert any(c in unique_vals for c in range(5))
+
+
+def test_generator_clean_cells_have_safe_paletted_mask_loading():
+    """Verify that notebook generator cell definitions guard mode 'P' mask loading."""
+    from scripts.build_t4_l4_notebook_suites import (
+        get_clean_cell_14_stage2,
+        get_clean_cell_16_stage2,
+        get_clean_cell_14_stage3,
+        get_clean_cell_10_stage4,
+    )
+
+    cell_funcs = {
+        "cell_14_stage2": get_clean_cell_14_stage2(),
+        "cell_16_stage2": get_clean_cell_16_stage2(),
+        "cell_14_stage3": get_clean_cell_14_stage3(),
+        "cell_10_stage4": get_clean_cell_10_stage4(),
+    }
+
+    for name, lines in cell_funcs.items():
+        code_str = "".join(lines)
+        assert "mode != 'P'" in code_str or 'mode != "P"' in code_str, (
+            f"Generator {name} missing safe mode 'P' guard for mask loading!"
+        )
+        assert ".convert('L').resize(" not in code_str, (
+            f"Generator {name} contains unsafe .convert('L').resize(...) on masks!"
+        )
+
 
 
 

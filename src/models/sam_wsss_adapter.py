@@ -169,8 +169,8 @@ class CAMPromptGenerator(nn.Module):
         elif cls_scores.dim() == 1:
             cls_scores = cls_scores.unsqueeze(0)
 
-        # Min-max normalize CAMs per channel
-        cams_norm = cams.clone()
+        # Min-max normalize CAMs per channel (ensure float32 precision for safe numpy extraction)
+        cams_norm = cams.float().clone()
         for i in range(b):
             for c in range(c_num):
                 c_min = cams_norm[i, c].min()
@@ -207,9 +207,9 @@ class CAMPromptGenerator(nn.Module):
                     dyn_theta = max(self.pos_threshold, mu + 0.5 * sigma)
                     high_mask = (cam_c >= dyn_theta).cpu().numpy()
 
-                    # Find candidate positive points
+                    # Find candidate positive points (safely float-converted)
                     pos_pts = self._find_positive_points(
-                        cam_c.cpu().numpy(),
+                        cam_c.float().cpu().numpy(),
                         high_mask,
                         max_points=self.max_pos_points,
                     )
@@ -222,17 +222,17 @@ class CAMPromptGenerator(nn.Module):
                     # Competing classes activation
                     other_indices = [idx for idx in range(c_num) if idx != c]
                     if other_indices:
-                        competing_max = cams_norm[i, other_indices].max(dim=0)[0].cpu().numpy()
+                        competing_max = cams_norm[i, other_indices].max(dim=0)[0].float().cpu().numpy()
                     else:
                         competing_max = np.zeros((h, w), dtype=np.float32)
 
-                    cam_c_np = cam_c.cpu().numpy()
+                    cam_c_np = cam_c.float().cpu().numpy()
                     comp_mask = (competing_max >= self.neg_threshold) & (cam_c_np <= 0.20)
 
                     # Background / glass check
-                    bg_mask = (cams_norm[i].max(dim=0)[0].cpu().numpy() < 0.15)
+                    bg_mask = (cams_norm[i].max(dim=0)[0].float().cpu().numpy() < 0.15)
                     if hsv_saturation is not None:
-                        sat_np = hsv_saturation[i].cpu().numpy()
+                        sat_np = hsv_saturation[i].float().cpu().numpy()
                         bg_mask = bg_mask | (sat_np < 0.08)
 
                     neg_mask = comp_mask | bg_mask

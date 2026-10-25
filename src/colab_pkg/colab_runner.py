@@ -240,11 +240,10 @@ def run_streaming_evaluation(
 
             raw_base = raw_4cls_dict.get(m_key, pred_4cls)
             pred_raw_roi = raw_base.copy()
-            pred_raw_roi[gt_mask == 4] = 4
+            # Do NOT overwrite prediction with ground truth background (scientific integrity)
             pred_final = engine.apply_pure_glass_guard(
                 pred_4cls, raw_np, background_class_idx=4
             )
-            pred_final[gt_mask == 4] = 4
             method_evaluators[m_key].update(
                 pred_final,
                 gt_mask,

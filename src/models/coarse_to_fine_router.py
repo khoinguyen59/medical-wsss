@@ -96,17 +96,18 @@ class CoarseToFineAdaptiveRouter:
         gts: List[np.ndarray],
     ) -> Dict[str, float]:
         """Computes WSSS-Tissue standard 4-class tissue segmentation metrics (excluding Class 4 background)."""
-        cm4 = np.zeros((4, 4), dtype=np.int64)
+        cm5 = np.zeros((5, 5), dtype=np.int64)
         for p, g in zip(preds, gts):
-            valid = (g >= 0) & (g < 4)
+            valid = (g >= 0) & (g < 5) & (p >= 0) & (p < 5)
             if np.any(valid):
-                t4 = g[valid].astype(np.int64)
-                p4 = np.clip(p[valid].astype(np.int64), 0, 3)
-                cm4 += np.bincount(t4 * 4 + p4, minlength=16).reshape((4, 4))
+                t_v = g[valid].astype(np.int64)
+                p_v = p[valid].astype(np.int64)
+                cm5 += np.bincount(t_v * 5 + p_v, minlength=25).reshape((5, 5))
 
-        tp = np.diag(cm4).astype(np.float64)
-        fp = cm4.sum(axis=0).astype(np.float64) - tp
-        fn = cm4.sum(axis=1).astype(np.float64) - tp
+        # 4 foreground tissue classes
+        tp = np.diag(cm5[:4, :4]).astype(np.float64)
+        fp = cm5[:, :4].sum(axis=0).astype(np.float64) - tp
+        fn = cm5[:4, :].sum(axis=1).astype(np.float64) - tp
         denom_iou = tp + fp + fn
         denom_dice = 2.0 * tp + fp + fn
         v_iou = denom_iou > 0
@@ -114,9 +115,9 @@ class CoarseToFineAdaptiveRouter:
 
         miou_4 = float(np.mean(tp[v_iou] / denom_iou[v_iou]) * 100.0) if np.any(v_iou) else 0.0
         mdice_4 = float(np.mean((2.0 * tp[v_dice]) / denom_dice[v_dice]) * 100.0) if np.any(v_dice) else 0.0
-        total_px = float(np.sum(cm4))
+        total_px = float(np.sum(cm5[:4, :]))
         pa_4 = float(np.sum(tp) / total_px * 100.0) if total_px > 0 else 0.0
-        freq = cm4.sum(axis=1).astype(np.float64)
+        freq = cm5[:4, :].sum(axis=1).astype(np.float64)
         fwiou_4 = (
             float(np.sum((freq[v_iou] / total_px) * (tp[v_iou] / denom_iou[v_iou])) * 100.0)
             if total_px > 0 and np.any(v_iou)

@@ -90,28 +90,39 @@ def evaluate_single_run(
 
 
 def run_comparative_benchmark(
-    data_root: str = "data/sample_dataset",
+    data_root: Optional[str] = None,
     output_dir: str = "experiments/benchmarks",
+    split: str = "test",
     seeds: Optional[List[int]] = None,
     configurations: Optional[List[str]] = None,
-    dry_run_samples: Optional[int] = 10,
+    dry_run_samples: Optional[int] = None,
     device: str = "cpu",
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     """Runs the 4-configuration comparative benchmark across multi-seed runs.
     
     Args:
-        data_root: Root directory of BCSS-WSSS dataset.
+        data_root: Root directory of BCSS-WSSS dataset (auto-resolves data/BCSS-WSSS).
         output_dir: Destination directory for JSON logs and markdown summaries.
+        split: Dataset split to benchmark ('test' by default for held-out evaluation).
         seeds: List of random seeds for multi-seed reproducibility.
         configurations: Subset of CONFIGURATIONS to test.
-        dry_run_samples: Maximum number of patches to evaluate per configuration (for quick verification).
+        dry_run_samples: Maximum number of patches to evaluate per configuration (None for full set).
         device: 'cpu' or 'cuda'.
     """
     seeds = seeds or DEFAULT_SEEDS
     configurations = configurations or CONFIGURATIONS
     os.makedirs(output_dir, exist_ok=True)
 
-    test_dataset = BCSSDataset(root_dir=data_root, split="valid")
+    if data_root is None:
+        if Path("data/BCSS-WSSS").is_dir():
+            data_root = "data/BCSS-WSSS"
+        elif Path("data/sample_dataset").is_dir():
+            print("[WARN] 'data/BCSS-WSSS' not found. Falling back to sample dataset for dry-run only.")
+            data_root = "data/sample_dataset"
+        else:
+            data_root = "data/BCSS-WSSS"
+
+    test_dataset = BCSSDataset(root_dir=data_root, split=split)
     all_results: Dict[str, List[Dict[str, float]]] = {cfg: [] for cfg in configurations}
 
     for cfg in configurations:
