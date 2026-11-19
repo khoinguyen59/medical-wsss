@@ -207,17 +207,22 @@ class Stage2Trainer:
                 l_unc = self.unc_loss(full_logits, mask_bn7)
                 loss = l_mlps + self.unc_weight * l_unc
                 if self.uabl_loss is not None and self.stain_deconv is not None:
-                    # Compute optical stain boundary gradient from normalized input images
-                    mean = torch.tensor([0.485, 0.456, 0.406], device=images.device, dtype=images.dtype).view(1, 3, 1, 1)
-                    std = torch.tensor([0.229, 0.224, 0.225], device=images.device, dtype=images.dtype).view(1, 3, 1, 1)
-                    img_01 = torch.clamp(images * std + mean, 0.0, 1.0)
-                    he_channels, _, _ = self.stain_deconv(img_01)
-                    stain_grad = self.stain_deconv.compute_stain_gradient(he_channels)
-                    pred_probs = F.softmax(full_logits, dim=1)
-                    entropy = -(pred_probs * torch.log(pred_probs.clamp(min=1e-6))).sum(dim=1, keepdim=True)
-                    entropy_norm = entropy / np.log(float(full_logits.shape[1]))
-                    l_uabl = self.uabl_loss(pred_probs, stain_grad, entropy_norm.detach())
+                    # Compute optical stain boundary gradient in strict FP32 with autocast disabled
+                    with torch.amp.autocast(device_type=images.device.type, enabled=False):
+                        mean = torch.tensor([0.485, 0.456, 0.406], device=images.device, dtype=torch.float32).view(1, 3, 1, 1)
+                        std = torch.tensor([0.229, 0.224, 0.225], device=images.device, dtype=torch.float32).view(1, 3, 1, 1)
+                        img_01 = torch.clamp(images.float() * std + mean, 0.0, 1.0)
+                        he_channels, _, _ = self.stain_deconv(img_01)
+                        stain_grad = self.stain_deconv.compute_stain_gradient(he_channels)
+                        pred_probs = F.softmax(full_logits.float(), dim=1)
+                        entropy = -(pred_probs * torch.log(pred_probs.clamp(min=1e-6))).sum(dim=1, keepdim=True)
+                        entropy_norm = entropy / np.log(float(full_logits.shape[1]))
+                        l_uabl = self.uabl_loss(pred_probs, stain_grad, entropy_norm.detach())
                     loss = loss + self.uabl_weight * l_uabl
+
+            if not torch.isfinite(loss):
+                self.optimizer.zero_grad(set_to_none=True)
+                continue
 
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)

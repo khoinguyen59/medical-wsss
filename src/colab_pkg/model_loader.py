@@ -545,19 +545,22 @@ class WSSSTissueStage1NetCAM(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         conv6 = self.forward_backbone(x)
-        x = self.dropout7(conv6)
-        x = self.pool(x)
-        x = self.fc8(x)
-        x = x.view(x.size(0), -1)
-        return torch.sigmoid(x)
+        with torch.amp.autocast(device_type=conv6.device.type, enabled=False):
+            x_drop = self.dropout7(conv6.float())
+            x_pool = self.pool(x_drop)
+            logits = F.conv2d(x_pool, self.fc8.weight.float()).view(x_pool.size(0), -1)
+            return torch.sigmoid(logits)
 
     def forward_cam(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         conv6 = self.forward_backbone(x)
-        x_pool = F.avg_pool2d(conv6, kernel_size=(conv6.size(2), conv6.size(3)), padding=0)
-        cam = F.relu(F.conv2d(conv6, self.fc8.weight))
-        y = self.fc8(x_pool).view(conv6.size(0), -1)
-        y = torch.sigmoid(y)
-        return cam, y
+        with torch.amp.autocast(device_type=conv6.device.type, enabled=False):
+            conv6_f = conv6.float()
+            fc8_w = self.fc8.weight.float()
+            x_pool = F.avg_pool2d(conv6_f, kernel_size=(conv6_f.size(2), conv6_f.size(3)), padding=0)
+            cam = F.relu(F.conv2d(conv6_f, fc8_w))
+            y = F.conv2d(x_pool, fc8_w).view(conv6_f.size(0), -1)
+            y = torch.sigmoid(y)
+            return cam, y
 
 
 # ==============================================================================

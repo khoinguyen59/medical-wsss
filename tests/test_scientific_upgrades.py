@@ -1072,6 +1072,119 @@ def test_downloader_extract_patient_id_parity_with_patient_split() -> None:
         )
 
 
+def test_fp16_amp_losses_no_nan_on_extreme_logits() -> None:
+    """Regression test: custom losses, PDA, and Stage-1 head stay finite under autocast & float16."""
+    from src.losses_metrics.losses import (
+        MultiLayerPseudoSupervisionLoss,
+        MultiPrototypePPCLoss,
+        UncertaintyAwareBoundaryLoss,
+        UncertaintyRegularizationLoss,
+    )
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.train_proposed_sam import CompositeWSSSLoss
+    from src.training.train_stage1 import AsymmetricLoss, AttentionModule, Stage1Trainer
+
+    torch.manual_seed(7)
+
+    # 1. AsymmetricLoss under float16 extreme logits (-50, 0, +50) and exact FP32 parity on logits < -16.1
+    asl = AsymmetricLoss(gamma_neg=4.0, gamma_pos=0.0, clip=0.05)
+    logits_f16 = torch.tensor(
+        [[-50.0, 50.0, 0.0, -35.0], [50.0, -50.0, 25.0, 0.0]],
+        dtype=torch.float16,
+        requires_grad=True,
+    )
+    targets_f16 = torch.tensor([[0.0, 1.0, 1.0, 0.0], [1.0, 0.0, 0.0, 1.0]], dtype=torch.float16)
+    with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+        loss_asl = asl(logits_f16, targets_f16)
+    assert loss_asl.dtype == torch.float32
+    assert torch.isfinite(loss_asl), f"AsymmetricLoss returned non-finite: {loss_asl}"
+    loss_asl.backward()
+    assert logits_f16.grad is not None and torch.isfinite(logits_f16.grad).all()
+
+    logits_neg = torch.tensor([[-25.0, 2.0, -18.0, 0.5]], dtype=torch.float32)
+    targets_neg = torch.tensor([[1.0, 0.0, 1.0, 0.0]], dtype=torch.float32)
+    probs_ref = torch.sigmoid(logits_neg)
+    expected_ref = -(
+        targets_neg * torch.log(probs_ref.clamp(min=1e-8))
+        + (1.0 - targets_neg)
+        * probs_ref.pow(4.0)
+        * torch.log((1.0 - (probs_ref - 0.05).clamp(min=0.0)).clamp(min=1e-8))
+    ).mean()
+    assert torch.allclose(asl(logits_neg, targets_neg), expected_ref, atol=1e-6)
+
+    # 2. AttentionModule (PDA) non-uniform extreme activations inside autocast (zero >65504 overflow)
+    attn = AttentionModule()
+    x_f16 = torch.full((2, 16, 4, 4), 100.0, dtype=torch.float16)
+    x_f16[:, :, 0, 0] = 50.0
+    x_f16.requires_grad_(True)
+    w_f16 = torch.full((4, 16, 1, 1), 10.0, dtype=torch.float16, requires_grad=True)
+    with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+        out_attn = attn(x_f16, w_f16, gamma=0.75)
+    assert out_attn.dtype == torch.float32
+    assert torch.isfinite(out_attn).all()
+
+    # 3. WSSSTissueStage1NetCAM & Stage1Trainer.forward_with_pda inside autocast return FP32 finite outputs
+    s1_net = WSSSTissueStage1NetCAM(n_class=4).eval()
+    trainer = Stage1Trainer(
+        model=s1_net,
+        optimizer=torch.optim.AdamW(s1_net.parameters(), lr=1e-4),
+        criterion=asl,
+        enable_amp=False,
+    )
+    img_bf = torch.rand((1, 3, 64, 64), dtype=torch.float32)
+    with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+        y_fwd = s1_net(img_bf)
+        cam_fc, y_fc = s1_net.forward_cam(img_bf)
+        logits_pda, probs_pda = trainer.forward_with_pda(img_bf, enable_pda=True)
+    assert y_fwd.dtype == torch.float32 and torch.isfinite(y_fwd).all()
+    assert cam_fc.dtype == torch.float32 and torch.isfinite(cam_fc).all()
+    assert y_fc.dtype == torch.float32 and torch.isfinite(y_fc).all()
+    assert logits_pda.dtype == torch.float32 and torch.isfinite(logits_pda).all()
+    assert probs_pda.dtype == torch.float32 and torch.isfinite(probs_pda).all()
+
+    # 4. MLPS + UncertaintyRegularization + MP-PPC (extreme cos diff) + UABL + CompositeWSSSLoss inside autocast
+    seg_logits = (torch.randn(2, 5, 16, 16) * 30.0).to(torch.float16).detach().requires_grad_(True)
+    pm = torch.randint(0, 5, (2, 16, 16), dtype=torch.long)
+    pm[0, 0, :4] = 255
+    mlps = MultiLayerPseudoSupervisionLoss()
+    unc = UncertaintyRegularizationLoss()
+    with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+        l_mlps = mlps(seg_logits, {"bn7": pm, "b5_2": pm, "b4_5": pm})
+        l_unc = unc(seg_logits, pm)
+    assert l_mlps.dtype == torch.float32 and torch.isfinite(l_mlps)
+    assert l_unc.dtype == torch.float32 and torch.isfinite(l_unc)
+
+    ppc = MultiPrototypePPCLoss(num_classes=4, num_prototypes=2, feat_dim=8, temp=0.05, conf_thresh=0.1)
+    with torch.no_grad():
+        ppc.prototypes.zero_()
+        ppc.prototypes[0, :, 0] = -1.0  # Opposite class 0 feature
+        ppc.prototypes[1, :, 0] = 1.0   # Aligned with class 1 negative -> pos_sim - sim_max <= -20 at temp=0.05
+    feats_ppc = torch.zeros((2, 8, 8, 8), dtype=torch.float32)
+    feats_ppc[:, 0, :, :] = 1.0
+    feats_ppc.requires_grad_(True)
+    cam_ppc = torch.zeros((2, 4, 8, 8), dtype=torch.float32)
+    cam_ppc[:, 0, :, :] = 0.99
+    cam_ppc[:, 1, :, :] = 0.01
+    img_lbl_f16 = torch.ones((2, 4), dtype=torch.float16)
+    with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+        l_ppc = ppc(feats_ppc, cam_ppc, img_lbl_f16)
+    assert l_ppc.dtype == torch.float32 and torch.isfinite(l_ppc)
+    l_ppc.backward()
+    assert feats_ppc.grad is not None and torch.isfinite(feats_ppc.grad).all()
+
+    uabl = UncertaintyAwareBoundaryLoss()
+    probs_f16 = torch.softmax(seg_logits.detach(), dim=1).to(torch.float16).requires_grad_(True)
+    grad_f16 = torch.rand((2, 1, 16, 16), dtype=torch.float16)
+    unc_map_f16 = torch.rand((2, 1, 16, 16), dtype=torch.float16)
+    comp = CompositeWSSSLoss()
+    with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+        l_uabl = uabl(probs_f16, grad_f16, unc_map_f16)
+        comp_out = comp(seg_logits, pm, iou_predictions=torch.rand((2, 5), dtype=torch.float16))
+    assert l_uabl.dtype == torch.float32 and torch.isfinite(l_uabl)
+    assert comp_out["total_loss"].dtype == torch.float32 and torch.isfinite(comp_out["total_loss"])
+
+
+
 
 
 
