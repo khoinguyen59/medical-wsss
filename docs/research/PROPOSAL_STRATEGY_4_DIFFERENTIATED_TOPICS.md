@@ -1,10 +1,11 @@
 # SE374.R11: CHIẾN LƯỢC ĐỀ XUẤT 4 ĐỀ TÀI ĐỒ ÁN ĐỘT PHÁ & KHÁC BIỆT
 
+> **Ghi chú Lưu trữ & Định hướng Đề tài:** Đây là tài liệu phân tích chiến lược giai đoạn khởi động nhằm so sánh 4 đề tài tiềm năng. Đồ án đã chính thức chốt và tập trung 100% nguồn lực vào **Đề tài Phân vùng ngữ nghĩa giám sát yếu trên tiêu bản WSI (BCSS-WSSS)**. Các hướng nghiên cứu về CT (AAPM), MRI u não (BraTS), hay đột quỵ não (ISLES) được lưu trữ làm tư liệu tham khảo.  
 > **Môn học:** SE374.R11 - Phát triển phần mềm xử lý ảnh y khoa, Học kỳ 1, Năm 2026  
 > **Khoa:** Khoa Kỹ thuật Phần mềm, Trường Đại học Công nghệ Thông tin (UIT), ĐHQG-HCM  
 > **Giảng viên hướng dẫn:** TS. Bùi Cao Doanh (`doanhbc@uit.edu.vn`)  
 > **Căn cứ tài liệu:**
-> - [Bài giảng 01: Nhập môn Xử lý ảnh Y khoa](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/lectures/Lecture_01_Introduction_to_Medical_Image.md) (Slide 2: Đồ án + Seminar chiếm **60% điểm số môn học**; Slide 4: 15 buổi học).
+> - [Bài giảng 01: Nhập môn Xử lý ảnh Y khoa](docs/lectures/Lecture_01_Introduction_to_Medical_Image.md) (Slide 2: Đồ án + Seminar chiếm **60% điểm số môn học**; Slide 4: 15 buổi học).
 > - Danh sách đăng ký lớp học: `SE374.R11 - Đồ án cuối kỳ.xlsx`.
 > - Dossier các bài báo SOTA trong `docs/papers/` (CG-GLORE, CGRL, MergeSurv, LowMagWSS).
 > - Kết quả khảo sát mã nguồn mở trên GitHub qua MCP Tooling.
@@ -48,7 +49,7 @@ flowchart TD
   - Sử dụng **Khái niệm hướng dẫn (Concept Bottleneck / CGRL)**: Khác biệt hoàn toàn với mô hình Deep Learning hộp đen thông thường. Mô hình liên kết các đặc trưng mô bệnh học với từ điển khái niệm y khoa được kiểm định (ví dụ: "nhân phân chia bất thường", "tế bào biểu mô tăng sinh", "hoại tử mô u") $\rightarrow$ Giúp bác sĩ giải phẫu bệnh tin tưởng và giải thích được tại sao AI đưa ra kết luận.
 - **Tài liệu nghiên cứu khoa học liên quan:**
   - *Bài báo gốc:* **Concept-Guided Representation Learning for Cancer Subtyping on Whole Slide Images** (Thuc Huynh, Doanh C. Bui et al., arXiv:2607.12556, BMVC 2026).
-  - *Dossier chi tiết trong workspace:* [`docs/papers/CGRL_arxiv_2607.12556.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/papers/CGRL_arxiv_2607.12556.md).
+  - *Dossier chi tiết trong workspace:* [`docs/papers/CGRL_arxiv_2607.12556.md`](docs/papers/CGRL_arxiv_2607.12556.md).
   - *Tham khảo nền tảng:* CLAM (Nature Biomedical Engineering 2021), TransMIL (NeurIPS 2021).
 - **Kho mã nguồn & Checkpoint trên GitHub (Đã thẩm tra bằng MCP GitHub):**
   - **Repo gốc:** [`ThucHuynh44/CGRL`](https://github.com/ThucHuynh44/CGRL) (Mã nguồn chính thức từ nhóm nghiên cứu UIT, tài trợ bởi Quỹ NCKH UIT).
@@ -72,7 +73,7 @@ flowchart TD
     2. **Toán tử FBP vi phân (Differentiable FBP):** Chuyển đổi dữ liệu đã nội suy từ miền sinogram sang miền ảnh.
     3. **Miền Ảnh (Image domain):** Áp dụng mạng điều chuẩn Hessian/Gradient kết hợp Global-Local Regularization (kế thừa bài báo CG-GLORE của Giảng viên) để khử triệt để vệt nhiễu sọc (*streak artifacts*).
 - **Tài liệu nghiên cứu khoa học liên quan:**
-  - *Bài báo Giảng viên:* **CG-GLORE: A Conjugate Gradient-Based Global-Local Regularization Network for Sparse-View CT Reconstruction** (Tran Xuan Hieu Le, Doanh C. Bui et al., arXiv:2608.15246, BMVC 2026). Dossier: [`docs/papers/CG_GLORE_arxiv_2608.15246.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/papers/CG_GLORE_arxiv_2608.15246.md).
+  - *Bài báo Giảng viên:* **CG-GLORE: A Conjugate Gradient-Based Global-Local Regularization Network for Sparse-View CT Reconstruction** (Tran Xuan Hieu Le, Doanh C. Bui et al., arXiv:2608.15246, BMVC 2026). Dossier: [`docs/papers/CG_GLORE_arxiv_2608.15246.md`](docs/papers/CG_GLORE_arxiv_2608.15246.md).
   - *Bài báo đa miền:* *MDPRNet: Multi-stage Dual-domain Progressive Network with Synergistic Training for Sparse-view CT Reconstruction* (2025/2026).
   - *Bài báo cơ sở:* Learned Primal-Dual (LPD - IEEE TMI), FBPConvNet.
 - **Kho mã nguồn tham khảo trên GitHub:**

@@ -84,7 +84,7 @@ Hệ thống sử dụng các bộ dữ liệu đối chuẩn công khai chuẩn
 
 | Tên Bộ Dữ Liệu | Xuất Bản / Nguồn | Quy Mô Dữ Liệu | Danh Mục Phân Lớp Mô Học (Classes) | Cơ Chế Phân Chia Chống Rò Rỉ (Patient-Level Split) |
 | :--- | :--- | :--- | :--- | :--- |
-| **BCSS-WSSS** *(Breast Cancer Semantic Segmentation)* | Amgad et al., *Bioinformatics 2019*; Han et al., *MedIA 2022* | 151 vùng ROI ($20\times$) từ TCGA-BRCA; tổng cộng 17.286 patches ($224 \times 224$ px). | **5 Phân lớp:**<br>1. Biểu mô u (Tumor - TUM)<br>2. Mô đệm (Stroma - STR)<br>3. Lympho bào (Lymphocyte - LYM)<br>4. Hoại tử (Necrosis - NEC)<br>5. Khác (Other - OTR) | Tách tuyệt đối theo Patient ID:<br>- Train: 106 ca bệnh ($23.422$ patches nhãn yếu)<br>- Val: 20 ca bệnh ($3.418$ patches mask chuẩn)<br>- Test: 25 ca bệnh ($4.986$ patches mask chuẩn) |
+| **BCSS-WSSS** *(Breast Cancer Semantic Segmentation)* | Amgad et al., *Bioinformatics 2019*; Han et al., *MedIA 2022* | 151 vùng ROI ($20\times$) từ TCGA-BRCA; tổng cộng 31.826 patches ($224 \times 224$ px). | **5 Phân lớp:**<br>1. Biểu mô u (Tumor - TUM)<br>2. Mô đệm (Stroma - STR)<br>3. Lympho bào (Lymphocyte - LYM)<br>4. Hoại tử (Necrosis - NEC)<br>5. Khác (Other - OTR) | Tách tuyệt đối theo Patient ID:<br>- Train: 106 ca bệnh ($23.423$ patches nhãn yếu)<br>- Val: 22 ca bệnh ($3.417$ patches mask chuẩn)<br>- Test: 23 ca bệnh ($4.986$ patches mask chuẩn) |
 | **LUAD-HistoSeg** *(Lung Adenocarcinoma Segmentation)* | Han et al., *MedIA 2022* | 49 bệnh nhân (29 ca GDPH + 20 ca TCGA-LUAD); 31.826 patches ($224 \times 224$ px tại $10\times$). | **4 Phân lớp:**<br>1. Biểu mô u (Tumor Epithelial - TE)<br>2. Mô đệm kèm u (TAS)<br>3. Hoại tử (Necrosis - NEC)<br>4. Lympho bào (Lymphocyte - LYM) | Tách tuyệt đối theo Patient ID:<br>- Train: 39 ca bệnh ($16.678$ patches nhãn yếu)<br>- Val: 5 ca bệnh ($300$ patches mask chuẩn)<br>- Test: 5 ca bệnh ($307$ patches mask chuẩn) |
 | **CAMELYON16** *(Lymph Node Metastasis)* | Bejnordi et al., *JAMA 2017* | 399 tiêu bản WSI toàn phần (.tif đa tầng, mỗi file 1-3 GB). Có sẵn nhãn nhúng trích xuất UNI (`camelyon16-uni` trên Hugging Face). | **2 Phân lớp:**<br>1. Khối u di căn (Metastasis)<br>2. Mô hạch bình thường (Normal) | Tách theo danh sách chuẩn Challenge:<br>- Train: 270 tiêu bản WSI<br>- Test: 129 tiêu bản WSI độc lập có mặt nạ ranh giới pixel của chuyên gia. |
 
@@ -188,7 +188,7 @@ Hệ thống được tổ chức thành 3 tầng vi dịch vụ độc lập th
 
 #### 7.3 Kế Hoạch Dự Phòng (Contingency / Backup Plan)
 - **Rủi ro 1: Tải về và cấu hình weights mô hình CONCH gặp sự cố cấp phép hoặc mạng:**
-  - *Giải pháp dự phòng:* Sử dụng bộ trích xuất đặc trưng CTransPath [Wang et al., 2022] hoặc ResNet-50 kết hợp giải thuật tổng hợp ranh giới HisynSeg đã tải về đầy đủ trong [`repos/HisynSeg`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/repos/HisynSeg). Pipeline vẫn bảo đảm đạt mIoU $>70\%$ mà không phụ thuộc vào CONCH.
+  - *Giải pháp dự phòng:* Sử dụng bộ trích xuất đặc trưng CTransPath [Wang et al., 2022] hoặc ResNet-50 kết hợp giải thuật tổng hợp ranh giới HisynSeg đã tải về đầy đủ trong [`repos/HisynSeg`](repos/HisynSeg). Pipeline vẫn bảo đảm đạt mIoU $>70\%$ mà không phụ thuộc vào CONCH.
 - **Rủi ro 2: Dung lượng tệp WSI Camelyon16 thô quá nặng khi thử nghiệm trạm làm việc:**
   - *Giải pháp dự phòng:* Kế thừa giải pháp nén kim tự tháp từ LowMagWSS [Pham et al., 2026] và tập đặc trưng trích xuất sẵn `camelyon16-uni` từ Hugging Face (17.3 GB) để thử nghiệm suy luận nhanh.
 

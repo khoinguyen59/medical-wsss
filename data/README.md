@@ -1,6 +1,6 @@
 # Huong Dan Luu Tru Du Lieu Y Khoa (`data/`)
 
-Thu muc nay danh rieng de chua du lieu anh y te (BCSS-WSSS, LUAD-HistoSeg, Camelyon16). Toan bo tep tin anh va mat na trong thu muc nay deu duoc loai tru khoi he thong Git qua `.gitignore` de tranh lam phinh to dung luong repository.
+Thu muc nay danh rieng de chua du lieu anh y te tap trung vao bo du lieu chuan BCSS-WSSS va bo danh gia cheo LUAD-HistoSeg. Toan bo tep tin anh va mat na trong thu muc nay deu duoc loai tru khoi he thong Git qua `.gitignore` de tranh lam phinh to dung luong repository.
 
 ---
 

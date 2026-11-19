@@ -67,7 +67,7 @@ def main():
 
 def restore_markdown_docs_from_transcript():
     """Restores any 0-byte Markdown files in docs/ from all brain transcripts and git HEAD, sanitizing ASCII hyphens."""
-    brain_root = r"C:\Users\Nguyen Trong Khoi\.gemini\antigravity\brain"
+    brain_root = os.path.expanduser("~/.gemini/antigravity/brain")
     bad_dashes = ("\u2013", "\u2014", "\u2012", "\u2015", "\u2212")
 
     def clean_hyphens(text: str) -> str:

@@ -30,7 +30,6 @@ from src.models.wsss_tissue import (
     apply_classmix_augmentation,
 )
 
-
 # ==============================================================================
 # 1. MultiStageFeatureBackbone Tests
 # ==============================================================================
@@ -314,3 +313,77 @@ def test_wsss_engine_dynamic_progressive_thresholding():
 
     assert mask_ep1.shape == (32, 32)
     assert mask_ep10.shape == (32, 32)
+
+
+def test_pda_cumulative_mask_prevents_peak_reemergence():
+    """Proves that cumulative_mask=True suppresses Peak 1 across all subsequent steps t=2..T.
+
+    Setup:
+    - Peak A at (1, 1) has magnitude 10.0.
+    - Secondary Peak B at (4, 4) has magnitude 5.0.
+    - Tertiary Tumor Bed C at (6, 6) has magnitude 2.5.
+    - With base_dropout_rate=1.0, top_p=0.05 (masks the top peak at each step):
+      * Step 0: Peak A (1, 1) has normalized activation 1.0.
+      * Step 1: Peak A is erased (0.0), so Peak B (4, 4) becomes 1.0.
+      * Step 2: With cumulative_mask=True, BOTH Peak A and Peak B are 0.0,
+        allowing Tertiary Tumor Bed C (6, 6) to reach 1.0!
+    """
+    b, d, h, w = 1, 8, 8, 8
+    c = 1
+    features = torch.zeros((b, d, h, w), dtype=torch.float32)
+    features[:, :, 1, 1] = 10.0  # Peak A
+    features[:, :, 4, 4] = 5.0   # Peak B
+    features[:, :, 6, 6] = 2.5   # Bed C
+
+    weights = torch.ones((c, d, 1, 1), dtype=torch.float32) / float(d)
+
+    pda_cum = ProgressiveDropoutAttention(
+        num_steps=2,
+        top_p=0.02,
+        base_dropout_rate=1.0,
+        boundary_bleeding_control=False,
+        channel_masking=False,
+        cumulative_mask=True,
+    )
+    _, step_cams_cum = pda_cum.generate_cam(features, weights, return_intermediates=True)
+
+    # Step 0: Peak A is 1.0
+    assert step_cams_cum[0][0, 0, 1, 1].item() == pytest.approx(1.0, abs=1e-5)
+    # Step 1: Peak A is suppressed to 0.0, Peak B is 1.0
+    assert step_cams_cum[1][0, 0, 1, 1].item() == pytest.approx(0.0, abs=1e-5)
+    assert step_cams_cum[1][0, 0, 4, 4].item() == pytest.approx(1.0, abs=1e-5)
+    # Step 2 (cumulative): Peak A stays 0.0 AND Peak B is suppressed to 0.0, so Bed C reaches 1.0!
+    assert step_cams_cum[2][0, 0, 1, 1].item() == pytest.approx(0.0, abs=1e-5)
+    assert step_cams_cum[2][0, 0, 4, 4].item() == pytest.approx(0.0, abs=1e-5)
+    assert step_cams_cum[2][0, 0, 6, 6].item() == pytest.approx(1.0, abs=1e-5)
+
+
+def test_wsss_engine_two_class_boundary_top2_entropy_gating():
+    """Proves that 2-class histological interface ties (Tumor vs Stroma) trigger top-2 binary entropy gating."""
+    engine = WSSSBenchmarkingEngine(mode="proposed", num_classes=5, device="cpu")
+
+    # Craft a deterministic 4-class foreground CAM where at rows 1..15, Tumor (class 0) and Stroma (class 1)
+    # are tied at 0.34 (above effective_thr=0.315 so raw argmax is 0, but below effective_thr * 1.2 = 0.378)
+    # while LYM and NEC are 0.0. Row 0 has 0.0 and rows 16..31 have 1.0 to fix min=0.0, max=1.0.
+    def _mock_pda(feat, weights):
+        cam = torch.zeros((1, 4, 32, 32), dtype=torch.float32)
+        cam[0, 0, 1:16, :] = 0.34
+        cam[0, 1, 1:16, :] = 0.34
+        cam[0, 0, 16:, :] = 1.00
+        cam[0, 1, 16:, 16:] = 1.00
+        return cam
+
+    engine.pda = _mock_pda
+    engine.relocalizer = lambda cam, feat: cam
+
+    img_tensor = torch.ones((1, 3, 32, 32), dtype=torch.float32) * 0.5
+    pred_mask = engine.generate_pseudo_mask(img_tensor, current_epoch=2, raw_image=None)
+
+    # Rows 2..14 have exact tie between Tumor (0.34) and Stroma (0.34) > Background (0.315),
+    # so top2_entropy is 1.0 (> 0.85) and margin == 0.0 (< 0.05) -> gated from class 0 to background class 4!
+    assert engine.last_top2_entropy_map is not None
+    assert float(engine.last_top2_entropy_map[2:14, :].mean()) == pytest.approx(1.0, abs=1e-4)
+    assert np.all(pred_mask[2:14, :] == 4)
+    # Bottom-left quadrant (18:, :14) has confident Tumor=1.0, Stroma=0.0 -> predicted as class 0 (Tumor)
+    assert np.all(pred_mask[18:, :14] == 0)
+

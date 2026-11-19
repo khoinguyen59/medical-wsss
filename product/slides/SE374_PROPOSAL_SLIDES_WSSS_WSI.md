@@ -85,7 +85,7 @@ style: |
 <div class="grid-2">
 <div>
 
-### Thách Thức Của Giải Phẫu Bệnh Số
+## Thách Thức Của Giải Phẫu Bệnh Số
 - **Kích thước Gigapixel:** Một tiêu bản WSI có độ phân giải lên tới $100.000 \times 100.000$ pixels ($>2$GB/file).
 - **Chi phí gán nhãn cực lớn:** Bác sĩ giải phẫu bệnh mất $>3.5$ giờ để khoanh vùng thủ công từng vi trường một ca bệnh.
 - **Tính bất đồng nhất mô học:** Khối u, mô đệm và lympho xâm nhập đan xen phức tạp.
@@ -93,7 +93,7 @@ style: |
 </div>
 <div>
 
-### Hạn Chế Của Các Giải Pháp Hiện Nay
+## Hạn Chế Của Các Giải Pháp Hiện Nay
 - **CAM truyền thống (Class Activation Maps):** Co ngót vùng kích hoạt (shrinkage), chỉ tập trung vào nhân tế bào dị dạng, bỏ sót viền u.
 - **Vision Transformer (ViT):** Độ phức tạp bậc hai $\mathcal{O}(L^2)$ làm nghẽn VRAM và trễ $>10$s trên máy trạm.
 - **Khoảng trống phần mềm:** Chưa có trạm làm việc tích hợp DeepZoom streaming mượt mà cho bác sĩ lâm sàng.
@@ -109,12 +109,12 @@ style: |
 
 # 2. Mục Tiêu Nghiên Cứu & Đóng Góp Dự Kiến
 
-### Hai Trụ Cột Đồ Án Môn SE374 (Medical AI + Software Engineering)
+## Hai Trụ Cột Đồ Án Môn SE374 (Medical AI + Software Engineering)
 
 <div class="grid-2">
 <div>
 
-#### Trụ Cột 1: Nghiên Cứu Lõi AI Y Khoa
+### Trụ Cột 1: Nghiên Cứu Lõi AI Y Khoa
 - **Mô hình hóa WSSS:** Khắc phục hiện tượng co ngót CAM, mở rộng ranh giới phân vùng đa lớp mô.
 - **Độ chính xác vượt trội:** Đạt mIoU $\ge 0.76$ trên BCSS-WSSS và $\ge 0.75$ trên LUAD-HistoSeg.
 - **Độ tin cậy học thuật:** Đánh giá công bằng trên 5 random seeds, tuân thủ nguyên tắc Zero-Mockup.
@@ -122,7 +122,7 @@ style: |
 </div>
 <div>
 
-#### Trụ Cột 2: Kỹ Thuật Phần Mềm Lâm Sàng
+### Trụ Cột 2: Kỹ Thuật Phần Mềm Lâm Sàng
 - **Web Workstation:** Trình duyệt tiêu bản phân giải sâu OpenSeadragon (tốc độ $>45$ FPS).
 - **Độ trễ suy luận:** Phản hồi mặt nạ lớp phủ (mask overlay) $<2$ giây khi bác sĩ chọn vùng ROI.
 - **Định lượng TME & Báo cáo:** Tự động tính sTILs score (%) và xuất biên bản PDF chuẩn CAP.
@@ -153,7 +153,7 @@ style: |
 <div class="grid-2">
 <div>
 
-### Giai Đoạn 1: Phân Loại Đa Nhãn + PDA
+## Giai Đoạn 1: Phân Loại Đa Nhãn + PDA
 - **Contrastive Mamba Block (CMB):** Khai thác ngữ cảnh xa với độ phức tạp tuyến tính $\mathcal{O}(L)$.
 - **Progressive Dropout Attention:** $\beta_t = \mu_t \cdot \max(M_k)$ $\to$ ép mạng mở rộng vùng kích hoạt sang ranh giới mờ.
 - **Pseudo-Masks Đa Tầng:** Kết hợp lớp `b4_3` (chi tiết), `b5_2` (cân bằng) và `bn7` (ngữ nghĩa).
@@ -161,7 +161,7 @@ style: |
 </div>
 <div>
 
-### Giai Đoạn 2: Phân Vùng + Cổng CGM
+## Giai Đoạn 2: Phân Vùng + Cổng CGM
 - **Prototype Matching:** Đẩy lùi hiện tượng rò rỉ ranh giới giữa các phân lớp mô học.
 - **Classification Gate (CGM):** Khi $\hat{y}_k \le 0.1 \to$ lập tức đóng kênh, triệt tiêu hoàn toàn dương tính giả.
 - **Overlap Stitching Engine:** Ghép trung bình xác suất trên tọa độ slide toàn phần WSI.
@@ -180,7 +180,7 @@ style: |
 <div class="grid-2">
 <div>
 
-### Tầng 1: Client Web Trạm Làm Việc
+## Tầng 1: Client Web Trạm Làm Việc
 - **Giao diện hiện đại:** HTML5, Canvas WebGL, Responsive CSS.
 - **DeepZoom Navigation:** OpenSeadragon duyệt mức phóng đại $1\times \to 40\times$.
 - **Lớp phủ mặt nạ:** Bật/tắt 5 kênh màu mô học độc lập, chỉnh độ trong suốt.
@@ -189,7 +189,7 @@ style: |
 </div>
 <div>
 
-### Tầng 2 & 3: Medical Backend & Engine
+## Tầng 2 & 3: Medical Backend & Engine
 - **FastAPI Tile Server:** Cắt lát động DZI từ tệp SVS/NDPI với độ trễ $<50$ms.
 - **Tissue Filtering:** Tiền lọc kính trắng tự động bằng Otsu thresholding.
 - **AI Inference Engine:** Nạp mảng tensor song song, suy luận không tràn RAM.
@@ -206,11 +206,11 @@ style: |
 
 # 6. Dữ Liệu Nghiên Cứu & Giao Thức Chống Rò Rỉ Bệnh Nhân
 
-### Ba Bộ Dữ Liệu Tiêu Chuẩn Quốc Tế
+## Ba Bộ Dữ Liệu Tiêu Chuẩn Quốc Tế
 
 | Tên Bộ Dữ Liệu | Nguồn Xuất Bản | Quy Mô | Danh Mục Phân Lớp Mô Học | Phân Chia Tập Dữ Liệu |
 | :--- | :---: | :---: | :--- | :--- |
-| **BCSS-WSSS** | MedIA 2022 | 17.286 patches | 5 Lớp: Khối u, Mô đệm, Lympho, Hoại tử, Khác | 106 ca Train / 20 ca Val / 25 ca Test |
+| **BCSS-WSSS** | MedIA 2022 | 31.826 patches | 5 Lớp: Khối u, Mô đệm, Lympho, Hoại tử, Khác | 106 ca Train / 22 ca Val / 23 ca Test |
 | **LUAD-HistoSeg** | MedIA 2022 | 31.826 patches | 4 Lớp: Biểu mô u, Mô đệm u, Hoại tử, Lympho | 39 ca Train / 5 ca Val / 5 ca Test |
 | **Camelyon16** | JAMA 2017 | 399 slide WSI | 2 Lớp: Di căn hạch ung thư vú vs. Bình thường | Kiểm thử ghép nối WSI & Streaming |
 
@@ -226,7 +226,7 @@ Phân chia tập <code>train / val / test</code> <b>hoàn toàn theo Patient ID<
 <div class="grid-2">
 <div>
 
-### Thước Đo Thực Nghiệm (Lab Metrics)
+## Thước Đo Thực Nghiệm (Lab Metrics)
 - **Mean IoU (mIoU):** Trọng tâm đánh giá độ phủ mặt nạ trên tất cả các lớp.
 - **Mean Dice (mDice):** Đo lường tính tương đồng hình thái học viền khối u.
 - **FwIoU & ACC:** Đo độ chính xác tổng thể có tính trọng số theo diện tích.
@@ -235,7 +235,7 @@ Phân chia tập <code>train / val / test</code> <b>hoàn toàn theo Patient ID<
 </div>
 <div>
 
-### Chỉ Số Lâm Sàng & Hiệu Năng
+## Chỉ Số Lâm Sàng & Hiệu Năng
 - **Tiết kiệm thời gian:** Đọc 100 vi trường từ 180 phút xuống $\le 7$ phút ($\ge 25\times$).
 - **Độ trễ giao diện:** Hiển thị lớp phủ mặt nạ trên web $<2.0$ giây.
 - **Độ tin cậy sTILs:** Hệ số tương quan Pearson $r \ge 0.85$ so với chuẩn lâm sàng.
@@ -268,7 +268,7 @@ Phân chia tập <code>train / val / test</code> <b>hoàn toàn theo Patient ID<
 <div class="grid-2">
 <div>
 
-### 1. Mã Nguồn Phần Mềm Hoàn Chỉnh
+## 1. Mã Nguồn Phần Mềm Hoàn Chỉnh
 - **Clean Architecture:** Gói `src/` phân tầng rõ ràng (config, datasets, models, visualization, pipeline).
 - **Trạm làm việc Web:** Giao diện tương tác mượt mà duyệt ảnh WSI gigapixel kèm lớp phủ mask.
 - **API Dịch vụ:** FastAPI endpoints cho streaming lát cắt và suy luận phân vùng.
@@ -277,7 +277,7 @@ Phân chia tập <code>train / val / test</code> <b>hoàn toàn theo Patient ID<
 </div>
 <div>
 
-### 2. Hồ Sơ Báo Cáo Khoa Học & Lâm Sàng
+## 2. Hồ Sơ Báo Cáo Khoa Học & Lâm Sàng
 - **Đề cương Mini Proposal:** Định dạng Word DOCX chuẩn mẫu UIT và slide 16:9.
 - **Báo cáo kỹ thuật cuối kỳ:** Định dạng Springer LNCS LaTeX / Word UIT chi tiết.
 - **Biên bản kiểm thử lâm sàng:** Báo cáo PDF mẫu sinh tự động bởi phần mềm.

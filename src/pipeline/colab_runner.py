@@ -7,8 +7,8 @@ Re-exports the modular Google Drive package (`src.colab_pkg`) so callers can inv
 All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:

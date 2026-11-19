@@ -13,7 +13,8 @@ Strict adherence to:
 - Invariant 07: Genuine PyTorch implementation with zero mockup.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

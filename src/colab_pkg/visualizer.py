@@ -1,11 +1,11 @@
 """
-Clinical Visualization & Results Packaging Module for SE374.R11 BCSS-WSSS Pipeline.
+Clinical Visualization & Results Packaging Module for BCSS-WSSS Pipeline.
 
 Provides:
 1. IEEE / Springer 5-class histopathology color palette and mask colorizer.
 2. Diversity-ranked patient patch selector across distinct TCGA patients.
 3. 300-DPI Clinical Segmentation Comparison Figure (5 columns: H&E, Doctor GT,
-   Baseline M1, Proposed SOTA M5, Clinical Overlay).
+   Baseline M1, Proposed SOTA M6, Clinical Overlay).
 4. 300-DPI Normalized 5x5 Confusion Matrix Heatmap.
 5. 300-DPI Multi-Method Ablation Study Bar Chart.
 6. Timestamped ZIP archiver with optional Google Drive backup and Colab browser download.
@@ -13,16 +13,18 @@ Provides:
 All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
-from pathlib import Path
 import shutil
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import zipfile
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
 import torch
+from PIL import Image
 from torchvision import transforms
 
 try:
@@ -50,6 +52,44 @@ def colorize_mask(mask_2d: np.ndarray) -> np.ndarray:
     """Maps a 2D integer mask in {0..4} to an (H, W, 3) uint8 RGB image."""
     clamped = np.clip(mask_2d, 0, 4).astype(np.int64)
     return DISCRETE_PALETTE[clamped]
+
+
+def compute_unified_patch_miou(
+    pred_arr: np.ndarray,
+    gt_arr: np.ndarray,
+) -> Dict[str, float]:
+    """Computes unified patch IoU metrics matching clinical_viewer contract."""
+    valid_fg = (gt_arr >= 0) & (gt_arr < 4)
+    valid_all = (gt_arr >= 0) & (gt_arr <= 4)
+    n_valid = int(np.sum(valid_all))
+    min_px = 50 if n_valid >= 4096 else 1
+    pa_val = float((pred_arr[valid_fg] == gt_arr[valid_fg]).mean() * 100.0) if np.any(valid_fg) else 0.0
+
+    ious_present: List[float] = []
+    ious_penalized: List[float] = []
+    for c_idx in range(4):
+        g_cnt = int(np.sum(gt_arr == c_idx))
+        p_cnt = int(np.sum((pred_arr == c_idx) & valid_all))
+        inter = int(np.sum((pred_arr == c_idx) & (gt_arr == c_idx)))
+        union = int(np.sum(((pred_arr == c_idx) | (gt_arr == c_idx)) & valid_all))
+        iou_pct = (inter / union * 100.0) if union > 0 else 0.0
+        if g_cnt >= min_px:
+            ious_present.append(iou_pct)
+            ious_penalized.append(iou_pct)
+        elif p_cnt >= min_px:
+            ious_penalized.append(0.0)
+
+    miou_gt_present = (
+        float(np.mean(ious_present))
+        if ious_present
+        else (float(np.mean(ious_penalized)) if ious_penalized else 0.0)
+    )
+    miou_penalized = float(np.mean(ious_penalized)) if ious_penalized else 0.0
+    return {
+        "miou_gt_present": miou_gt_present,
+        "miou_penalized": miou_penalized,
+        "pa_4cls": pa_val,
+    }
 
 
 def select_diverse_clinical_samples(
@@ -99,15 +139,16 @@ def render_clinical_comparison_figure(
     test_mask_dir: Union[str, Path],
     model: torch.nn.Module,
     wsss_engine: Any,
-    best_method_key: str = "M5_Proposed_SOTA_Ensemble",
+    best_method_key: str = "M6_MultiScale_Pyramid_D4_Ensemble",
     model_stage1: Optional[torch.nn.Module] = None,
     device: Optional[Union[str, torch.device]] = None,
     output_dir: Optional[Union[str, Path]] = None,
     legacy_dir: Optional[Union[str, Path]] = None,
     sample_count: int = 4,
     show_plots: bool = True,
+    mask_outside_roi: bool = False,
 ) -> Tuple[Optional[plt.Figure], Optional[Path]]:
-    """Renders and saves the 300-DPI 5-column clinical comparison figure."""
+    """Renders and saves the 300-DPI 5-column unmasked clinical comparison figure."""
     mask_dir = Path(test_mask_dir)
     sample_files = select_diverse_clinical_samples(
         active_test_files, mask_dir, sample_count=sample_count
@@ -159,44 +200,40 @@ def render_clinical_comparison_figure(
 
         outside_roi_mask = gt == 4
         pred_m1_display = pred_m1_vis.copy()
-        pred_m1_display[outside_roi_mask] = 4
         pred_best_display = pred_best_vis.copy()
-        pred_best_display[outside_roi_mask] = 4
+        if mask_outside_roi:
+            pred_m1_display[outside_roi_mask] = 4
+            pred_best_display[outside_roi_mask] = 4
 
-        roi_pixels = (gt >= 0) & (gt < 4)
-        acc_m1_sample = (
-            float((pred_m1_vis[roi_pixels] == gt[roi_pixels]).mean() * 100.0)
-            if np.any(roi_pixels)
-            else 0.0
-        )
-        acc_best_sample = (
-            float((pred_best_vis[roi_pixels] == gt[roi_pixels]).mean() * 100.0)
-            if np.any(roi_pixels)
-            else 0.0
-        )
+        def _patch_miou_pa(pred_arr: np.ndarray, gt_arr: np.ndarray) -> Tuple[float, float]:
+            patch_stats = compute_unified_patch_miou(pred_arr, gt_arr)
+            return patch_stats["miou_gt_present"], patch_stats["pa_4cls"]
+
+        miou_m1_sample, pa_m1_sample = _patch_miou_pa(pred_m1_display, gt)
+        miou_best_sample, pa_best_sample = _patch_miou_pa(pred_best_display, gt)
 
         gt_colored = colorize_mask(gt)
         m1_colored = colorize_mask(pred_m1_display)
         pred_colored = colorize_mask(pred_best_display)
         overlay = (0.60 * raw_np + 0.40 * pred_colored).astype(np.uint8)
         patient_id = extract_patient_id(img_p.name)
-        best_short_tag = best_method_key.split("_")[0] if "_" in best_method_key else "M5"
+        best_short_tag = best_method_key.split("_")[0] if "_" in best_method_key else "M6"
 
         axes[row_idx, 0].imshow(raw_np)
         axes[row_idx, 0].set_title(
-            f"Bệnh nhân: {patient_id}\n(Tiêu bản H&E gốc)", fontsize=11, fontweight="bold"
+            f"Patient: {patient_id}\n(Raw H&E 40x Patch)", fontsize=11, fontweight="bold"
         )
         axes[row_idx, 0].axis("off")
 
         axes[row_idx, 1].imshow(gt_colored)
         axes[row_idx, 1].set_title(
-            "Ground Truth Bác Sĩ\n(Vẽ tay trên kính hiển vi)", fontsize=11, fontweight="bold"
+            "Pathologist Ground Truth\n(Hand-Annotated Reference)", fontsize=11, fontweight="bold"
         )
         axes[row_idx, 1].axis("off")
 
         axes[row_idx, 2].imshow(m1_colored)
         axes[row_idx, 2].set_title(
-            f"Baseline WSSS-Tissue (M1)\n(Khớp ROI: {acc_m1_sample:.1f}%)",
+            f"Baseline Single-Scale (M1)\n(mIoU: {miou_m1_sample:.1f}% | PA: {pa_m1_sample:.1f}%)",
             fontsize=11,
             fontweight="bold",
         )
@@ -204,7 +241,7 @@ def render_clinical_comparison_figure(
 
         axes[row_idx, 3].imshow(pred_colored)
         axes[row_idx, 3].set_title(
-            f"Đề Xuất Cải Tiến ({best_short_tag} SOTA)\n(Khớp ROI: {acc_best_sample:.1f}%)",
+            f"Proposed Multi-Scale ({best_short_tag})\n(mIoU: {miou_best_sample:.1f}% | PA: {pa_best_sample:.1f}%)",
             fontsize=11,
             fontweight="bold",
         )
@@ -212,7 +249,7 @@ def render_clinical_comparison_figure(
 
         axes[row_idx, 4].imshow(overlay)
         axes[row_idx, 4].set_title(
-            "Lớp Phủ Overlay Lâm Sàng\n(alpha = 0.40 trên H&E)", fontsize=11, fontweight="bold"
+            "Clinical H&E Overlay\n(Unmasked Alpha = 0.40)", fontsize=11, fontweight="bold"
         )
         axes[row_idx, 4].axis("off")
 
@@ -783,6 +820,127 @@ def plot_whole_roi_ground_truth_comparison(
         saved_path = out_p / f"{slide_id}_whole_roi_comparison.png"
         fig.savefig(saved_path, dpi=300, bbox_inches="tight")
         print(f"[OK] Đã lưu hình đối sánh Whole-ROI 300 DPI: {saved_path.resolve()}")
+
+    if show_plots:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return fig, saved_path
+
+
+def render_visual_verification_diagnostic_figure(
+    cases: List[Dict[str, Any]],
+    output_path: Optional[Union[str, Path]] = None,
+    show_plots: bool = False,
+    method_label: str = "AI Prediction (M6 Unmasked)",
+) -> Tuple[Optional[plt.Figure], Optional[Path]]:
+    """Renders a 6-column 300-DPI Visual Correctness Diagnostic Figure across patient cases.
+
+    Columns:
+        1. Raw H&E Patch
+        2. Pathologist Ground Truth
+        3. AI Prediction (Unmasked)
+        4. Match vs Error Overlay (Emerald Green = Match, Amber = 2px Margin, Crimson Red = Error)
+        5. Anatomical Contours (Solid Cyan = GT, Dashed Gold = AI)
+        6. Pixel-wise Shannon Entropy Uncertainty Heatmap
+    """
+    from src.visualization.clinical_viewer import (
+        compute_agreement_error_overlay,
+        compute_contour_comparison_overlay,
+        compute_entropy_heatmap_overlay,
+    )
+
+    if not cases:
+        return None, None
+
+    n_rows = len(cases)
+    fig, axes = plt.subplots(n_rows, 6, figsize=(25.5, 4.3 * n_rows), dpi=300)
+    if n_rows == 1:
+        axes = np.expand_dims(axes, axis=0)
+
+    for row_idx, item in enumerate(cases):
+        raw_np = np.asarray(item["image"], dtype=np.uint8)
+        gt_np = np.asarray(item["gt"], dtype=np.int64)
+        pred_np = np.asarray(item["pred"], dtype=np.int64)
+        probs = np.asarray(item["probs"], dtype=np.float32)
+        patient_id = str(item.get("patient_id", f"Case_{row_idx + 1}"))
+        case_tag = str(item.get("tag", ""))
+
+        gt_rgb = colorize_mask(gt_np)
+        pred_rgb = colorize_mask(pred_np)
+        agree_rgb, stats = compute_agreement_error_overlay(raw_np, pred_np, gt_np)
+        contour_rgb = compute_contour_comparison_overlay(raw_np, pred_np, gt_np)
+        entropy_rgb, mean_ent = compute_entropy_heatmap_overlay(raw_np, probs)
+
+        header_line = f"{patient_id} ({case_tag})" if case_tag else patient_id
+
+        axes[row_idx, 0].imshow(raw_np)
+        axes[row_idx, 0].set_title(f"{header_line}\nRaw H&E (40x, 0.25 MPP)", fontsize=10, fontweight="bold")
+
+        axes[row_idx, 1].imshow(gt_rgb)
+        axes[row_idx, 1].set_title("Pathologist Ground Truth\n(5-Class Reference)", fontsize=10, fontweight="bold")
+
+        miou_gt = float(stats.get("miou_gt_present", stats["miou_4cls"]))
+        miou_pen = float(stats.get("miou_penalized", stats["miou_4cls"]))
+
+        axes[row_idx, 2].imshow(pred_rgb)
+        axes[row_idx, 2].set_title(
+            f"{method_label}\nmIoU: {miou_gt:.1f}% (Pen: {miou_pen:.1f}%) | Dice: {stats['mdice_4cls']:.1f}%",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+        axes[row_idx, 3].imshow(agree_rgb)
+        axes[row_idx, 3].set_title(
+            f"Match: {stats['exact_match_pct']:.1f}% (Green)\n"
+            f"Margin: {stats['boundary_margin_pct']:.1f}% | Core Err: {stats['core_error_pct']:.1f}% (Red)",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+        axes[row_idx, 4].imshow(contour_rgb)
+        axes[row_idx, 4].set_title(
+            f"Boundary Contours (BF1: {stats['boundary_f1']:.1f}%)\nSolid Cyan=GT | Dashed Gold=AI",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+        axes[row_idx, 5].imshow(entropy_rgb)
+        axes[row_idx, 5].set_title(
+            f"Shannon Uncertainty Map\nMean Entropy: {mean_ent:.3f} (Hot=Ambiguous)",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+        for col_idx in range(6):
+            axes[row_idx, col_idx].axis("off")
+
+    legend_handles = [
+        plt.Rectangle((0, 0), 1, 1, color=DISCRETE_PALETTE[0] / 255.0, label="TUM (Tumor)"),
+        plt.Rectangle((0, 0), 1, 1, color=DISCRETE_PALETTE[1] / 255.0, label="STR (Stroma)"),
+        plt.Rectangle((0, 0), 1, 1, color=DISCRETE_PALETTE[2] / 255.0, label="LYM (Lymphocyte)"),
+        plt.Rectangle((0, 0), 1, 1, color=DISCRETE_PALETTE[3] / 255.0, label="NEC (Necrosis)"),
+        plt.Rectangle((0, 0), 1, 1, color=DISCRETE_PALETTE[4] / 255.0, label="BACK (Glass)"),
+        plt.Rectangle((0, 0), 1, 1, color=(16 / 255.0, 185 / 255.0, 129 / 255.0), label="Green = Exact Match"),
+        plt.Rectangle((0, 0), 1, 1, color=(245 / 255.0, 158 / 255.0, 11 / 255.0), label="Amber = 2px Boundary Shift"),
+        plt.Rectangle((0, 0), 1, 1, color=(239 / 255.0, 68 / 255.0, 68 / 255.0), label="Red = Core Mismatch"),
+    ]
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        ncol=4,
+        fontsize=10,
+        frameon=True,
+        bbox_to_anchor=(0.5, -0.02),
+    )
+    plt.tight_layout()
+
+    saved_path: Optional[Path] = None
+    if output_path is not None:
+        saved_path = Path(output_path)
+        saved_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(saved_path, dpi=300, bbox_inches="tight")
 
     if show_plots:
         plt.show()

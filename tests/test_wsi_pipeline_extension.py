@@ -9,17 +9,15 @@ import numpy as np
 import pytest
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
 
+from src.models.wsss_inference_methods import MultiMethodWSSSEngineV2
 from src.pipeline.wsi_lowmag_highmag_pipeline import (
-    WSILowMagHighMagPipeline,
     WSICandidatePatch,
+    WSILowMagHighMagPipeline,
     WSIProcessingReport,
 )
-from src.models.wsss_inference_methods import MultiMethodWSSSEngineV2
-
-
-import torch.nn.functional as F
 
 
 class MockDeepLabV3Plus(nn.Module):
@@ -298,3 +296,53 @@ def test_wsi_pipeline_extract_patch_cached_handle():
     # Test with numpy array handle
     crop_from_arr = pipeline.extract_patch_image(slide_input=img_arr, patch_info=cand, slide_obj=img_arr)
     assert crop_from_arr.shape == (32, 32, 3)
+
+
+def test_wsi_pipeline_with_real_multimethod_engine_and_odd_dimensions():
+    """Verify WSI pipeline using real MultiMethodWSSSEngineV2 models on a non-multiple slide size (300x250)."""
+    from pathlib import Path
+
+    from PIL import Image
+
+    from src.models.wsss_inference_methods import (
+        DeepLabV3Plus,
+        MultiMethodWSSSEngineV2,
+        WSSSTissueStage1NetCAM,
+    )
+
+    real_engine = MultiMethodWSSSEngineV2()
+    pipeline = WSILowMagHighMagPipeline(
+        patch_size=112,
+        lowmag_target_size=(128, 128),
+        tissue_threshold=0.10,
+        engine=real_engine,
+        device="cpu",
+    )
+
+    # Build a 250x300 slide (not divisible by 112) embedding a real patch from data/sample_dataset
+    sample_patch_path = Path("data/sample_dataset/test/img")
+    sample_pngs = sorted(sample_patch_path.glob("*.png"))
+    assert len(sample_pngs) > 0
+    real_patch = np.array(Image.open(sample_pngs[0]).convert("RGB"))
+
+    slide_arr = np.full((250, 300, 3), fill_value=248, dtype=np.uint8)
+    h_p, w_p = min(224, 250), min(224, 300)
+    slide_arr[10 : 10 + h_p, 20 : 20 + w_p] = real_patch[:h_p, :w_p]
+
+    model_s2 = DeepLabV3Plus(num_classes=4).eval()
+    model_s1 = WSSSTissueStage1NetCAM(num_classes=4).eval()
+
+    stitched_mask, report = pipeline.run_end_to_end_wsi(
+        slide_input=slide_arr,
+        model_stage2=model_s2,
+        model_stage1=model_s1,
+        method="M1_Baseline_SingleScale",
+        slide_id="REAL_ENGINE_ODD_SLIDE",
+        max_patches_to_infer=2,
+    )
+
+    assert stitched_mask.shape == (128, 128)
+    assert set(np.unique(stitched_mask)).issubset({0, 1, 2, 3, 4})
+    assert report.original_dimensions == (300, 250)
+    assert report.selected_candidate_patches >= 1
+

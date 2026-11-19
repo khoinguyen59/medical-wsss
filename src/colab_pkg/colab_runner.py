@@ -1,5 +1,5 @@
 """
-High-Level End-to-End Orchestrator for SE374.R11 BCSS-WSSS Google Colab Pipeline.
+High-Level End-to-End Orchestrator for BCSS-WSSS Google Colab Pipeline.
 
 Enables 1-to-3 line execution from any Google Colab notebook while keeping all
 heavy logic cleanly modularized inside the Google Drive / repository code folder:
@@ -12,14 +12,15 @@ All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
 import datetime
-from pathlib import Path
 import random
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+
 import numpy as np
-from PIL import Image
 import torch
+from PIL import Image
 from torchvision import transforms
 
 
@@ -39,7 +40,6 @@ try:
     from .downloader import (
         DEFAULT_MAX_SANITY_SAMPLES,
         DEFAULT_MIN_SANITY_PATIENTS,
-        TARGET_PATIENTS,
         ensure_bcss_dataset,
         ensure_checkpoints,
         extract_patient_id,
@@ -49,7 +49,6 @@ try:
     )
     from .evaluator import (
         CLASS_CODES,
-        CLASS_LABELS,
         ColabSegmentationEvaluator,
         compute_paired_statistical_tests,
         export_evaluation_artifacts,
@@ -57,7 +56,6 @@ try:
     )
     from .model_loader import (
         MultiMethodWSSSEngine,
-        MultiMethodWSSSEngineV2,
         OtsuClinicalGating,
         load_wsss_models,
     )
@@ -71,7 +69,6 @@ except ImportError:
     from downloader import (
         DEFAULT_MAX_SANITY_SAMPLES,
         DEFAULT_MIN_SANITY_PATIENTS,
-        TARGET_PATIENTS,
         ensure_bcss_dataset,
         ensure_checkpoints,
         extract_patient_id,
@@ -81,7 +78,6 @@ except ImportError:
     )
     from evaluator import (
         CLASS_CODES,
-        CLASS_LABELS,
         ColabSegmentationEvaluator,
         compute_paired_statistical_tests,
         export_evaluation_artifacts,
@@ -89,7 +85,6 @@ except ImportError:
     )
     from model_loader import (
         MultiMethodWSSSEngine,
-        MultiMethodWSSSEngineV2,
         OtsuClinicalGating,
         load_wsss_models,
     )

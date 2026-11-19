@@ -1,5 +1,5 @@
 """
-Multi-Layer Pseudo-Mask Generation and Affinity Matting Service for SE374.R11 WSSS.
+Multi-Layer Pseudo-Mask Generation and Affinity Matting Service for Histopathology WSSS.
 
 Generates high-fidelity 5-class discrete pseudo-masks (TUM, STR, LYM, NEC, BACK) for all
 BCSS-WSSS training patches using:
@@ -15,19 +15,26 @@ BCSS-WSSS training patches using:
 """
 
 import argparse
-import os
+import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
-import cv2
+# Ensure project root is in sys.path
+_CURRENT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _CURRENT_DIR.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import numpy as np
-from PIL import Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from PIL import Image
 from torchvision import transforms
 
-from src.datasets.otsu_filter import compute_otsu_tissue_mask
+from src.datasets.otsu_filter import apply_otsu_gating_to_prediction
+from src.models.pda_generator import ProgressiveDropoutAttention
+from src.models.sg_dap import StainGuidedAffinityRefiner
 from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
 from src.training.dataset_loader import (
     BCSS_PALETTE,
@@ -37,6 +44,7 @@ from src.training.dataset_loader import (
     find_image_files,
     parse_patch_filename,
 )
+from src.training.train_stage2 import infer_stage1_norm_mode, prepare_stage1_input
 
 
 def bilateral_affinity_propagation_gpu(
@@ -101,18 +109,35 @@ def bilateral_affinity_propagation_gpu(
 
 
 class MultiLayerCAMExtractor:
-    """Extracts CAMs from bn7, b5_2, and b4_5 layers of WSSSTissueStage1NetCAM."""
+    """Extracts Multi-Depth CAMs from bn7, b5_2, and b4_5 layers of WSSSTissueStage1NetCAM
+
+    using Progressive Dropout Attention (PDA) with Prototype Cosine Gating.
+    Operates in pure feedforward mode with torch.no_grad() for maximum throughput.
+    """
 
     def __init__(
         self,
         model: WSSSTissueStage1NetCAM,
         device: torch.device,
+        num_pda_steps: int = 3,
+        pda_top_p: float = 0.25,
     ) -> None:
         self.model = model.to(device).eval()
         self.device = device
         self.features: Dict[str, torch.Tensor] = {}
-        self.gradients: Dict[str, torch.Tensor] = {}
         self.handles: List[Any] = []
+
+        # Initialize Progressive Dropout Attention generator
+        self.pda = ProgressiveDropoutAttention(
+            num_steps=num_pda_steps,
+            top_p=pda_top_p,
+            base_dropout_rate=0.50,
+            step_weight_decay=0.80,
+            boundary_bleeding_control=True,
+            spatial_masking=True,
+            channel_masking=True,
+            cumulative_mask=True,
+        ).to(device)
 
         self._register_hooks()
 
@@ -124,33 +149,25 @@ class MultiLayerCAMExtractor:
                 self.features[name] = output
             return hook
 
-        def get_gradient(name: str):
-            def hook(module: nn.Module, grad_in: Any, grad_out: Any):
-                if isinstance(grad_out, tuple):
-                    grad_out = grad_out[0]
-                self.gradients[name] = grad_out
-            return hook
-
-        # Register forward and backward hooks for b4_5 and b5_2
+        # Register forward hooks on b4_5 and b5_2
         if hasattr(self.model, "b4_5"):
             self.handles.append(self.model.b4_5.register_forward_hook(get_activation("b4_5")))
-            self.handles.append(self.model.b4_5.register_full_backward_hook(get_gradient("b4_5")))
 
         if hasattr(self.model, "b5_2"):
             self.handles.append(self.model.b5_2.register_forward_hook(get_activation("b5_2")))
-            self.handles.append(self.model.b5_2.register_full_backward_hook(get_gradient("b5_2")))
 
     def remove_hooks(self) -> None:
         for handle in self.handles:
             handle.remove()
         self.handles.clear()
 
+    @torch.no_grad()
     def extract_cams(
         self,
         images: torch.Tensor,
         labels: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        """Extract multi-layer CAMs for active classes.
+        """Extract multi-depth CAMs using Progressive Dropout Attention.
 
         Args:
             images: (B, 3, H, W) normalized image tensor.
@@ -160,64 +177,44 @@ class MultiLayerCAMExtractor:
             Dictionary with keys 'bn7', 'b5_2', 'b4_5', each tensor shape (B, 4, H, W).
         """
         b, _, h, w = images.shape
-        images = images.to(self.device).requires_grad_(True)
+        images = images.to(self.device)
         labels = labels.to(self.device)
 
-        # Clear hooks
         self.features.clear()
-        self.gradients.clear()
 
-        # Forward pass
-        conv6 = self.model.forward_backbone(images)  # bn7 feature: (B, 4096, 28, 28)
-        pool_feat = self.model.pool(self.model.dropout7(conv6))
-        logits = self.model.fc8(pool_feat).view(b, -1)  # (B, 4)
+        # Forward backbone pass
+        conv6 = self.model.forward_backbone(images)  # bn7 feature: (B, 4096, H_feat, W_feat)
+        feat_bn7 = conv6
+        feat_b5_2 = self.features.get("b5_2", feat_bn7)
+        feat_b4_5 = self.features.get("b4_5", feat_bn7)
+        self.features["bn7"] = feat_bn7
+        self.features["b5_2"] = feat_b5_2
+        self.features["b4_5"] = feat_b4_5
 
-        # Layer 1: bn7 direct projection CAM
-        cam_bn7 = F.relu(F.conv2d(conv6, self.model.fc8.weight))  # (B, 4, 28, 28)
+        fc_weights = self.model.fc8.weight  # (4, 4096, 1, 1)
+
+        # 1. PDA CAM for bn7 (deep semantic context, 4096 channels)
+        cam_bn7 = self.pda.forward(feat_bn7, fc_weights)
+
+        # 2. PDA CAM for b5_2 (structural tissue layout, 1024 channels)
+        w_b5 = fc_weights[:, :feat_b5_2.shape[1], :, :]
+        cam_b5_2 = self.pda.forward(feat_b5_2, w_b5)
+
+        # 3. PDA CAM for b4_5 (cellular boundary fidelity, 512 channels)
+        w_b4 = fc_weights[:, :feat_b4_5.shape[1], :, :]
+        cam_b4_5 = self.pda.forward(feat_b4_5, w_b4)
+
+        # Interpolate all CAMs to input image resolution (H, W)
         cam_bn7 = F.interpolate(cam_bn7, size=(h, w), mode="bilinear", align_corners=False)
+        cam_b5_2 = F.interpolate(cam_b5_2, size=(h, w), mode="bilinear", align_corners=False)
+        cam_b4_5 = F.interpolate(cam_b4_5, size=(h, w), mode="bilinear", align_corners=False)
 
-        # Layers 2 & 3: b5_2 and b4_5 via Grad-CAM
-        cam_b5_2 = torch.zeros((b, NUM_FOREGROUND, h, w), device=self.device)
-        cam_b4_5 = torch.zeros((b, NUM_FOREGROUND, h, w), device=self.device)
-
-        # Compute gradients for each active foreground class
-        for c in range(NUM_FOREGROUND):
-            if labels[:, c].sum() == 0:
-                continue
-
-            self.model.zero_grad()
-            score = (logits[:, c] * labels[:, c]).sum()
-            score.backward(retain_graph=True)
-
-            if "b5_2" in self.features and "b5_2" in self.gradients:
-                feat5 = self.features["b5_2"]
-                grad5 = self.gradients["b5_2"]
-                w5 = grad5.mean(dim=(2, 3), keepdim=True)
-                cam5 = F.relu((w5 * feat5).sum(dim=1, keepdim=True))
-                cam5 = F.interpolate(cam5, size=(h, w), mode="bilinear", align_corners=False)
-                cam_b5_2[:, c : c + 1] = cam5
-
-            if "b4_5" in self.features and "b4_5" in self.gradients:
-                feat4 = self.features["b4_5"]
-                grad4 = self.gradients["b4_5"]
-                w4 = grad4.mean(dim=(2, 3), keepdim=True)
-                cam4 = F.relu((w4 * feat4).sum(dim=1, keepdim=True))
-                cam4 = F.interpolate(cam4, size=(h, w), mode="bilinear", align_corners=False)
-                cam_b4_5[:, c : c + 1] = cam4
-
-        # Fallback if b4_5 or b5_2 hooks were not active
-        if cam_b5_2.sum() == 0:
-            cam_b5_2 = cam_bn7.clone()
-        if cam_b4_5.sum() == 0:
-            cam_b4_5 = cam_bn7.clone()
-
-        # Label gating: extinguish inactive classes
+        # Ground-truth label gating: mathematically extinguish inactive classes
         gate = labels.view(b, NUM_FOREGROUND, 1, 1)
         cam_bn7 = cam_bn7 * gate
         cam_b5_2 = cam_b5_2 * gate
         cam_b4_5 = cam_b4_5 * gate
 
-        # Normalize per-image min-max
         def normalize_cam(cam_tensor: torch.Tensor) -> torch.Tensor:
             min_val = cam_tensor.view(b, NUM_FOREGROUND, -1).min(dim=-1)[0].view(b, NUM_FOREGROUND, 1, 1)
             max_val = cam_tensor.view(b, NUM_FOREGROUND, -1).max(dim=-1)[0].view(b, NUM_FOREGROUND, 1, 1)
@@ -232,44 +229,37 @@ class MultiLayerCAMExtractor:
 
 
 def assemble_pseudo_mask(
-    cams: torch.Tensor,
+    cams: Union[torch.Tensor, np.ndarray],
     raw_images_np: np.ndarray,
     background_threshold: float = 0.20,
 ) -> np.ndarray:
     """Combine 4-class CAM scores with clinical Otsu tissue gating into a 5-class mask.
 
     Args:
-        cams: (B, 4, H, W) normalized CAM tensor on CPU.
+        cams: (B, 4, H, W) normalized CAM tensor or numpy array.
         raw_images_np: (B, H, W, 3) uint8 RGB image batch.
         background_threshold: Base sensitivity threshold for tissue vs background.
 
     Returns:
         discrete_masks: (B, H, W) int64 array with pixel values in {0, 1, 2, 3, 4}.
     """
-    b, c, h, w = cams.shape
-    cams_np = cams.numpy()  # (B, 4, H, W)
-    discrete_masks = np.zeros((b, h, w), dtype=np.int64)
+    if isinstance(cams, torch.Tensor):
+        cams_np = cams.detach().cpu().numpy()
+    else:
+        cams_np = cams
 
-    for i in range(b):
-        patch_img = raw_images_np[i]
-        patch_cam = cams_np[i]  # (4, H, W)
+    b, c, h, w = cams_np.shape
+    bg_channel = np.full((b, 1, h, w), fill_value=background_threshold, dtype=np.float32)
+    score_volume = np.concatenate([cams_np, bg_channel], axis=1)  # (B, 5, H, W)
+    initial_masks = np.argmax(score_volume, axis=1).astype(np.int64)  # (B, H, W)
 
-        # Detect glass background using clinical Otsu in HSV space
-        tissue_binary = compute_otsu_tissue_mask(patch_img)  # 1 for tissue, 0 for glass
-
-        # Background score channel
-        bg_score = np.full((1, h, w), fill_value=background_threshold, dtype=np.float32)
-        bg_score[0, tissue_binary == 0] = 1.0  # Force 1.0 on glass
-
-        # Concatenate 4 foreground CAMs + 1 background channel: (5, H, W)
-        volume = np.concatenate([patch_cam, bg_score], axis=0)
-        label_map = np.argmax(volume, axis=0)
-
-        # Enforce glass as class 4
-        label_map[tissue_binary == 0] = 4
-        discrete_masks[i] = label_map
-
-    return discrete_masks
+    # Apply clinical Otsu gating in HSV saturation space
+    gated_masks = apply_otsu_gating_to_prediction(
+        pred_mask=initial_masks,
+        image=raw_images_np,
+        background_class_idx=4,
+    )
+    return gated_masks
 
 
 def save_palette_mask(mask: np.ndarray, save_path: Union[str, Path]) -> None:
@@ -289,8 +279,15 @@ def generate_pseudo_masks_pipeline(
     batch_size: int = 8,
     dry_run: bool = False,
     device_str: Optional[str] = None,
+    use_sg_dap: bool = False,
+    stage1_norm_mode: str = "auto",
 ) -> Dict[str, Any]:
     """Orchestrate multi-layer pseudo-mask generation for training dataset."""
+    resolved_stage1_norm = infer_stage1_norm_mode(
+        None,
+        checkpoint_path=checkpoint_path,
+        requested_mode=stage1_norm_mode,
+    )
     device = torch.device(device_str if device_str else ("cuda" if torch.cuda.is_available() else "cpu"))
     data_path = Path(data_dir)
     if (data_path / "training").exists():
@@ -319,11 +316,20 @@ def generate_pseudo_masks_pipeline(
     # Initialize model
     model = WSSSTissueStage1NetCAM(n_class=NUM_FOREGROUND)
     if checkpoint_path and Path(checkpoint_path).exists():
-        state = torch.load(checkpoint_path, map_location="cpu")
-        state_dict = state.get("state_dict", state)
+        try:
+            state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        except Exception:
+            state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)  # nosec B614
+        resolved_stage1_norm = infer_stage1_norm_mode(
+            state,
+            checkpoint_path=checkpoint_path,
+            requested_mode=stage1_norm_mode,
+        )
+        state_dict = state.get("state_dict", state.get("model", state)) if isinstance(state, dict) else state
         model.load_state_dict(state_dict, strict=False)
 
     extractor = MultiLayerCAMExtractor(model, device=device)
+    sg_dap_refiner = StainGuidedAffinityRefiner().to(device).eval() if use_sg_dap else None
 
     # Scan patches
     all_files = find_image_files(train_dir)
@@ -358,19 +364,50 @@ def generate_pseudo_masks_pipeline(
         label_batch = torch.from_numpy(np.stack(labels, axis=0)).float().to(device)
         raw_imgs_np = np.stack(raw_imgs, axis=0)
 
+        # Align Stage-1 input normalization with checkpoint expectations ('zero_one' vs 'imagenet')
+        s1_img_batch = prepare_stage1_input(
+            img_batch,
+            stage1_norm_mode=resolved_stage1_norm,
+            images_are_imagenet_norm=True,
+        )
+
         # Extract multi-layer CAMs
-        cams_dict = extractor.extract_cams(img_batch, label_batch)
+        cams_dict = extractor.extract_cams(s1_img_batch, label_batch)
 
         # Pure-PyTorch GPU Affinity Matting refinement
         raw_img_tensors = torch.from_numpy(raw_imgs_np).permute(0, 3, 1, 2).float().to(device) / 255.0
-        refined_bn7 = bilateral_affinity_propagation_gpu(cams_dict["bn7"], raw_img_tensors)
-        refined_b5_2 = bilateral_affinity_propagation_gpu(cams_dict["b5_2"], raw_img_tensors)
-        refined_b4_5 = bilateral_affinity_propagation_gpu(cams_dict["b4_5"], raw_img_tensors)
+        if sg_dap_refiner is not None:
+            # SG-DAP mode: stain-guided affinity propagation with ignore_index=255 at uncertain tissue boundaries
+            _, _, h_img, w_img = raw_img_tensors.shape
 
-        # Assemble discrete pseudo-masks
-        masks_bn7 = assemble_pseudo_mask(refined_bn7.cpu(), raw_imgs_np)
-        masks_b5_2 = assemble_pseudo_mask(refined_b5_2.cpu(), raw_imgs_np)
-        masks_b4_5 = assemble_pseudo_mask(refined_b4_5.cpu(), raw_imgs_np)
+            def _apply_sg_dap(cam_tensor: torch.Tensor, deep_feats: torch.Tensor) -> np.ndarray:
+                cam_up = F.interpolate(cam_tensor, size=(h_img, w_img), mode="bilinear", align_corners=False)
+                cam_sum = cam_up.sum(dim=1, keepdim=True)
+                cam_probs = cam_up / cam_sum.clamp(min=1e-6)
+                _, sg_mask = sg_dap_refiner(
+                    raw_img_tensors,
+                    deep_feats,
+                    cam_probs,
+                    return_ignore_mask=True,
+                )
+                sg_np = sg_mask.cpu().numpy()
+                gated_np = apply_otsu_gating_to_prediction(sg_np, image=raw_imgs_np, background_class_idx=4)
+                # Preserve Otsu glass background (4); only mark uncertain tissue pixels as 255
+                gated_np[(sg_np == 255) & (gated_np != 4)] = 255
+                return gated_np
+
+            masks_bn7 = _apply_sg_dap(cams_dict["bn7"], extractor.features.get("bn7", raw_img_tensors))
+            masks_b5_2 = _apply_sg_dap(cams_dict["b5_2"], extractor.features.get("b5_2", raw_img_tensors))
+            masks_b4_5 = _apply_sg_dap(cams_dict["b4_5"], extractor.features.get("b4_5", raw_img_tensors))
+        else:
+            refined_bn7 = bilateral_affinity_propagation_gpu(cams_dict["bn7"], raw_img_tensors)
+            refined_b5_2 = bilateral_affinity_propagation_gpu(cams_dict["b5_2"], raw_img_tensors)
+            refined_b4_5 = bilateral_affinity_propagation_gpu(cams_dict["b4_5"], raw_img_tensors)
+
+            # Assemble discrete pseudo-masks
+            masks_bn7 = assemble_pseudo_mask(refined_bn7.cpu(), raw_imgs_np)
+            masks_b5_2 = assemble_pseudo_mask(refined_b5_2.cpu(), raw_imgs_np)
+            masks_b4_5 = assemble_pseudo_mask(refined_b4_5.cpu(), raw_imgs_np)
 
         # Save to disk
         for i, f in enumerate(batch_files):
@@ -387,6 +424,7 @@ def generate_pseudo_masks_pipeline(
         "pm_bn7_dir": str(pm_bn7_dir),
         "pm_b5_2_dir": str(pm_b5_2_dir),
         "pm_b4_5_dir": str(pm_b4_5_dir),
+        "stage1_norm_mode": resolved_stage1_norm,
     }
 
 
@@ -397,6 +435,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=str, default=None, help="Output directory for train_PM")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size")
     parser.add_argument("--dry-run", action="store_true", help="Process only 4 patches for testing")
+    parser.add_argument("--use-sg-dap", action="store_true", help="Use Stain-Guided Affinity Refiner with ignore_index=255")
+    parser.add_argument(
+        "--stage1-norm-mode",
+        type=str,
+        default="auto",
+        choices=["auto", "zero_one", "imagenet"],
+        help="Stage-1 input normalization mode ('auto', 'zero_one', or 'imagenet')",
+    )
     parser.add_argument("--device", type=str, default=None, help="Device ('cuda' or 'cpu')")
     return parser.parse_args()
 
@@ -410,6 +456,8 @@ def main() -> None:
         batch_size=args.batch_size,
         dry_run=args.dry_run,
         device_str=args.device,
+        use_sg_dap=args.use_sg_dap,
+        stage1_norm_mode=args.stage1_norm_mode,
     )
     print("Pseudo-Mask Generation Complete.")
     print(f"Processed: {res['processed_count']} patches")

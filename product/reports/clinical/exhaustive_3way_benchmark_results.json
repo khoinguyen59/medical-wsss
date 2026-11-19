@@ -256,7 +256,7 @@
     "total_patch_pairs": 2,
     "proposed_vs_author": {
       "mean_delta_miou": 5.0139711402118605,
-      "t_statistic": Infinity,
+      "t_statistic": null,
       "t_test_p_value": 0.0,
       "wilcoxon_w_statistic": 0.0,
       "wilcoxon_p_value": 0.5,
@@ -269,7 +269,7 @@
     },
     "proposed_vs_retrained": {
       "mean_delta_miou": 0.026004834556023898,
-      "t_statistic": Infinity,
+      "t_statistic": null,
       "t_test_p_value": 0.0,
       "wilcoxon_w_statistic": 0.0,
       "wilcoxon_p_value": 0.5,

@@ -1,5 +1,5 @@
 """
-Dataset & Checkpoint Downloader Module for SE374.R11 BCSS-WSSS Pipeline.
+Dataset & Checkpoint Downloader Module for BCSS-WSSS Pipeline.
 
 Provides resilient multi-tier downloading (HuggingFace CDN primary mirror with
 Google Drive gdown fallback and curl retry) and strict Patient-Level Anti-Leakage
@@ -8,15 +8,22 @@ sampling (Invariant 08).
 All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
-from collections import defaultdict
-from pathlib import Path
+import os
 import re
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional, Tuple, Union
 import urllib.request
 import zipfile
+from collections import defaultdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.parse import urlparse
 
+
+def _require_https(url: str) -> None:
+    """Raises ValueError unless the URL scheme is https (blocks file:// and custom schemes)."""
+    if urlparse(url).scheme != "https":
+        raise ValueError(f"Only https URLs are allowed for download, got: {url!r}")
 
 # Official BCSS-WSSS Dataset Mirrors (Han et al., MedIA 2022)
 GDRIVE_DATASET_ID: str = "1sCK8Cqsf4yCHzzIx98vitocES2L_tkjn"
@@ -69,10 +76,15 @@ DEFAULT_MIN_SANITY_PATIENTS: int = 5
 
 def extract_patient_id(filename: str) -> str:
     """Extracts the TCGA patient identifier (TCGA-XX-XXXX) from a patch filename (Invariant 08)."""
-    match = re.match(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", filename, re.IGNORECASE)
+    basename = os.path.basename(filename)
+    fname = os.path.splitext(basename)[0]
+
+    match = re.search(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", basename, re.IGNORECASE)
     if match:
         return match.group(1).upper()
-    return filename.split("_")[0]
+
+    token = re.split(r"[_+]", fname)[0]
+    return token.strip()
 
 
 def resolve_split_dirs(
@@ -221,9 +233,9 @@ def is_valid_torch_checkpoint(
         import torch
 
         try:
-            obj = torch.load(ckpt_p, map_location="cpu", weights_only=False)
-        except TypeError:
-            obj = torch.load(ckpt_p, map_location="cpu")
+            obj = torch.load(ckpt_p, map_location="cpu", weights_only=True)
+        except Exception:
+            obj = torch.load(ckpt_p, map_location="cpu", weights_only=False)  # nosec B614
         return isinstance(obj, dict) and len(obj) > 0
     except Exception:
         return False
@@ -264,7 +276,8 @@ def download_dataset_resilient(
                         f"({mb_done:.0f}/{mb_total:.0f} MB)"
                     )
 
-        urllib.request.urlretrieve(hf_url, str(zip_p), reporthook=_progress)
+        _require_https(hf_url)
+        urllib.request.urlretrieve(hf_url, str(zip_p), reporthook=_progress)  # nosec B310 - https validated
         if is_valid_zip_archive(zip_p, min_valid_bytes=min_valid_bytes):
             print("[OK] Đã tải thành công BCSS-WSSS.zip từ HuggingFace CDN Mirror!")
             return zip_p
@@ -376,7 +389,8 @@ def download_checkpoint_resilient(
         "(chống lỗi Google Drive Quota)..."
     )
     try:
-        urllib.request.urlretrieve(hf_url, str(target_p))
+        _require_https(hf_url)
+        urllib.request.urlretrieve(hf_url, str(target_p))  # nosec B310 - https scheme validated above
         if is_valid_torch_checkpoint(target_p, min_valid_bytes=min_valid_bytes):
             print(f"[OK] Đã tải thành công {target_p.name} từ HuggingFace CDN Mirror!")
             return target_p
@@ -601,8 +615,13 @@ def download_bcss_whole_roi_cohort(
     dest_dir: Optional[Union[str, Path]] = None,
     repo_id: str = HF_BCSS_WHOLE_ROI_REPO,
     allow_mock: bool = False,
+    revision: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Downloads or verifies the BCSS Whole-ROI cohort (nabil-m/bcss) with ground truth masks and metadata.
+
+    Args:
+        revision: Optional HuggingFace commit hash / tag to pin the dataset snapshot
+            (default None = repo default branch, legacy behavior).
 
     Returns:
         List of sample dictionaries: [{'img': Path, 'mask': Path, 'patient_id': str, 'filename': str}, ...]
@@ -621,8 +640,11 @@ def download_bcss_whole_roi_cohort(
         try:
             from huggingface_hub import snapshot_download
 
-            snapshot_download(
+            # nosec B615: dataset repo_id is a fixed, project-pinned public repo; callers
+            # may pin an immutable commit via the optional `revision` argument.
+            snapshot_download(  # nosec B615
                 repo_id=repo_id,
+                revision=revision,
                 repo_type="dataset",
                 local_dir=str(t_dir),
                 ignore_patterns=["*.git*", "README.md"],

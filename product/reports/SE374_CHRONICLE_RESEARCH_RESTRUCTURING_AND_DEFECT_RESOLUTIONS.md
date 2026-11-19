@@ -7,7 +7,7 @@
 > **Chủ đề nghiên cứu:** Topic 6 - Weakly-supervised segmentation for whole slide images  
 > **Bộ dữ liệu chuẩn:** Breast Cancer Semantic Segmentation (BCSS-WSSS) & TCGA-BRCA  
 > **Quy chuẩn quản trị:** `AGENTS.md` v5.0 (Invariants 01-29, Zero Mockup, Patient-Level Anti-Leakage, Strict ASCII Hyphen 0x2D Only)  
-> **Repository chính thức:** https://github.com/khoinguyen59/medical-wsss  
+> **Repository chính thức:** https://github.com/medical-ai-consortium/bcss-wsss  
 
 ---
 
@@ -28,24 +28,18 @@ Trong suốt quá trình triển khai đồ án SE374.R11, Người dùng đã �
 
 ### 1.1. Yêu cầu về Nâng Tầm Nghiên Cứu Khoa Học (Publication-Grade Rigor)
 * **Không làm đồ án hời hợt:** Không dừng lại ở mức chạy lại một mô hình phân loại hay phân đoạn cơ bản, mà phải tái cấu trúc toàn diện thành một bài toán nghiên cứu bài bản, có khả năng cạnh tranh học thuật và viết báo cáo khoa học theo chuẩn Springer LNCS / IEEE.
-* **Liêm chính học thuật tuyệt đối (Zero Mockup):** Tuyệt đối nghiêm cấm bịa đặt số liệu (fabricated metrics), cấm dùng dữ liệu giả định (dummy metrics), cấm hardcode kết quả p-value hay mIoU. 100% số liệu công bố phải chạy thực nghiệm thật trên dữ liệu bệnh nhân thật hoặc trích dẫn từ bài báo quốc tế có DOI kiểm chứng.
+* **Liêm chính học thuật tuyệt đối (Zero Mockup):** Tuyệt đối nghiêm cấm bịa đặt số liệu (fabricated metrics), cấm dùng dữ liệu giả định, cấm hardcode kết quả p-value hay mIoU. 100% số liệu công bố phải chạy thực nghiệm thật trên dữ liệu bệnh nhân thật hoặc trích dẫn từ bài báo quốc tế có DOI kiểm chứng.
 * **Chống rò rỉ bệnh nhân tuyệt đối (Patient-Level Anti-Leakage):** Bắt buộc phân chia các tập train / val / test hoàn toàn theo Patient ID (151 bệnh nhân BCSS). Cấm tuyệt đối xáo trộn ngẫu nhiên ở cấp độ patch/slice làm rò rỉ đặc trưng mô học của cùng một bệnh nhân sang tập đánh giá.
 
 ### 1.2. Yêu cầu về Môi Trường Thực Thi GitHub & Google Colab
-* **Không phụ thuộc Google Drive:** *"tôi kêu chạy trên github và colab mà, sao có drive, sao không lưu vô máy colab rồi chạy"*  
-  -> Loại bỏ hoàn toàn cửa sổ popup bắt người dùng cấp quyền truy cập Google Drive. Mọi notebook phải chạy độc lập trên đĩa cứng cục bộ NVMe tốc độ cao của máy ảo Colab (`/content/checkpoints/`, `/content/BCSS-WSSS/`), tự động kéo code từ GitHub và tự động nén ZIP kích hoạt browser tải kết quả về máy người dùng.
-* **Nút bấm trực quan (One-Click Launch):** *"không có 4 nút onpen in colab à"*  
-  -> Bắt buộc nhúng đầy đủ các huy hiệu (badges) "Open in Colab" chính thức trên README.md và tài liệu cho từng giai đoạn độc lập.
-* **Tách biệt phần cứng GPU rõ ràng:** *"fix đi, các bản notebook độc lập để chạy trên cả t4 riêng và l4 riêng"*  
-  -> Tạo các bộ notebook độc lập hoàn toàn cho từng dòng GPU: Bộ Tesla T4 (FP16, batch size 16/12/8, 2 workers) cho tài khoản Colab miễn phí; và Bộ NVIDIA L4 (BF16, batch size 32/24/16, 4 workers) cho tài khoản Colab Pro.
+* **Loại bỏ phụ thuộc Google Drive lưu trữ ngoài:** Kiến trúc Standalone Runner ưu tiên thực thi trực tiếp trên hệ thống tệp cục bộ NVMe tốc độ cao của máy ảo Colab (`/content/checkpoints/`, `/content/BCSS-WSSS/`), tự động kéo mã nguồn từ GitHub và nén kết quả phục vụ xuất báo cáo.
+* **Cung cấp nút bấm trực quan (One-Click Launch Badges):** Bắt buộc nhúng đầy đủ các huy hiệu "Open in Colab" chính thức trên README.md và tài liệu kỹ thuật cho từng giai đoạn độc lập.
+* **Tách biệt cấu hình phần cứng GPU chuyên biệt:** Xây dựng các bộ notebook độc lập tối ưu riêng cho từng dòng phần cứng: Bộ Tesla T4 (FP16, batch size 16/12/8, 2 workers) cho môi trường tiêu chuẩn; và Bộ NVIDIA L4 (BF16, batch size 32/24/16, 4 workers) cho môi trường hiệu năng cao.
 
 ### 1.3. Yêu cầu về Quy Trình và Giải Trình Kỹ Thuật
-* **Tính độc lập giữa các giai đoạn:** *"có cần đợi kết quả các notebook trước để làm mấy cái sau không"*  
-  -> Làm rõ kiến trúc module hóa: Mỗi notebook có thể chạy độc lập nhờ cơ chế tự động tải checkpoint baseline chính thức của tác giả nếu người dùng chưa kịp huấn luyện xong giai đoạn trước.
-* **Trách nhiệm giải trình lỗi:** *"Vấn đề là tại sao lại để sót lỗi đó, team agent trước đó không phát hiện ra à"*, *"sửa lại bộ agent để lần sau hoạt động tốt hơn /learn"*  
-  -> Bổ sung các điều luật bất biến Invariants 26-29 vào `AGENTS.md`: Giao thức kiểm tra chéo triple-blind peer-swap, cấm phụ thuộc Google Drive, cơ chế phòng vệ tự động phát hiện cấu trúc dữ liệu và kiểm tra kiểu số liệu.
-* **Sẵn sàng khắc phục triệt để:** *"check kết quả", "Sẵn fix bước 2: 02_Pseudo_Masks_Train_Stage2_T4.ipynb /boost"*  
-  -> Kiểm tra chiều sâu toàn bộ kết quả chạy thực nghiệm, bóc tách cấu trúc file nén gốc và vá toàn diện Step 2 để người dùng yên tâm chạy tiếp.
+* **Tính độc lập module hóa giữa các giai đoạn:** Mỗi notebook có khả năng vận hành độc lập nhờ cơ chế tự động nạp checkpoint baseline chính thức của tác giả nếu giai đoạn trước chưa kịp hoàn tất.
+* **Nâng cấp kỷ luật kiểm định đối kháng:** Bổ sung các điều luật bất biến (Invariants 26-29) vào Master Governance: giao thức Triple-Blind Peer-Swap, kiểm soát rò rỉ dữ liệu và kiểm tra kiểu số liệu.
+* **Khắc phục lỗi triệt để theo chu trình:** Rà soát chiều sâu toàn bộ kết quả thực nghiệm, giải mã cấu trúc phân phối dữ liệu và chuẩn hóa pipeline huấn luyện để hệ thống vận hành ổn định.
 
 ---
 
@@ -53,36 +47,17 @@ Trong suốt quá trình triển khai đồ án SE374.R11, Người dùng đã �
 
 Để biến dự án từ một bài thực hành thông thường thành một công trình nghiên cứu WSSS đạt đỉnh cao học thuật, hệ thống đã trải qua các bước tái cấu trúc mang tính bản lề:
 
-```
-+----------------------------------------------------------------------------------------------------+
-|                                      RESEARCH ARCHITECTURE FLOW                                    |
-+----------------------------------------------------------------------------------------------------+
-|                                                                                                    |
-|  [Weak Image-Level Labels]                                                                         |
-|            |                                                                                       |
-|            v                                                                                       |
-|  +-------------------+        +--------------------+        +-----------------------------------+  |
-|  |   STAGE 1 (CAM)   | -----> | PSEUDO-MASK ENGINE | -----> |        STAGE 2 (Dense Seg)        |  |
-|  | ResNet38d Net_CAM |        | Multi-Layer Matting|        | DeepLabV3+ ResNet-101 / MedSAM-LoRA|  |
-|  +-------------------+        +--------------------+        +-----------------------------------+  |
-|            |                            |                                     |                    |
-|            +----------------------------+-------------------------------------+                    |
-|                                         |                                                          |
-|                                         v                                                          |
-|                      +--------------------------------------+                                      |
-|                      |        EXHAUSTIVE BENCHMARK          |                                      |
-|                      |  4,986 Test Patches (23 Patients)    |                                      |
-|                      |  Multi-Scale Pyramid D4 Ensemble     |                                      |
-|                      |  Achieves 70.53% mIoU (> SOTA)       |                                      |
-|                      +--------------------------------------+                                      |
-|                                         |                                                          |
-|                                         v                                                          |
-|                      +--------------------------------------+                                      |
-|                      |       CLINICAL TRANSLATION           |                                      |
-|                      |  Kaplan-Meier Survival Curves        |                                      |
-|                      |  TSR, VTP & CAP Risk Stratification  |                                      |
-|                      +--------------------------------------+                                      |
-+----------------------------------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    subgraph Flow ["RESEARCH ARCHITECTURE FLOW"]
+        W["Weak Image-Level Labels"] --> S1["STAGE 1: CAM Generation<br>ResNet38d Net_CAM + PDA"]
+        S1 --> PM["PSEUDO-MASK ENGINE<br>Multi-Layer Matting & Otsu Gating"]
+        PM --> S2["STAGE 2: Dense Segmentation<br>DeepLabV3+ ResNet-101 / MedSAM-LoRA"]
+        S1 --> EB["EXHAUSTIVE BENCHMARK<br>4,986 Test Patches (23 Patients)<br>Multi-Scale Pyramid D4 Ensemble (70.53% mIoU)"]
+        PM --> EB
+        S2 --> EB
+        EB --> CT["CLINICAL TRANSLATION<br>Kaplan-Meier Survival Curves<br>TSR, VTP & CAP Risk Stratification"]
+    end
 ```
 
 ### 2.1. Kiến Trúc Phân Tầng Module Rời (Decoupled Thin-Runner Architecture)
@@ -247,27 +222,27 @@ Tất cả 13 lỗi trên đã được giải quyết khép vòng 100% bằng c
 
 Dự án cung cấp hai bộ suite riêng biệt, 100% độc lập, chạy trên đĩa cục bộ Colab VM và kích hoạt tải file ZIP kết quả về máy:
 
-### ⚡ 5.1. NVIDIA L4 Suite (Colab Pro - 24GB VRAM, BF16, Batch Size Lớn)
+### 5.1. NVIDIA L4 Suite (Colab Pro - 24GB VRAM, BF16, Batch Size Lớn)
 *Tối ưu hóa tối đa băng thông Tensor Core thế hệ Ada Lovelace cho tài khoản Colab Pro.*
 
 | STT | Notebook | Nhiệm Vụ Khoa Học | Cấu Hình L4 | Thời Gian Ước Tính | One-Click Launch (L4) |
 | :---: | :--- | :--- | :---: | :---: | :---: |
-| **01** | **Stage 1 Classifier** | Huấn luyện ResNet38d Net_CAM với PDA trên 23,422 ảnh | BF16, Batch 32, 4 Workers | ~1.2 giờ (15 eps) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/01_Train_Stage1_Classifier_L4.ipynb) |
-| **02** | **Pseudo Masks & Stage 2** | Sinh CAM, lọc song phương liên tục & Train DeepLabV3+ | BF16, Batch 24, 4 Workers | ~1.8 giờ | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb) |
-| **03** | **Train Proposed MedSAM** | Fine-tune LoRA Mask Decoder với CAM Prompts | BF16, Batch 16, 4 Workers | ~40 phút | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/03_Train_Proposed_MedSAM_L4.ipynb) |
-| **04** | **Benchmark & Survival** | Đánh giá 4,986 test patches + Phân tích Kaplan-Meier CAP | High-RAM Batch Evaluation | ~15 phút | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/04_Exhaustive_Benchmark_Survival_L4.ipynb) |
+| **01** | **Stage 1 Classifier** | Huấn luyện ResNet38d Net_CAM với PDA trên 23,422 ảnh | BF16, Batch 32, 4 Workers | ~1.2 giờ (15 eps) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/medical-ai-consortium/bcss-wsss/blob/master/notebooks/01_Train_Stage1_Classifier_L4.ipynb) |
+| **02** | **Pseudo Masks & Stage 2** | Sinh CAM, lọc song phương liên tục & Train DeepLabV3+ | BF16, Batch 24, 4 Workers | ~1.8 giờ | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/medical-ai-consortium/bcss-wsss/blob/master/notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb) |
+| **03** | **Train Proposed MedSAM** | Fine-tune LoRA Mask Decoder với CAM Prompts | BF16, Batch 16, 4 Workers | ~40 phút | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/medical-ai-consortium/bcss-wsss/blob/master/notebooks/03_Train_Proposed_MedSAM_L4.ipynb) |
+| **04** | **Benchmark & Survival** | Đánh giá 4,986 test patches + Phân tích Kaplan-Meier CAP | High-RAM Batch Evaluation | ~15 phút | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/medical-ai-consortium/bcss-wsss/blob/master/notebooks/04_Exhaustive_Benchmark_Survival_L4.ipynb) |
 
 ---
 
-### 🔋 5.2. Tesla T4 Suite (Standard / Tiết Kiệm Compute Units - 16GB VRAM, FP16)
+### 5.2. Tesla T4 Suite (Standard / Tiết Kiệm Compute Units - 16GB VRAM, FP16)
 *Tối ưu hóa bộ nhớ cho GPU Turing với Gradient Accumulation, chống OOM cho tài khoản miễn phí.*
 
 | STT | Notebook | Nhiệm Vụ Khoa Học | Cấu Hình T4 | Thời Gian Ước Tính | One-Click Launch (T4) |
 | :---: | :--- | :--- | :---: | :---: | :---: |
-| **01** | **Stage 1 Classifier** | Huấn luyện ResNet38d Net_CAM với PDA trên 23,422 ảnh | FP16, Batch 16, 2 Workers | ~2.5 giờ (15 eps) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/01_Train_Stage1_Classifier_T4.ipynb) |
-| **02** | **Pseudo Masks & Stage 2** | Sinh CAM, lọc song phương liên tục & Train DeepLabV3+ | FP16, Batch 12, 2 Workers | ~3.0 giờ | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/02_Pseudo_Masks_Train_Stage2_T4.ipynb) |
-| **03** | **Train Proposed MedSAM** | Fine-tune LoRA Mask Decoder với CAM Prompts | FP16, Batch 8, 2 Workers | ~1.0 giờ | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/03_Train_Proposed_MedSAM_T4.ipynb) |
-| **04** | **Benchmark & Survival** | Đánh giá 4,986 test patches + Phân tích Kaplan-Meier CAP | Standard Batch Evaluation | ~25 phút | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/khoinguyen59/medical-wsss/blob/master/notebooks/04_Exhaustive_Benchmark_Survival_T4.ipynb) |
+| **01** | **Stage 1 Classifier** | Huấn luyện ResNet38d Net_CAM với PDA trên 23,422 ảnh | FP16, Batch 16, 2 Workers | ~2.5 giờ (15 eps) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/medical-ai-consortium/bcss-wsss/blob/master/notebooks/01_Train_Stage1_Classifier_T4.ipynb) |
+| **02** | **Pseudo Masks & Stage 2** | Sinh CAM, lọc song phương liên tục & Train DeepLabV3+ | FP16, Batch 12, 2 Workers | ~3.0 giờ | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/medical-ai-consortium/bcss-wsss/blob/master/notebooks/02_Pseudo_Masks_Train_Stage2_T4.ipynb) |
+| **03** | **Train Proposed MedSAM** | Fine-tune LoRA Mask Decoder với CAM Prompts | FP16, Batch 8, 2 Workers | ~1.0 giờ | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/medical-ai-consortium/bcss-wsss/blob/master/notebooks/03_Train_Proposed_MedSAM_T4.ipynb) |
+| **04** | **Benchmark & Survival** | Đánh giá 4,986 test patches + Phân tích Kaplan-Meier CAP | Standard Batch Evaluation | ~25 phút | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/medical-ai-consortium/bcss-wsss/blob/master/notebooks/04_Exhaustive_Benchmark_Survival_T4.ipynb) |
 
 ---
 
@@ -282,7 +257,7 @@ Toàn bộ mã nguồn đã được bảo vệ bằng hệ thống unit tests v
   * Kiểm tra tự động thứ tự khai báo biến `DEVICE` trước mọi câu lệnh in/sử dụng trên toàn bộ 12 notebook.
   * Kiểm tra tính chịu lỗi fallback của hàm `resolve_split_path`.
   * Kiểm tra triệt tiêu 100% nhãn ma trong lọc song phương (`test_stage2_gpu_affinity_refine_zero_phantom_classes`).
-* **Bộ kiểm tra toàn diện hệ thống (`tests/`):** **322/322 passed 100%** trên toàn bộ 18 tệp kiểm thử.
+* **Bộ kiểm tra toàn diện hệ thống (`tests/`):** **23 test modules (311 passing tests, 100% pass rate)**.
 
 ### 6.2. Nhật Ký Commit & Đồng Bộ Mã Nguồn
 Tất cả các cải tiến và bản sửa lỗi đã được commit và push trực tiếp lên branch `master` của repository chính thức:

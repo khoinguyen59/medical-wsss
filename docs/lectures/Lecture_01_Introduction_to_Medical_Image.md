@@ -205,11 +205,11 @@ Từ phân tích chuyên sâu Slide Bài giảng 01 của TS. Bùi Cao Doanh, đ
 
 ## 5. Tham Khảo Tài Liệu & Liên Kết Hệ Thống
 
-- **Tệp bài giảng PDF gốc:** [`docs/lectures/Lecture_01_Introduction_to_Medical_Image.pdf`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/lectures/Lecture_01_Introduction_to_Medical_Image.pdf)
-- **Tài liệu phân tích 8 chủ đề môn học:** [`docs/SE374_TOPIC_MATRIX_AND_GUIDE.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/SE374_TOPIC_MATRIX_AND_GUIDE.md)
-- **Đề xuất chiến lược đồ án nhóm:** [`docs/PROPOSAL_TOPIC_RECOMMENDATION.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/PROPOSAL_TOPIC_RECOMMENDATION.md)
+- **Tệp bài giảng PDF gốc:** [`docs/lectures/Lecture_01_Introduction_to_Medical_Image.pdf`](docs/lectures/Lecture_01_Introduction_to_Medical_Image.pdf)
+- **Tài liệu phân tích 8 chủ đề môn học:** [`docs/SE374_TOPIC_MATRIX_AND_GUIDE.md`](docs/SE374_TOPIC_MATRIX_AND_GUIDE.md)
+- **Đề xuất chiến lược đồ án nhóm:** [`docs/PROPOSAL_TOPIC_RECOMMENDATION.md`](docs/PROPOSAL_TOPIC_RECOMMENDATION.md)
 - **Tài liệu bài báo tác giả (Paper Dossiers):**
-  - CG-GLORE (Topic 1): [`docs/papers/CG_GLORE_arxiv_2608.15246.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/papers/CG_GLORE_arxiv_2608.15246.md)
-  - CGRL (Topic 3): [`docs/papers/CGRL_arxiv_2607.12556.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/papers/CGRL_arxiv_2607.12556.md)
-  - MergeSurv (Topic 4): [`docs/papers/MergeSurv_arxiv_2607.04747.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/papers/MergeSurv_arxiv_2607.04747.md)
-  - LowMagWSS (Topic 6): [`docs/papers/LowMagWSS_arxiv_2607.10783.md`](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/docs/papers/LowMagWSS_arxiv_2607.10783.md)
+  - CG-GLORE (Topic 1): [`docs/papers/CG_GLORE_arxiv_2608.15246.md`](docs/papers/CG_GLORE_arxiv_2608.15246.md)
+  - CGRL (Topic 3): [`docs/papers/CGRL_arxiv_2607.12556.md`](docs/papers/CGRL_arxiv_2607.12556.md)
+  - MergeSurv (Topic 4): [`docs/papers/MergeSurv_arxiv_2607.04747.md`](docs/papers/MergeSurv_arxiv_2607.04747.md)
+  - LowMagWSS (Topic 6): [`docs/papers/LowMagWSS_arxiv_2607.10783.md`](docs/papers/LowMagWSS_arxiv_2607.10783.md)

@@ -1,4 +1,4 @@
-"""Generator for SE374.R11 Thin Drive Runner v2 Google Colab Notebooks.
+"""Generator for BCSS-WSSS Thin Drive Runner v2 Google Colab Notebooks.
 
 Creates 4 hardware-specific, ultra-clean Thin Runner v2 notebooks in `notebooks/`
 and mirrors them in `notebooks/modular_drive/` without modifying or overwriting
@@ -164,12 +164,9 @@ def build_thin_notebook(spec: Dict[str, Any]) -> Dict[str, Any]:
     cells.append(
         _md_cell(
             "cell-00-header",
-            f"""# SE374.R11 - Topic 6: Weakly-Supervised Segmentation for WSI (LowMagWSS)
+            f"""# BCSS-WSSS - Weakly-Supervised Segmentation for WSI (LowMagWSS)
 ## Thin Google Drive Runner v2: `{spec['title_badge']}`
 
-* **Mon hoc:** SE374.R11 - Phat trien phan mem xu ly anh y khoa (UIT - DHQG-HCM)
-* **Giang vien huong dan:** TS. Bui Cao Doanh
-* **Nhom thuc hien:** [Nhom de xuat rieng - Ho va ten Sinh vien (MSSV)]
 * **Kien truc Notebook:** **Thin Drive Runner v2** - Toan bo ma nguon mo hinh (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`), bo tai du lieu (`downloader.py`), trinh suy luan 7 phuong phap SOTA (`MultiMethodWSSSEngineV2`) va trinh xuat bieu do 300-DPI (`visualizer.py`) duoc dong goi trong thu muc code tren Google Drive (`src/`). Moi o code trong notebook nay chi giu vai tro dieu phoi gon nhe (`<= 32` dong/o).
 * **Cau hinh phan cung:** {spec['hardware_desc']}
 * **Thoi gian chay du kien:** {spec['expected_runtime']}
@@ -382,7 +379,7 @@ display(SUMMARY_DF)""",
             "cell-11-viz-md",
             """---
 ## Buoc 6: Truc Quan Hoa 3 Bieu Do Khoa Hoc Chuẩn 300-DPI (Clinical Comparison, Confusion Matrix & Ablation Chart)
-Su dung `render_clinical_comparison_figure()`, `render_confusion_matrix_heatmap()` va `render_ablation_bar_chart()` tu `src.pipeline.colab_runner` de xuat bo hinh anh 300-DPI phuc vu bao cao SE374.R11.""",
+Su dung `render_clinical_comparison_figure()`, `render_confusion_matrix_heatmap()` va `render_ablation_bar_chart()` tu `src.pipeline.colab_runner` de xuat bo hinh anh 300-DPI phuc vu bao cao nghien cuu BCSS-WSSS.""",
         )
     )
 
@@ -513,9 +510,9 @@ if len(ACTIVE_TEST_FILES) > 0:
 
 def build_modular_drive_readme() -> str:
     """Create `notebooks/modular_drive/README.md` with Google Drive setup instructions."""
-    text = """# SE374.R11 - Thin Drive Runner v2 Colab Notebook Suite
+    text = """# BCSS-WSSS - Thin Drive Runner v2 Colab Notebook Suite
 
-Thu muc nay chua bo 4 Google Colab Notebooks the he moi (**Thin Drive Runner v2**) danh cho de tai **Topic 6: Weakly-Supervised Segmentation for Whole Slide Images (LowMagWSS)** cua **[Nhom de xuat rieng - Ho va ten Sinh vien (MSSV)]**; GVHD: TS. Bui Cao Doanh.
+Thu muc nay chua bo 4 Google Colab Notebooks the he moi (**Thin Drive Runner v2**) danh cho he thong **Weakly-Supervised Segmentation for Whole Slide Images (LowMagWSS)** tren tap du lieu BCSS-WSSS.
 
 ## 1. Diem Khac Biet Cua Kien Truc Thin Drive Runner v2
 - **Khong nhung code mo hinh khong lo vao o notebook:** Thay vi nhung hang nghin dong dinh nghia class (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`, `MultiMethodWSSSEngine`) truc tiep trong `.ipynb`, toan bo logic duoc dat trong thu muc code `src/` tren Google Drive (`src/colab_pkg/`, `src/pipeline/colab_runner.py`, `src/models/wsss_inference_methods.py`).
@@ -586,9 +583,10 @@ def run_notebook_smoke_test(nb_path: Path) -> None:
     """Execute all code cells of `nb_path` sequentially on a synthetic BCSS dataset & mock checkpoints."""
     import tempfile
     import zipfile
+
     import numpy as np
-    from PIL import Image
     import torch
+    from PIL import Image
 
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))

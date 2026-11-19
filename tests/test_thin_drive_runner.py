@@ -24,6 +24,7 @@ import json
 import zipfile
 from pathlib import Path
 from typing import Dict, List
+
 import numpy as np
 import pytest
 import torch
@@ -31,6 +32,8 @@ import torch
 import scripts.build_drive_package as packager
 from src.models.wsss_inference_methods import (
     DeepLabV3Plus as Stage2DeepLabV3Plus,
+)
+from src.models.wsss_inference_methods import (
     MultiMethodWSSSEngine,
     MultiMethodWSSSEngineV2,
     WSSSTissueStage1NetCAM,
@@ -89,13 +92,15 @@ def test_1_existing_legacy_notebooks_untouched():
 
 
 def test_2_drive_bundle_packager_creates_complete_folder_and_zip(tmp_path):
-    """Verify `scripts/build_drive_package.py` assembles `drive_upload_ready/SE374_WSSS_Drive_Code/`
-    and `drive_upload_ready/SE374_WSSS_Drive_Code.zip` cleanly and supports 1-click extraction.
+    """Verify `scripts/build_drive_package.py` assembles isolated `SE374_WSSS_Drive_Code/`
+    and `SE374_WSSS_Drive_Code.zip` cleanly without mutating tracked repository files.
     """
-    summary = packager.build_drive_package()
+    out_base = tmp_path / "drive_out"
+    bundle_dir = out_base / "SE374_WSSS_Drive_Code"
+    summary = packager.build_drive_package(output_base_dir=out_base, sync_repo_files=False)
 
-    assert BUNDLE_DIR.is_dir(), f"Bundle directory not created: {BUNDLE_DIR}"
-    bundle_src = BUNDLE_DIR / "src"
+    assert bundle_dir.is_dir(), f"Bundle directory not created: {bundle_dir}"
+    bundle_src = bundle_dir / "src"
     assert bundle_src.is_dir(), "Missing `src/` inside Drive bundle directory"
 
     # Check essential modular files inside bundle/src/
@@ -113,17 +118,17 @@ def test_2_drive_bundle_packager_creates_complete_folder_and_zip(tmp_path):
         "src/utils/deliverable_auditor.py",
     ]
     for rel in required_rel_files:
-        target = BUNDLE_DIR / rel
+        target = bundle_dir / rel
         assert target.is_file(), f"Missing required file in Drive bundle: {rel}"
 
     # Verify zero __pycache__ or .pyc inside bundle
-    pycache_dirs = list(BUNDLE_DIR.rglob("__pycache__"))
-    pyc_files = list(BUNDLE_DIR.rglob("*.pyc"))
+    pycache_dirs = list(bundle_dir.rglob("__pycache__"))
+    pyc_files = list(bundle_dir.rglob("*.pyc"))
     assert len(pycache_dirs) == 0, f"Found __pycache__ inside clean Drive bundle: {pycache_dirs}"
     assert len(pyc_files) == 0, f"Found .pyc files inside clean Drive bundle: {pyc_files}"
 
     # Verify README_DRIVE_SETUP.md in Vietnamese
-    readme_path = BUNDLE_DIR / "README_DRIVE_SETUP.md"
+    readme_path = bundle_dir / "README_DRIVE_SETUP.md"
     assert readme_path.is_file(), "Missing README_DRIVE_SETUP.md in Drive bundle"
     readme_text = readme_path.read_text(encoding="utf-8")
     assert len(readme_text) > 1500, "README_DRIVE_SETUP.md is too short"
@@ -136,18 +141,18 @@ def test_2_drive_bundle_packager_creates_complete_folder_and_zip(tmp_path):
         assert char not in readme_text, f"Forbidden {name} in README_DRIVE_SETUP.md"
 
     # Verify package_manifest.json lists all 7 supported SOTA methods (M1..M7)
-    manifest_data = json.loads((BUNDLE_DIR / "package_manifest.json").read_text(encoding="utf-8"))
+    manifest_data = json.loads((bundle_dir / "package_manifest.json").read_text(encoding="utf-8"))
     assert len(manifest_data["supported_wsss_methods"]) == 7
     assert "M6_MultiScale_Pyramid_D4_Ensemble" in manifest_data["supported_wsss_methods"]
     assert "M7_Proposed_Ultra_SOTA_Curriculum" in manifest_data["supported_wsss_methods"]
 
     # Verify POSIX LF line endings on packaged Python source files
-    raw_bytes = (BUNDLE_DIR / "src" / "models" / "wsss_inference_methods.py").read_bytes()
+    raw_bytes = (bundle_dir / "src" / "models" / "wsss_inference_methods.py").read_bytes()
     assert b"\r\n" not in raw_bytes, "Packaged source files must use POSIX LF ('\\n') line endings for Linux Colab VMs"
 
     # Verify pre-zipped archive integrity and extraction round-trip
-    zip_outer = DRIVE_READY_DIR / "SE374_WSSS_Drive_Code.zip"
-    zip_inner = BUNDLE_DIR / "SE374_WSSS_Drive_Code.zip"
+    zip_outer = out_base / "SE374_WSSS_Drive_Code.zip"
+    zip_inner = bundle_dir / "SE374_WSSS_Drive_Code.zip"
     assert zip_outer.is_file(), f"Missing outer zip archive: {zip_outer}"
     assert zip_inner.is_file(), f"Missing inner zip archive copy: {zip_inner}"
     assert zipfile.is_zipfile(zip_outer), "SE374_WSSS_Drive_Code.zip is not a valid zip file"
@@ -169,16 +174,18 @@ def test_2_drive_bundle_packager_creates_complete_folder_and_zip(tmp_path):
     assert len(summary["supported_wsss_methods"]) == 7
 
 
-def test_3_new_thin_runner_notebooks_valid_concise_and_modular():
-    """Verify all new Thin Runner notebooks (in `notebooks/` and `drive_upload_ready/`)
+def test_3_new_thin_runner_notebooks_valid_concise_and_modular(tmp_path):
+    """Verify all new Thin Runner notebooks (in `notebooks/` and isolated Drive bundle)
     have valid JSON schema, zero syntax errors, concise cells (no monolithic code dumps),
     and call the modular code package (`src`).
     """
-    packager.build_drive_package()
+    out_base = tmp_path / "drive_out_3"
+    bundle_dir = out_base / "SE374_WSSS_Drive_Code"
+    packager.build_drive_package(output_base_dir=out_base, sync_repo_files=False)
 
     # Collect new Thin Runner notebooks from notebooks/ (if present) and from the Drive bundle
     repo_thin_nbs = packager.discover_thin_runner_notebooks(NOTEBOOKS_DIR)
-    bundle_thin_nbs = sorted((BUNDLE_DIR / "notebooks").glob("*.ipynb"))
+    bundle_thin_nbs = sorted((bundle_dir / "notebooks").glob("*.ipynb"))
 
     all_thin_nbs = repo_thin_nbs + bundle_thin_nbs
     assert len(all_thin_nbs) >= 4, (
@@ -483,17 +490,18 @@ def test_6_json_serialization_safety_and_ablation_metrics():
     assert len(parsed_back["ablation_summary"]) == 7
 
 
-def test_7_invariant_12_strict_ascii_hyphens_across_all_packaged_files():
+def test_7_invariant_12_strict_ascii_hyphens_across_all_packaged_files(tmp_path):
     """Verify 0 non-ASCII dashes across `scripts/build_drive_package.py`,
-    `tests/test_thin_drive_runner.py`, and all text files in `drive_upload_ready/`.
+    `tests/test_thin_drive_runner.py`, and all generated package files in `tmp_path`.
     """
-    packager.build_drive_package()
+    out_base = tmp_path / "drive_out_7"
+    packager.build_drive_package(output_base_dir=out_base, sync_repo_files=False)
 
     files_to_check = [
         PROJECT_ROOT / "scripts" / "build_drive_package.py",
         PROJECT_ROOT / "tests" / "test_thin_drive_runner.py",
     ]
-    for p in DRIVE_READY_DIR.rglob("*"):
+    for p in out_base.rglob("*"):
         if p.is_file() and p.suffix in {".py", ".md", ".json", ".ipynb", ".txt", ".html", ".csv"}:
             files_to_check.append(p)
 

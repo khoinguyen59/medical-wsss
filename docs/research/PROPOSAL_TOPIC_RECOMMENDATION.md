@@ -2,6 +2,7 @@
 ## Môn học: Phát Triển Phần Mềm Xử Lý Ảnh Y Khoa (SE374.R11)
 ### Khoa Kỹ thuật Phần mềm - Trường Đại học Công nghệ Thông tin (UIT), ĐHQG-HCM
 
+> **Ghi chú Lưu trữ & Định hướng Đề tài:** Đây là tài liệu phân tích tổng quan các chủ đề môn học ban đầu. Dự án đã chính thức lựa chọn và tập trung toàn diện vào **Đề tài Phân vùng ngữ nghĩa giám sát yếu trên tiêu bản WSI ung thư vú (BCSS-WSSS)** (Topic 6). Các chủ đề khác (CT AAPM, MRI u não BraTS, fMRI ABIDE I) được lưu trữ phục vụ tham khảo học thuật.  
 > **Nguồn đối soát:** `SE374.R11 - Đồ án cuối kỳ.xlsx` & `topic.md`  
 > **Giảng viên / Phòng nghiên cứu phụ trách:** TS. Bùi Cao Doanh (`doanhbc@uit.edu.vn`) & PGS. TS. Nguyễn Khang (`khangnttm@uit.edu.vn`)  
 > **Đặc thù môn học:** Kết hợp giữa **Thuật toán Xử lý ảnh Y tế / AI Y khoa (Medical AI Core)** và **Kỹ thuật phát triển phần mềm lâm sàng hoàn chỉnh (Clinical Medical Software Engineering)**.  
@@ -15,18 +16,18 @@ Dựa trên bảng theo dõi `SE374.R11 - Đồ án cuối kỳ.xlsx`, lớp hi�
 | Nhóm | Thành Viên Đăng Ký | Tên Đề Tài & Phân Loại Topic | Nhận Xét Độc Lập & Mức Độ Cạnh Tranh |
 | :---: | :--- | :--- | :--- |
 | **Nhóm 1** | *(Chưa điền tên thành viên)* | **Sparse-view CT reconstruction** *(Topic 1)* | **Vị trí chiến lược:** Đề tài trọng tâm Buổi 2 của Thầy Doanh. Chưa có tên thành viên cụ thể $\rightarrow$ Cơ hội rất lớn nếu nhóm của bạn chọn nhận chủ đề này. |
-| **Nhóm 2** | 24520554 - Nguyễn Huy Hoàng | **Tumor segmentation using CT/MRI** *(Topic 5)* | **Hướng kinh điển:** Sử dụng BraTS dataset. Bài toán phân vùng u não 3D rất quen thuộc, thư viện MONAI hỗ trợ mạnh mẽ, nhưng tính đột phá mới lạ không cao. |
-| **Nhóm 3** | 24520336 - Huỳnh Đức Dũng | *Tên đề tài gì cho hay nhỉ* | **Chưa chốt đề tài:** Đang tìm kiếm định hướng. |
+| **Nhóm 2** | [Tác giả / Nhóm nghiên cứu] | **Tumor segmentation using CT/MRI** *(Topic 5)* | **Hướng kinh điển:** Sử dụng BraTS dataset. Bài toán phân vùng u não 3D rất quen thuộc, thư viện MONAI hỗ trợ mạnh mẽ, nhưng tính đột phá mới lạ không cao. |
+| **Nhóm 3** | [Tác giả / Nhóm nghiên cứu] | *Tên đề tài gì cho hay nhỉ* | **Chưa chốt đề tài:** Đang tìm kiếm định hướng. |
 | **Nhóm 4** | *(Trống)* | *(Chưa có đăng ký)* | Vị trí hoàn toàn trống. |
-| **Nhóm 5** | 23520922 - Hà Nhật Minh<br>23521267 - Nguyễn Việt Kỳ Quân | **Whole-Slide Image-Based Survival Risk Analysis Using Attention Multiple Instance Learning** *(Topic 4)* | **Hướng nghiên cứu hay:** Dự đoán thời gian sống sót bằng WSI giải phẫu bệnh (TCGA). Nhóm chọn phương pháp Attention-MIL kinh điển, có thể đối mặt với thách thức tài nguyên khi xử lý gigapixel WSI. |
-| **Nhóm 6** | 23521262 - Nguyễn Hồng Quân<br>23521214 - Phạm Hoàng Phúc | **Weakly-supervised segmentation for whole slide images** *(Topic 6)* | **Bám sát đề bài:** Kế thừa paper LowMagWSS (7/2026 của lab Thầy Doanh/Thầy Khang). Hướng đi thông minh, giải quyết bài toán giảm dung lượng lưu trữ WSI. |
-| **Nhóm 7** | 23520707 - Phạm Tuấn Khang<br>Phạm Hùng<br>Nguyễn Đình Tri | **Ứng dụng hỏi đáp dành cho bác sĩ chẩn đoán hình ảnh** *(Topic 8 - Tự do)* | **Medical VQA / Chatbot:** Ý tưởng hấp dẫn về mặt phần mềm, nhưng thách thức rất lớn về mặt y khoa là hiện tượng ảo giác (hallucination) của LLM và đòi hỏi tài nguyên GPU lớn nếu tự train mô hình đa phương thức (Med-VLM). |
-| **Nhóm 8** | 23520826 - Võ Tuấn Kiệt | **Ứng dụng phát hiện người mắc rối loạn phổ tự kỉ dựa trên ảnh fMRI** *(Topic 8 - Tự do)* | **Brain fMRI & Web Demo:** Sử dụng dataset ABIDE I để khai thác functional connectivity não, định hướng làm web demo. Rất đúng trọng tâm môn phần mềm xử lý ảnh y tế. |
-| **Nhóm 9** | 24520601 - Nguyễn Đại Hưng<br>24521489 - Dương Nguyễn Phú Quý<br>25520115 - Vũ Xuân Bách<br>25521929 - Bảo Trình | **Limited-angle CT reconstruction** *(Topic 2)* | **Nhóm đông thành viên nhất (4 bạn):** Tái tạo CT góc hạn chế. Đề tài toán học và xử lý ảnh nghịch đảo rất nặng, cần sự phối hợp tốt giữa sinogram inpainting và tái tạo ảnh. |
+| **Nhóm 5** | [Tác giả / Nhóm nghiên cứu] | **Whole-Slide Image-Based Survival Risk Analysis Using Attention Multiple Instance Learning** *(Topic 4)* | **Hướng nghiên cứu hay:** Dự đoán thời gian sống sót bằng WSI giải phẫu bệnh (TCGA). Nhóm chọn phương pháp Attention-MIL kinh điển, có thể đối mặt với thách thức tài nguyên khi xử lý gigapixel WSI. |
+| **Nhóm 6** | [Tác giả / Nhóm nghiên cứu] | **Weakly-supervised segmentation for whole slide images** *(Topic 6)* | **Bám sát đề bài:** Kế thừa paper LowMagWSS (7/2026 của lab Thầy Doanh/Thầy Khang). Hướng đi thông minh, giải quyết bài toán giảm dung lượng lưu trữ WSI. |
+| **Nhóm 7** | [Tác giả / Nhóm nghiên cứu] | **Ứng dụng hỏi đáp dành cho bác sĩ chẩn đoán hình ảnh** *(Topic 8 - Tự do)* | **Medical VQA / Chatbot:** Ý tưởng hấp dẫn về mặt phần mềm, nhưng thách thức rất lớn về mặt y khoa là hiện tượng ảo giác (hallucination) của LLM và đòi hỏi tài nguyên GPU lớn nếu tự train mô hình đa phương thức (Med-VLM). |
+| **Nhóm 8** | [Tác giả / Nhóm nghiên cứu] | **Ứng dụng phát hiện người mắc rối loạn phổ tự kỉ dựa trên ảnh fMRI** *(Topic 8 - Tự do)* | **Brain fMRI & Web Demo:** Sử dụng dataset ABIDE I để khai thác functional connectivity não, định hướng làm web demo. Rất đúng trọng tâm môn phần mềm xử lý ảnh y tế. |
+| **Nhóm 9** | [Tác giả / Nhóm nghiên cứu] | **Limited-angle CT reconstruction** *(Topic 2)* | **Đề tài tính toán cao:** Tái tạo CT góc hạn chế. Đề tài toán học và xử lý ảnh nghịch đảo rất nặng, cần sự phối hợp tốt giữa sinogram inpainting và tái tạo ảnh. |
 
 ### 📌 Các "Kho Báu" Đang Bị Bỏ Trống (Unclaimed Strategic Gaps):
 1. **Topic 1 (Sparse-view CT reconstruction):** Giảng viên giảng rất kỹ ở Buổi 2 và vừa công bố paper đỉnh cao **CG-GLORE** (15/08/2026). Nhóm 1 hiện chưa có danh sách thành viên!
-2. **Topic 3 (Cancer subtyping using Whole Slide Images):** **Chưa có bất kỳ nhóm nào chọn!** Trong khi phòng lab của Thầy Doanh vừa ra mắt bài báo **CGRL** (16/07/2026) kèm mã nguồn GitHub chính thức của sinh viên UIT (`ThucHuynh44/CGRL`).
+2. **Topic 3 (Cancer subtyping using Whole Slide Images):** **Chưa có bất kỳ nhóm nào chọn!** Trong khi phòng lab của Thầy Doanh vừa ra mắt bài báo **CGRL** (16/07/2026) kèm mã nguồn GitHub chính thức (`ThucHuynh44/CGRL`).
 3. **Topic 7 (Collateral imaging in acute ischemic stroke using MRI):** **Chưa có bất kỳ nhóm nào chọn!** Đánh giá tuần hoàn bàng hệ trong cấp cứu đột quỵ thiếu máu não là bài toán lâm sàng cực kỳ cấp thiết, cứu sống bệnh nhân trong "cửa sổ vàng".
 
 ---

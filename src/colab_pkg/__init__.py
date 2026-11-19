@@ -1,11 +1,11 @@
 """
-Modular Google Drive & Colab Package (colab_pkg) for SE374.R11 BCSS-WSSS Pipeline.
+Modular Google Drive & Colab Package (colab_pkg) for BCSS-WSSS Pipeline.
 
-Upload this folder (`src/colab_pkg/`) to Google Drive (e.g. `MyDrive/SE374_WSSS_Code/colab_pkg`)
+Upload this folder (`src/colab_pkg/`) to Google Drive (e.g. `MyDrive/SE374_WSSS_Drive_Code/colab_pkg`)
 or clone the repository on Google Colab, then run the entire experiment in 1-3 lines:
 
     import sys
-    sys.path.insert(0, "/content/drive/MyDrive/SE374_WSSS_Code")
+    sys.path.insert(0, "/content/drive/MyDrive/SE374_WSSS_Drive_Code")
     from colab_pkg import run_bcss_wsss_experiment
     results = run_bcss_wsss_experiment(sanity_mode=False, mode_tag="T4_Full4986")
 
@@ -54,11 +54,17 @@ try:
         LUAD_CLASS_LABELS,
         ColabSegmentationEvaluator,
         compute_paired_statistical_tests,
+        compute_patient_level_paired_test,
         export_evaluation_artifacts,
+        holm_bonferroni_correction,
+        predict_pda_ablation,
+        predict_uniform_multiscale_baseline,
         print_evaluation_summary,
         run_biomarker_correlation_study,
         run_cross_dataset_luad_benchmark,
         run_multimag_and_pareto_benchmark,
+        run_multiscale_baseline_comparison,
+        run_pda_ablation_study,
         run_val_to_test_scientific_protocol,
         sanitize_for_json,
     )
@@ -101,6 +107,7 @@ try:
         render_ablation_bar_chart,
         render_clinical_comparison_figure,
         render_confusion_matrix_heatmap,
+        render_visual_verification_diagnostic_figure,
         select_diverse_clinical_samples,
     )
 except ImportError:
@@ -145,11 +152,17 @@ except ImportError:
         LUAD_CLASS_LABELS,
         ColabSegmentationEvaluator,
         compute_paired_statistical_tests,
+        compute_patient_level_paired_test,
         export_evaluation_artifacts,
+        holm_bonferroni_correction,
+        predict_pda_ablation,
+        predict_uniform_multiscale_baseline,
         print_evaluation_summary,
         run_biomarker_correlation_study,
         run_cross_dataset_luad_benchmark,
         run_multimag_and_pareto_benchmark,
+        run_multiscale_baseline_comparison,
+        run_pda_ablation_study,
         run_val_to_test_scientific_protocol,
         sanitize_for_json,
     )
@@ -192,6 +205,7 @@ except ImportError:
         render_ablation_bar_chart,
         render_clinical_comparison_figure,
         render_confusion_matrix_heatmap,
+        render_visual_verification_diagnostic_figure,
         select_diverse_clinical_samples,
     )
 
@@ -240,6 +254,7 @@ __all__ = [
     "build_and_load_stage1_netcam",
     "colorize_mask",
     "compute_paired_statistical_tests",
+    "compute_patient_level_paired_test",
     "download_bcss_whole_roi_cohort",
     "download_checkpoint_resilient",
     "download_dataset_resilient",
@@ -249,6 +264,7 @@ __all__ = [
     "ensure_luad_dataset",
     "export_evaluation_artifacts",
     "extract_patient_id",
+    "holm_bonferroni_correction",
     "is_valid_torch_checkpoint",
     "is_valid_zip_archive",
     "load_luad_models",
@@ -257,18 +273,23 @@ __all__ = [
     "plot_biomarker_bland_altman_and_regression",
     "plot_coarse_to_fine_pareto_curve",
     "plot_whole_roi_ground_truth_comparison",
+    "predict_pda_ablation",
+    "predict_uniform_multiscale_baseline",
     "prepare_dataset_and_splits",
     "print_evaluation_summary",
     "render_ablation_bar_chart",
     "render_clinical_comparison_figure",
     "render_confusion_matrix_heatmap",
+    "render_visual_verification_diagnostic_figure",
     "resolve_split_dirs",
     "resolve_test_dirs",
     "run_bcss_wsss_experiment",
     "run_biomarker_correlation_study",
     "run_cross_dataset_luad_benchmark",
     "run_multimag_and_pareto_benchmark",
+    "run_multiscale_baseline_comparison",
     "run_package_self_test",
+    "run_pda_ablation_study",
     "run_streaming_evaluation",
     "run_val_to_test_scientific_protocol",
     "safe_torch_load",

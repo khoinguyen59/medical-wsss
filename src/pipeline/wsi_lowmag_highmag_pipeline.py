@@ -745,6 +745,7 @@ class WSILowMagHighMagPipeline:
             t_v = standardized_gt[valid].astype(np.int64)
             p_v = pred_resized[valid].astype(np.int64)
             cm5 = np.bincount(t_v * 5 + p_v, minlength=25).reshape((5, 5))
+        cm4 = cm5[:4, :4]
 
         # 4 foreground tissue classes: strictly preserve Class 4 Background false positives and false negatives
         tp = np.diag(cm5[:4, :4]).astype(np.float64)

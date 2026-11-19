@@ -1,5 +1,5 @@
 """
-SE374.R11 Medical AI - Independent Deliverable Quality Assurance Auditor.
+BCSS-WSSS Medical AI - Independent Deliverable Quality Assurance Auditor.
 Hệ thống kiểm soát chất lượng báo cáo, tài liệu và ấn phẩm học thuật độc lập.
 
 Chức năng kiểm tra 4 tầng:
@@ -12,8 +12,9 @@ Chức năng kiểm tra 4 tầng:
 import os
 import re
 import sys
-from typing import List, Dict, Any, Tuple
-from PIL import Image, ExifTags
+from typing import Any, Dict, List, Optional
+
+from PIL import ExifTags, Image
 
 
 class DeliverableIssue:
@@ -77,7 +78,12 @@ class DeliverableAuditor:
 
         return self.issues
 
-    def audit_docx_file(self, docx_path: str) -> List[DeliverableIssue]:
+    def audit_docx_file(
+        self,
+        docx_path: str,
+        render_preview: bool = True,
+        preview_output_dir: Optional[str] = None,
+    ) -> List[DeliverableIssue]:
         """Audits compiled DOCX file: footers, headers, styles, font colors, and faculty names."""
         abs_path = os.path.abspath(docx_path)
         if not os.path.exists(abs_path):
@@ -86,7 +92,10 @@ class DeliverableAuditor:
 
         try:
             import zipfile
-            import xml.etree.ElementTree as ET
+            try:
+                import defusedxml.ElementTree as safe_et
+            except ImportError:
+                safe_et = None
 
             with zipfile.ZipFile(abs_path, "r") as z:
                 files = z.namelist()
@@ -103,13 +112,18 @@ class DeliverableAuditor:
                                     severity="CRITICAL",
                                     file_path=docx_path,
                                     line_num=0,
-                                    message=f"Phat hien ten giang vien cu hoac lab ngoai ('{pat}') trong '{fname}'. Giang vien mon SE374.R11 la TS. Bui Cao Doanh!",
+                                    message=f"Phat hien ten giang vien cu hoac lab ngoai ('{pat}') trong '{fname}'. Vui long kiem tra lai thong tin giang vien huong dan chinh thuc!",
                                     remediation="Chuan hoa lai template va footer khong de ten Tran Hung Nghiep hay UNKN Lab."
                                 ))
 
                 # Check 2: Leaked Meta-Prompts / Rubrics in document.xml
                 if "word/document.xml" in files:
-                    doc_text = "".join(ET.fromstring(z.read("word/document.xml")).itertext())
+                    if safe_et is not None:
+                        doc_xml_root = safe_et.fromstring(z.read("word/document.xml"))
+                    else:
+                        import xml.etree.ElementTree as std_et  # nosec B405
+                        doc_xml_root = std_et.fromstring(z.read("word/document.xml"))  # nosec B314
+                    doc_text = "".join(doc_xml_root.itertext())
                     meta_rubric_patterns = [
                         (r"invariant-\d+", "Ro ri ma INVARIANT noi bo cua agent vao bao cao"),
                         (r"cam ket liem chinh", "Ro ri loi cam ket noi bo / meta-disclaimer vao bao cao"),
@@ -130,7 +144,11 @@ class DeliverableAuditor:
                 # Check 3: Font Color Academic Black Audit (Styles & Runs)
                 if "word/styles.xml" in files:
                     styles_xml = z.read("word/styles.xml").decode("utf-8", errors="ignore")
-                    styles_root = ET.fromstring(styles_xml)
+                    if safe_et is not None:
+                        styles_root = safe_et.fromstring(styles_xml)
+                    else:
+                        import xml.etree.ElementTree as std_et  # nosec B405
+                        styles_root = std_et.fromstring(styles_xml)  # nosec B314
                     for style in styles_root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style"):
                         style_id = style.attrib.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId", "")
                         for color in style.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color"):
@@ -149,26 +167,41 @@ class DeliverableAuditor:
             self.issues.append(DeliverableIssue("STRUCTURE", "WARNING", docx_path, 0, f"Khong the giai ma file DOCX: {e}", "Kiem tra file."))
 
         # Check 4: Visual Page Rendering & Multimodal Vision Audit Gate
-        self._audit_docx_visual_rendering(abs_path)
+        if render_preview:
+            self._audit_docx_visual_rendering(abs_path, preview_output_dir=preview_output_dir)
 
         return self.issues
 
-    def _audit_docx_visual_rendering(self, docx_path: str):
+    def _audit_docx_visual_rendering(
+        self,
+        docx_path: str,
+        preview_output_dir: Optional[str] = None,
+    ):
         """Converts DOCX to PDF and renders all pages as PNG images for visual and vision inspection.
         Uses system Word COM and PyMuPDF (fitz) - standard installed libraries.
         """
         try:
-            import win32com.client
-            import pythoncom
             import fitz
+            import pythoncom
+            import win32com.client
         except ImportError:
             return
 
-        pages_dir = os.path.join(os.path.dirname(docx_path), "assets", "preview", "pages")
+        pages_dir = (
+            os.path.abspath(preview_output_dir)
+            if preview_output_dir is not None
+            else os.path.join(os.path.dirname(docx_path), "assets", "preview", "pages")
+        )
         os.makedirs(pages_dir, exist_ok=True)
-        pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
-
-        need_convert = not os.path.exists(pdf_path) or (os.path.getmtime(docx_path) > os.path.getmtime(pdf_path))
+        existing_pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
+        need_convert = not os.path.exists(existing_pdf_path) or (
+            os.path.getmtime(docx_path) > os.path.getmtime(existing_pdf_path)
+        )
+        if need_convert and preview_output_dir is not None:
+            pdf_path = os.path.join(pages_dir, os.path.basename(existing_pdf_path))
+            need_convert = not os.path.exists(pdf_path) or (os.path.getmtime(docx_path) > os.path.getmtime(pdf_path))
+        else:
+            pdf_path = existing_pdf_path
         if need_convert:
             word = None
             com_initialized = False
@@ -214,10 +247,10 @@ class DeliverableAuditor:
                     if found_colored_text:
                         break
                     if "lines" in b:
-                        for l in b["lines"]:
+                        for line_item in b["lines"]:
                             if found_colored_text:
                                 break
-                            for s in l.get("spans", []):
+                            for s in line_item.get("spans", []):
                                 text = s.get("text", "").strip()
                                 color = s.get("color", 0)
                                 if text and color != 0:
@@ -236,74 +269,144 @@ class DeliverableAuditor:
                                         ))
                                         found_colored_text = True
                                         break
-        except Exception as e:
+        except Exception:
             # Word COM warning if Word is busy or not interactive
             pass
 
     # -------------------------------------------------------------------------
     # GATE 1: IMAGE & MEDIA QUALITY AUDIT (CHẶN ẢNH ĐỜI THƯỜNG / ẢNH MỜ)
     # -------------------------------------------------------------------------
-    def _audit_embedded_images(self, doc_path: str, lines: List[str]):
-        """Finds all markdown image tags ![caption](path) and audits the target media files."""
-        img_pattern = re.compile(r"!\[(.*?)\]\((.*?)\)")
+    def _audit_image_reference(
+        self,
+        doc_path: str,
+        line_idx: int,
+        caption: str,
+        clean_path: str,
+    ):
+        """Audits a single image reference extracted from Markdown or HTML."""
+        # Check 1: Caption / alt presence
+        if not caption.strip():
+            self.issues.append(DeliverableIssue(
+                category="IMAGE",
+                severity="CRITICAL",
+                file_path=doc_path,
+                line_num=line_idx,
+                message="Hình ảnh thiếu chú thích khoa học (caption trống).",
+                remediation="Bổ sung chú thích chuẩn (ví dụ: ![Hình 1: Sơ đồ kiến trúc...](...) hoặc thuộc tính alt=\"...\")."
+            ))
 
-        for line_idx, line in enumerate(lines, start=1):
+        # Check 2: Raw temp storage or phone snapshot filename pattern
+        lower_path = clean_path.lower()
+        forbidden_name_patterns = ["media_", "img_", "pxl_", "screenshot", "dcm_", "photo_"]
+        for pat in forbidden_name_patterns:
+            if pat in os.path.basename(lower_path):
+                self.issues.append(DeliverableIssue(
+                    category="IMAGE",
+                    severity="CRITICAL",
+                    file_path=doc_path,
+                    line_num=line_idx,
+                    message=f"Tên tệp '{os.path.basename(clean_path)}' có dấu hiệu ảnh chụp màn hình/điện thoại đời thường.",
+                    remediation="Vẽ lại sơ đồ bằng công cụ khoa học (Matplotlib/Draw.io/TikZ/SVG) và đặt tên chuẩn (fig1_...). "
+                ))
+
+        # Remote URL / data URI check: Shields.io badges and inline URIs are not local files
+        if lower_path.startswith(("http://", "https://", "data:")):
+            return
+
+        # Resolve image absolute path
+        if os.path.isabs(clean_path):
+            img_abs_path = clean_path
+        else:
+            # Try relative to doc directory first, then relative to workspace
+            candidate1 = os.path.normpath(os.path.join(os.path.dirname(doc_path), clean_path))
+            candidate2 = os.path.normpath(os.path.join(self.workspace_root, clean_path))
+            if os.path.exists(candidate1):
+                img_abs_path = candidate1
+            elif os.path.exists(candidate2):
+                img_abs_path = candidate2
+            else:
+                self.issues.append(DeliverableIssue(
+                    category="IMAGE",
+                    severity="CRITICAL",
+                    file_path=doc_path,
+                    line_num=line_idx,
+                    message=f"Tệp hình ảnh được tham chiếu không tồn tại: {clean_path}",
+                    remediation="Kiểm tra lại đường dẫn tệp ảnh."
+                ))
+                return
+
+        # Audit physical image file
+        self.audit_single_image_file(img_abs_path, doc_path, line_idx, caption=caption)
+
+    def _audit_embedded_images(self, doc_path: str, lines: List[str]):
+        """Finds Markdown ![caption](path) and HTML <img ... src="..."> tags (outside code fences) and audits them."""
+        img_pattern = re.compile(r"!\[(.*?)\]\((.*?)\)")
+        html_img_pattern = re.compile(r"<img\b[^>]*>", flags=re.IGNORECASE | re.DOTALL)
+        src_attr_pattern = re.compile(r"""\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", flags=re.IGNORECASE)
+        alt_attr_pattern = re.compile(r"""\balt\s*=\s*(?:"([^"]*)"|'([^']*)')""", flags=re.IGNORECASE)
+
+        non_fenced_lines: List[str] = []
+        in_code_block = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                in_code_block = not in_code_block
+                non_fenced_lines.append("")
+                continue
+            non_fenced_lines.append("" if in_code_block else line)
+
+        # 1. Markdown image tags
+        for line_idx, line in enumerate(non_fenced_lines, start=1):
+            if not line:
+                continue
             matches = img_pattern.findall(line)
             for caption, img_rel_path in matches:
-                # Strip optional title or query params
-                clean_path = img_rel_path.split(" ")[0].strip()
+                raw_path = img_rel_path.strip().split(" ")[0].strip()
+                if not raw_path.lower().startswith("data:"):
+                    raw_path = raw_path.split("?")[0].split("#")[0].strip()
+                self._audit_image_reference(doc_path, line_idx, caption, raw_path)
 
-                # Check 1: Caption presence
-                if not caption.strip():
-                    self.issues.append(DeliverableIssue(
-                        category="IMAGE",
-                        severity="CRITICAL",
-                        file_path=doc_path,
-                        line_num=line_idx,
-                        message="Hình ảnh thiếu chú thích khoa học (caption trống).",
-                        remediation="Bổ sung chú thích chuẩn (ví dụ: ![Hình 1: Sơ đồ kiến trúc...](...))."
-                    ))
+        # 2. HTML <img ...> tags (single-line and multiline)
+        non_fenced_text = "\n".join(non_fenced_lines)
+        for match in html_img_pattern.finditer(non_fenced_text):
+            tag_text = match.group(0)
+            line_idx = non_fenced_text[:match.start()].count("\n") + 1
 
-                # Check 2: Raw temp storage or phone snapshot filename pattern
-                lower_path = clean_path.lower()
-                forbidden_name_patterns = ["media_", "img_", "pxl_", "screenshot", "dcm_", "photo_"]
-                for pat in forbidden_name_patterns:
-                    if pat in os.path.basename(lower_path):
-                        self.issues.append(DeliverableIssue(
-                            category="IMAGE",
-                            severity="CRITICAL",
-                            file_path=doc_path,
-                            line_num=line_idx,
-                            message=f"Tên tệp '{os.path.basename(clean_path)}' có dấu hiệu ảnh chụp màn hình/điện thoại đời thường.",
-                            remediation="Vẽ lại sơ đồ bằng công cụ khoa học (Matplotlib/Draw.io/TikZ/SVG) và đặt tên chuẩn (fig1_...). "
-                        ))
+            src_match = src_attr_pattern.search(tag_text)
+            raw_src = ""
+            if src_match is not None:
+                raw_src = (
+                    src_match.group(1)
+                    if src_match.group(1) is not None
+                    else (src_match.group(2) if src_match.group(2) is not None else (src_match.group(3) or ""))
+                ).strip()
 
-                # Resolve image absolute path
-                if os.path.isabs(clean_path):
-                    img_abs_path = clean_path
-                else:
-                    # Try relative to doc directory first, then relative to workspace
-                    candidate1 = os.path.normpath(os.path.join(os.path.dirname(doc_path), clean_path))
-                    candidate2 = os.path.normpath(os.path.join(self.workspace_root, clean_path))
-                    if os.path.exists(candidate1):
-                        img_abs_path = candidate1
-                    elif os.path.exists(candidate2):
-                        img_abs_path = candidate2
-                    else:
-                        self.issues.append(DeliverableIssue(
-                            category="IMAGE",
-                            severity="CRITICAL",
-                            file_path=doc_path,
-                            line_num=line_idx,
-                            message=f"Tệp hình ảnh được tham chiếu không tồn tại: {clean_path}",
-                            remediation="Kiểm tra lại đường dẫn tệp ảnh."
-                        ))
-                        continue
+            alt_match = alt_attr_pattern.search(tag_text)
+            caption = ""
+            if alt_match is not None:
+                caption = (
+                    alt_match.group(1)
+                    if alt_match.group(1) is not None
+                    else (alt_match.group(2) or "")
+                )
 
-                # Audit physical image file
-                self.audit_single_image_file(img_abs_path, doc_path, line_idx)
+            if not raw_src:
+                self.issues.append(DeliverableIssue(
+                    category="IMAGE",
+                    severity="CRITICAL",
+                    file_path=doc_path,
+                    line_num=line_idx,
+                    message="Thẻ <img> thiếu thuộc tính src.",
+                    remediation="Bổ sung đường dẫn tệp ảnh hợp lệ vào thuộc tính src=\"...\" của thẻ <img>."
+                ))
+                continue
 
-    def audit_single_image_file(self, img_path: str, doc_path: str = "", line_num: int = 0):
+            clean_src = raw_src
+            if not clean_src.lower().startswith("data:"):
+                clean_src = clean_src.split("?")[0].split("#")[0].strip()
+            self._audit_image_reference(doc_path, line_idx, caption, clean_src)
+
+    def audit_single_image_file(self, img_path: str, doc_path: str = "", line_num: int = 0, caption: str = ""):
         """Audits an individual image file for EXIF camera metadata, resolution, and blurriness."""
         if not os.path.exists(img_path):
             return
@@ -349,9 +452,25 @@ class DeliverableAuditor:
                                     break
 
                 # Check Academic Color Neutrality (Academic Grayscale / Monochrome enforcement)
-                # In formal engineering & scientific reports, diagrams must be monochrome/grayscale, not colorful marketing graphics.
+                # Architecture/workflow diagrams must be monochrome/grayscale; 300-DPI (>=295 DPI, >=1800px wide)
+                # scientific charts and histopathology/medical colormap figures are permitted.
                 try:
                     import numpy as np
+                    dpi_info = img.info.get("dpi")
+                    is_high_dpi = (
+                        isinstance(dpi_info, tuple)
+                        and len(dpi_info) >= 2
+                        and float(dpi_info[0]) >= 295.0
+                        and float(dpi_info[1]) >= 295.0
+                    )
+                    meta_text = f"{os.path.basename(img_path)} {caption}".lower()
+                    diagram_markers = (
+                        "kien truc", "kiến trúc", "architecture", "flowchart",
+                        "diagram", "so do", "sơ đồ", "dataflow", "luong du lieu",
+                    )
+                    is_arch_diagram = any(tok in meta_text for tok in diagram_markers)
+                    is_scientific_medical_figure = is_high_dpi and width >= 1800 and not is_arch_diagram
+
                     img_rgb = img.convert("RGB")
                     r, g, b = img_rgb.split()
                     r_arr = np.array(r, dtype=np.float32)
@@ -364,7 +483,7 @@ class DeliverableAuditor:
                     fg_mask = (r_arr < 250) | (g_arr < 250) | (b_arr < 250)
                     if np.any(fg_mask):
                         mean_color_std = float(np.mean(channel_std[fg_mask]))
-                        if mean_color_std > 30.0:
+                        if mean_color_std > 30.0 and not is_scientific_medical_figure:
                             self.issues.append(DeliverableIssue(
                                 category="IMAGE",
                                 severity="CRITICAL",
@@ -472,19 +591,23 @@ class DeliverableAuditor:
         last_heading_level = 0
         in_table = False
         in_code_block = False
+        ascii_reported_in_block = False
         ascii_box_pattern = re.compile(r"^\+[-=]{4,}\+$")
         ascii_flow_pattern = re.compile(r"[│▼▲◄►]")
 
         for line_idx, line in enumerate(lines, start=1):
             stripped = line.strip()
 
-            # Code block tracking for ASCII art diagrams
-            if stripped.startswith("```"):
+            # Code block tracking for ASCII art diagrams (supports both ``` and ~~~ fences)
+            if stripped.startswith("```") or stripped.startswith("~~~"):
                 in_code_block = not in_code_block
+                ascii_reported_in_block = False
                 continue
 
             if in_code_block:
-                if ascii_box_pattern.search(stripped) or ascii_flow_pattern.search(stripped):
+                if not ascii_reported_in_block and (
+                    ascii_box_pattern.search(stripped) or ascii_flow_pattern.search(stripped)
+                ):
                     self.issues.append(DeliverableIssue(
                         category="STRUCTURE",
                         severity="CRITICAL",
@@ -494,8 +617,8 @@ class DeliverableAuditor:
                         remediation="Ve lai so do bang Matplotlib/TikZ/SVG xuat file anh khoa hoc vector/300 DPI roi nhung qua cu phap ![Caption](...)."
                     ))
                     # Avoid spamming errors for every single line of the same ASCII block
-                    in_code_block = False
-                    continue
+                    ascii_reported_in_block = True
+                continue
 
             # Heading hierarchy check
             if stripped.startswith("#"):
@@ -525,8 +648,8 @@ class DeliverableAuditor:
     def _audit_faculty_and_identity(self, doc_path: str, lines: List[str]):
         """Audits document for wrong faculty names and leaked rubric prompts."""
         wrong_faculty_patterns = [
-            (r"tran\s*hung\s*nghiep", "Tên Giảng viên cũ 'Trần Hùng Nghiệp'. Giảng viên hướng dẫn môn SE374.R11 là TS. Bùi Cao Doanh!"),
-            (r"unkn\s*lab", "Tên phòng lab ngoài 'UNKN Lab'. Không thuộc môn học SE374.R11!"),
+            (r"tran\s*hung\s*nghiep", "Tên Giảng viên cũ 'Trần Hùng Nghiệp' không khớp với giảng viên hướng dẫn chính thức."),
+            (r"unkn\s*lab", "Tên phòng lab ngoài 'UNKN Lab' không thuộc phạm vi dự án."),
         ]
         meta_rubric_patterns = [
             (r"\[INVARIANT-\d+\]", "Rò rỉ mã quy tắc nội bộ '[INVARIANT-...]' vào báo cáo."),
@@ -543,7 +666,7 @@ class DeliverableAuditor:
                         file_path=doc_path,
                         line_num=line_idx,
                         message=f"Phát hiện sai sót thông tin giảng viên: {desc}",
-                        remediation="Đổi tên Giảng viên hướng dẫn thành 'TS. Bùi Cao Doanh' và loại bỏ tên khác."
+                        remediation="Cập nhật đúng tên Giảng viên hướng dẫn chính thức và loại bỏ tên không liên quan."
                     ))
 
             for pat, desc in meta_rubric_patterns:
@@ -587,7 +710,7 @@ class DeliverableAuditor:
 
         report_lines.extend([
             "=" * 80,
-            "BAO CAO KIEM SOAT CHAT LUONG AN PHAM HOC THUAT (SE374 INDEPENDENT QUALITY AUDITOR)",
+            "BAO CAO KIEM SOAT CHAT LUONG AN PHAM HOC THUAT (INDEPENDENT QUALITY AUDITOR)",
             f"Tong so loi phat hien: {len(self.issues)} (Nghiem trong [CRITICAL]: {critical_count}, Canh bao [WARNING]: {warning_count})",
             "=" * 80,
         ])
@@ -625,6 +748,7 @@ if __name__ == "__main__":
         targets = [
             os.path.join("product", "proposal", "SE374_MINI_PROPOSAL_WSSS_WSI.md"),
             os.path.join("product", "reports", "SE374_FINAL_TECHNICAL_REPORT_WSSS.md"),
+            os.path.join("product", "slides", "SE374_PROPOSAL_SLIDES_WSSS_WSI.md"),
         ]
     elif len(sys.argv) > 1:
         targets = sys.argv[1:]

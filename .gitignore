@@ -44,7 +44,7 @@ htmlcov/
 AGENTS.md
 graphify-out*/
 scripts/update_graphify.py
-product/reports/SE374_MULTI_AGENT_AUDIT_AND_DEFECT_RESOLUTION_REPORT.md
+product/reports/archive/
 
 # External Reference Repositories & Paper Archives (Excluded to keep repo lightweight & pure)
 repos/

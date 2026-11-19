@@ -1,5 +1,10 @@
-import os
+import ast
 import glob
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
 
 IGNORED_DASH_PREFIXES = (
     "repos\\", "repos/",
@@ -11,14 +16,34 @@ IGNORED_DASH_PREFIXES = (
     ".git\\", ".git/",
 )
 
+# Exact byte-for-byte copy of instructor's lab notebook and user-uploaded reference documents
+EXEMPT_EXTERNAL_DOCS = {
+    os.path.normpath("notebooks/Lab1.ipynb"),
+    os.path.normpath("Lab1.ipynb"),
+    os.path.normpath("docs/references/Quy Trình Tester Y Khoa.md"),
+}
+
 BAD_DASH_CHARS = ['\u2014', '\u2013', '\u2012', '\u2015', '\u2212']
+
+SECRET_TOKEN_REGEXES = [
+    re.compile(r"hf_[A-Za-z0-9]{20,}"),
+    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"AIza[0-9A-Za-z\-_]{35}"),
+]
+
+
+def _is_exempt_file(fpath: str) -> bool:
+    if fpath.startswith(IGNORED_DASH_PREFIXES):
+        return True
+    norm_p = os.path.normpath(fpath)
+    return norm_p in EXEMPT_EXTERNAL_DOCS
 
 
 def _scan_files_for_bad_dashes(patterns):
     target_files = []
     for pat in patterns:
         for f in glob.glob(pat, recursive=True):
-            if not f.startswith(IGNORED_DASH_PREFIXES):
+            if not _is_exempt_file(f):
                 target_files.append(f)
 
     violations = []
@@ -34,13 +59,79 @@ def _scan_files_for_bad_dashes(patterns):
 def test_no_ai_em_dash_in_markdown():
     """Verify zero non-ASCII dashes across all markdown files (Invariant 12)."""
     violations = _scan_files_for_bad_dashes(["**/*.md"])
-    assert len(violations) == 0, f"Found {len(violations)} non-ASCII dash violations in markdown:\n" + "\n".join(violations[:10])
+    assert len(violations) == 0, (
+        f"Found {len(violations)} non-ASCII dash violations in markdown:\n"
+        + "\n".join(violations[:10])
+    )
 
 
 def test_no_ai_em_dash_in_python_and_notebooks():
-    """Verify zero non-ASCII dashes across all Python files and Jupyter notebooks (Invariant 12)."""
+    """Verify zero non-ASCII dashes across all project Python files and Jupyter notebooks (Invariant 12)."""
     violations = _scan_files_for_bad_dashes(["**/*.py", "**/*.ipynb"])
-    assert len(violations) == 0, f"Found {len(violations)} non-ASCII dash violations in code/notebooks:\n" + "\n".join(violations[:10])
+    assert len(violations) == 0, (
+        f"Found {len(violations)} non-ASCII dash violations in code/notebooks:\n"
+        + "\n".join(violations[:10])
+    )
+
+
+def test_no_leaked_api_tokens_in_project_files():
+    """Verify no hardcoded HuggingFace, GitHub, or Google API tokens exist in project code/notebooks."""
+    leaks = []
+    for pat in ["src/**/*.py", "scripts/**/*.py", "notebooks/**/*.ipynb"]:
+        for fpath in glob.glob(pat, recursive=True):
+            if _is_exempt_file(fpath):
+                continue
+            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                for line_idx, line in enumerate(f, start=1):
+                    for rgx in SECRET_TOKEN_REGEXES:
+                        if rgx.search(line):
+                            leaks.append(f"{fpath}:{line_idx} matches secret token pattern {rgx.pattern}")
+    assert len(leaks) == 0, "Detected leaked API tokens in project files:\n" + "\n".join(leaks)
+
+
+def test_no_ai_em_dash_in_html_workstation():
+    """Verify zero non-ASCII dashes in src/visualization/static/*.html (Invariant 12)."""
+    violations = _scan_files_for_bad_dashes(["src/visualization/static/*.html"])
+    assert len(violations) == 0, (
+        "Found non-ASCII dash violations in workstation HTML:\n" + "\n".join(violations[:10])
+    )
+
+
+def test_src_and_drive_bundle_ast_and_content_sync():
+    """Verify every Python module in src/ is synchronized with drive_upload_ready/SE374_WSSS_Drive_Code/src/."""
+    src_root = Path("src")
+    bundle_src_root = Path("drive_upload_ready/SE374_WSSS_Drive_Code/src")
+    assert src_root.is_dir(), "src/ directory must exist"
+    assert bundle_src_root.is_dir(), "Drive bundle src/ directory must exist"
+
+    src_py_files = sorted(src_root.rglob("*.py"))
+    assert len(src_py_files) >= 25, "Expected at least 25 Python modules in src/"
+
+    mismatches = []
+    for src_file in src_py_files:
+        rel_path = src_file.relative_to(src_root)
+        bundle_file = bundle_src_root / rel_path
+        if not bundle_file.is_file():
+            mismatches.append(f"Missing in Drive bundle: {rel_path}")
+            continue
+        src_text = src_file.read_text(encoding="utf-8").replace("\r\n", "\n").strip()
+        bundle_text = bundle_file.read_text(encoding="utf-8").replace("\r\n", "\n").strip()
+        # Verify AST syntax validity of both
+        ast.parse(src_text, filename=str(src_file))
+        ast.parse(bundle_text, filename=str(bundle_file))
+        if hashlib.sha256(src_text.encode("utf-8")).hexdigest() != hashlib.sha256(bundle_text.encode("utf-8")).hexdigest():
+            mismatches.append(f"Out-of-sync content between src/{rel_path} and Drive bundle")
+
+    assert len(mismatches) == 0, "Drive bundle out of sync with src/:\n" + "\n".join(mismatches)
+
+
+def test_teacher_lab1_notebook_copy_untouched_and_valid_json():
+    """Verify that if notebooks/Lab1.ipynb exists, it is valid nbformat v4 JSON and untouched."""
+    lab1_path = Path("notebooks/Lab1.ipynb")
+    if lab1_path.is_file():
+        data = json.loads(lab1_path.read_text(encoding="utf-8"))
+        assert data.get("nbformat") == 4
+        assert len(data.get("cells", [])) >= 10
 
 
 def test_invariants_24_and_25_defined_in_agents_md():

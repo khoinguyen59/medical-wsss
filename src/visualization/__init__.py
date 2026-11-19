@@ -1,1 +1,1 @@
-"""SE374.R11 WSSS subpackage."""
+"""WSSS Histopathology Visualization & Clinical Workstation Subpackage."""

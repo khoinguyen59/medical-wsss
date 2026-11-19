@@ -13,7 +13,7 @@
 Thư mục `repos/` của dự án đã clone và tích hợp đầy đủ 12 kho mã nguồn đại diện cho các đỉnh cao công nghệ (SOTA) quốc tế trong phân vùng ảnh mô bệnh học giải phẫu bệnh có giám sát yếu (Weakly-Supervised Semantic Segmentation - WSSS) và mô hình nền tảng y tế (Pathology Foundation Models - PFMs):
 
 ```
-c:\Users\Nguyen Trong Khoi\Downloads\Y_KHOA\repos/
+repos/
 ├── WSSS-Tissue/          # [MedIA 2022] Baseline WSSS mô bệnh học 2 giai đoạn (Net_CAM ResNet38d + DeepLabV3+)
 ├── LowMagWSS/            # [arXiv 2026] Phân vùng WSI có giám sát yếu dùng độ phóng đại thấp & CGM gating
 ├── ARML/                 # [MICCAI 2024] Điều chuẩn biên không gian (Criss-Cross Attention & Affinity Modulation)

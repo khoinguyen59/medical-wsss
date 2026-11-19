@@ -1,0 +1,321 @@
+{
+  "metadata": {
+    "project": "BCSS-WSSS Multi-Direction Experimental Ablation",
+    "cohort": "BCSS Breast Cancer Histopathology",
+    "evaluation_mode": "real_bcss_stratified_23patients_46patches",
+    "evaluation_date": "2026-11-18 03:43:14",
+    "device": "cpu",
+    "prototypes_calibrated": true,
+    "num_test_patches_evaluated": 46,
+    "num_patients_evaluated": 23,
+    "num_classes": 4,
+    "classes": [
+      "tumor",
+      "stroma",
+      "inflammatory",
+      "necrosis"
+    ]
+  },
+  "comparative_benchmarks": {
+    "m1": {
+      "method_code": "m1",
+      "four_class_miou": 57.616237274996074,
+      "five_class_miou": 44.15608860741281,
+      "pixel_accuracy": 84.47388897471303,
+      "pixel_accuracy_5cls": 77.5599455135315,
+      "boundary_f1": 44.69028254964343,
+      "per_class_iou": {
+        "tumor": 78.02905069380847,
+        "stroma": 75.3647962874643,
+        "inflammatory": 53.50035063961502,
+        "necrosis": 23.570751479096526
+      },
+      "per_class_iou_5cls": {
+        "tumor": 73.1195480962468,
+        "stroma": 68.68609558548043,
+        "inflammatory": 53.45924107401751,
+        "necrosis": 21.723805507019343,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 357.8206086929877,
+      "wilcoxon_p_vs_m1": 1.0,
+      "wilcoxon_p_vs_m6": 0.5716788525651493,
+      "patient_wilcoxon_p_vs_m1": 1.0,
+      "patient_mean_delta_pct_vs_m1": 0.0,
+      "patient_wilcoxon_p_vs_m6": 0.5945447675809836,
+      "patient_mean_delta_pct_vs_m6": -1.8357339516789095,
+      "holm_adjusted_p_vs_m1": 1.0,
+      "holm_adjusted_p_vs_m6": 1.0
+    },
+    "m6": {
+      "method_code": "m6",
+      "four_class_miou": 58.13407561237217,
+      "five_class_miou": 44.683197203165356,
+      "pixel_accuracy": 84.53520849109445,
+      "pixel_accuracy_5cls": 77.61600903948536,
+      "boundary_f1": 45.61686469576895,
+      "per_class_iou": {
+        "tumor": 77.75401513657174,
+        "stroma": 75.38326580380219,
+        "inflammatory": 56.86887091235166,
+        "necrosis": 22.530150596763107
+      },
+      "per_class_iou_5cls": {
+        "tumor": 72.98925066513337,
+        "stroma": 68.52177074734814,
+        "inflammatory": 56.58655352108665,
+        "necrosis": 21.526658307958684,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 4847.273971741189,
+      "wilcoxon_p_vs_m1": 0.5716788525651493,
+      "wilcoxon_p_vs_m6": 1.0,
+      "patient_wilcoxon_p_vs_m1": 0.5945447675809836,
+      "patient_mean_delta_pct_vs_m1": 1.8357339516789095,
+      "patient_wilcoxon_p_vs_m6": 1.0,
+      "patient_mean_delta_pct_vs_m6": 0.0,
+      "holm_adjusted_p_vs_m1": 1.0,
+      "holm_adjusted_p_vs_m6": 1.0
+    },
+    "m7_only": {
+      "method_code": "m7_only",
+      "four_class_miou": 57.683569479109025,
+      "five_class_miou": 44.2006511935608,
+      "pixel_accuracy": 84.5343555148233,
+      "pixel_accuracy_5cls": 77.61522917590949,
+      "boundary_f1": 44.99765131994729,
+      "per_class_iou": {
+        "tumor": 78.15792129103943,
+        "stroma": 75.43837215979786,
+        "inflammatory": 53.43824903760017,
+        "necrosis": 23.69973542799862
+      },
+      "per_class_iou_5cls": {
+        "tumor": 73.21988925783627,
+        "stroma": 68.76301200926012,
+        "inflammatory": 53.4002380698919,
+        "necrosis": 21.828363856515818,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 654.4079347829962,
+      "wilcoxon_p_vs_m1": 0.14044185868038234,
+      "wilcoxon_p_vs_m6": 0.593231153901425,
+      "patient_wilcoxon_p_vs_m1": 0.1663950877314605,
+      "patient_mean_delta_pct_vs_m1": 0.016524081484892306,
+      "patient_wilcoxon_p_vs_m6": 0.6157753403052747,
+      "patient_mean_delta_pct_vs_m6": -1.8192098701940171,
+      "holm_adjusted_p_vs_m1": 1.0,
+      "holm_adjusted_p_vs_m6": 1.0
+    },
+    "m8_only": {
+      "method_code": "m8_only",
+      "four_class_miou": 56.54444819018508,
+      "five_class_miou": 43.160704408706316,
+      "pixel_accuracy": 83.91120896117916,
+      "pixel_accuracy_5cls": 77.0454955079858,
+      "boundary_f1": 44.21986732856603,
+      "per_class_iou": {
+        "tumor": 77.73103651797545,
+        "stroma": 74.6269023790017,
+        "inflammatory": 53.32911036036036,
+        "necrosis": 20.49074350340281
+      },
+      "per_class_iou_5cls": {
+        "tumor": 72.75068805923429,
+        "stroma": 68.3424597756162,
+        "inflammatory": 53.1430895981596,
+        "necrosis": 17.77553183622156,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 398.9016434788937,
+      "wilcoxon_p_vs_m1": 0.05326837411593355,
+      "wilcoxon_p_vs_m6": 0.2449989161927575,
+      "patient_wilcoxon_p_vs_m1": 0.0049023196009763586,
+      "patient_mean_delta_pct_vs_m1": -0.4911267359395244,
+      "patient_wilcoxon_p_vs_m6": 0.13218525350312607,
+      "patient_mean_delta_pct_vs_m6": -2.326860687618434,
+      "holm_adjusted_p_vs_m1": 0.47941536704340193,
+      "holm_adjusted_p_vs_m6": 1.0
+    },
+    "m9_only": {
+      "method_code": "m9_only",
+      "four_class_miou": 57.616237274996074,
+      "five_class_miou": 44.15608860741281,
+      "pixel_accuracy": 84.47388897471303,
+      "pixel_accuracy_5cls": 77.5599455135315,
+      "boundary_f1": 44.69028254964343,
+      "per_class_iou": {
+        "tumor": 78.02905069380847,
+        "stroma": 75.3647962874643,
+        "inflammatory": 53.50035063961502,
+        "necrosis": 23.570751479096526
+      },
+      "per_class_iou_5cls": {
+        "tumor": 73.1195480962468,
+        "stroma": 68.68609558548043,
+        "inflammatory": 53.45924107401751,
+        "necrosis": 21.723805507019343,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 399.1872413025703,
+      "wilcoxon_p_vs_m1": 1.0,
+      "wilcoxon_p_vs_m6": 0.5716788525651493,
+      "patient_wilcoxon_p_vs_m1": 1.0,
+      "patient_mean_delta_pct_vs_m1": 0.0,
+      "patient_wilcoxon_p_vs_m6": 0.5945447675809836,
+      "patient_mean_delta_pct_vs_m6": -1.8357339516789095,
+      "holm_adjusted_p_vs_m1": 1.0,
+      "holm_adjusted_p_vs_m6": 1.0
+    },
+    "od_only": {
+      "method_code": "od_only",
+      "four_class_miou": 56.930324893988036,
+      "five_class_miou": 43.44454763955777,
+      "pixel_accuracy": 84.06422342670896,
+      "pixel_accuracy_5cls": 77.18539436834516,
+      "boundary_f1": 43.75172726317029,
+      "per_class_iou": {
+        "tumor": 77.83575609535546,
+        "stroma": 74.79157498222732,
+        "inflammatory": 54.15002426369032,
+        "necrosis": 20.94394423467906
+      },
+      "per_class_iou_5cls": {
+        "tumor": 72.93713525892,
+        "stroma": 68.4328274153127,
+        "inflammatory": 54.01141197605905,
+        "necrosis": 18.049610773197166,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 415.10636956081726,
+      "wilcoxon_p_vs_m1": 0.03199071959621339,
+      "wilcoxon_p_vs_m6": 0.30141180092144204,
+      "patient_wilcoxon_p_vs_m1": 0.019978898649974472,
+      "patient_mean_delta_pct_vs_m1": -1.2885938148029,
+      "patient_wilcoxon_p_vs_m6": 0.22959970027964283,
+      "patient_mean_delta_pct_vs_m6": -3.124327766481809,
+      "holm_adjusted_p_vs_m1": 0.3199071959621339,
+      "holm_adjusted_p_vs_m6": 1.0
+    },
+    "m7": {
+      "method_code": "m7",
+      "four_class_miou": 58.17590170471164,
+      "five_class_miou": 44.71572133676078,
+      "pixel_accuracy": 84.57150737018885,
+      "pixel_accuracy_5cls": 77.64919656721383,
+      "boundary_f1": 45.8741029889355,
+      "per_class_iou": {
+        "tumor": 77.83014349925855,
+        "stroma": 75.42505940984802,
+        "inflammatory": 56.923179782041856,
+        "necrosis": 22.525224127698124
+      },
+      "per_class_iou_5cls": {
+        "tumor": 73.04552287624172,
+        "stroma": 68.56442803184544,
+        "inflammatory": 56.65666902744043,
+        "necrosis": 21.520233973976364,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 5140.331497826517,
+      "wilcoxon_p_vs_m1": 0.3705183851760585,
+      "wilcoxon_p_vs_m6": 0.02682886777582616,
+      "patient_wilcoxon_p_vs_m1": 0.493762736661269,
+      "patient_mean_delta_pct_vs_m1": 1.9528205861721848,
+      "patient_wilcoxon_p_vs_m6": 0.03720159584855677,
+      "patient_mean_delta_pct_vs_m6": 0.11708663449327524,
+      "holm_adjusted_p_vs_m1": 1.0,
+      "holm_adjusted_p_vs_m6": 0.2682886777582616
+    },
+    "m8": {
+      "method_code": "m8",
+      "four_class_miou": 56.82970444878016,
+      "five_class_miou": 43.678453826272325,
+      "pixel_accuracy": 83.92272414083965,
+      "pixel_accuracy_5cls": 77.05602366625999,
+      "boundary_f1": 46.584086354639844,
+      "per_class_iou": {
+        "tumor": 77.68633237163526,
+        "stroma": 74.55636303486486,
+        "inflammatory": 55.308584901299064,
+        "necrosis": 19.767537487321473
+      },
+      "per_class_iou_5cls": {
+        "tumor": 72.7638515074678,
+        "stroma": 67.87002187598729,
+        "inflammatory": 54.930463408922904,
+        "necrosis": 19.036179564683675,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 5191.330336957396,
+      "wilcoxon_p_vs_m1": 0.3853425591984685,
+      "wilcoxon_p_vs_m6": 0.817467886098501,
+      "patient_wilcoxon_p_vs_m1": 0.7038066713131698,
+      "patient_mean_delta_pct_vs_m1": 2.7314079462019087,
+      "patient_wilcoxon_p_vs_m6": 0.9393858590033665,
+      "patient_mean_delta_pct_vs_m6": 0.8956739945229989,
+      "holm_adjusted_p_vs_m1": 1.0,
+      "holm_adjusted_p_vs_m6": 1.0
+    },
+    "m9": {
+      "method_code": "m9",
+      "four_class_miou": 56.82970444878016,
+      "five_class_miou": 43.678453826272325,
+      "pixel_accuracy": 83.92272414083965,
+      "pixel_accuracy_5cls": 77.05602366625999,
+      "boundary_f1": 46.584086354639844,
+      "per_class_iou": {
+        "tumor": 77.68633237163526,
+        "stroma": 74.55636303486486,
+        "inflammatory": 55.308584901299064,
+        "necrosis": 19.767537487321473
+      },
+      "per_class_iou_5cls": {
+        "tumor": 72.7638515074678,
+        "stroma": 67.87002187598729,
+        "inflammatory": 54.930463408922904,
+        "necrosis": 19.036179564683675,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 5224.853891306734,
+      "wilcoxon_p_vs_m1": 0.3853425591984685,
+      "wilcoxon_p_vs_m6": 0.817467886098501,
+      "patient_wilcoxon_p_vs_m1": 0.7038066713131698,
+      "patient_mean_delta_pct_vs_m1": 2.7314079462019087,
+      "patient_wilcoxon_p_vs_m6": 0.9393858590033665,
+      "patient_mean_delta_pct_vs_m6": 0.8956739945229989,
+      "holm_adjusted_p_vs_m1": 1.0,
+      "holm_adjusted_p_vs_m6": 1.0
+    },
+    "m_combined": {
+      "method_code": "m_combined",
+      "four_class_miou": 56.16480818410963,
+      "five_class_miou": 43.149578648988815,
+      "pixel_accuracy": 83.44164552391224,
+      "pixel_accuracy_5cls": 76.61618060947205,
+      "boundary_f1": 44.99153172526472,
+      "per_class_iou": {
+        "tumor": 77.45896430362372,
+        "stroma": 73.87674271106415,
+        "inflammatory": 55.47517850691951,
+        "necrosis": 17.848347214831133
+      },
+      "per_class_iou_5cls": {
+        "tumor": 72.56297213541863,
+        "stroma": 67.26673320459281,
+        "inflammatory": 54.972091234924186,
+        "necrosis": 17.15434389570844,
+        "background": 3.791752774299951
+      },
+      "latency_ms_per_patch": 5296.172447825286,
+      "wilcoxon_p_vs_m1": 0.667225361762762,
+      "wilcoxon_p_vs_m6": 0.729618806544102,
+      "patient_wilcoxon_p_vs_m1": 0.6592008188193383,
+      "patient_mean_delta_pct_vs_m1": 0.6605825559420797,
+      "patient_wilcoxon_p_vs_m6": 0.6373129673484332,
+      "patient_mean_delta_pct_vs_m6": -1.1751513957368298,
+      "holm_adjusted_p_vs_m1": 1.0,
+      "holm_adjusted_p_vs_m6": 1.0
+    }
+  }
+}

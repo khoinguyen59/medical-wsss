@@ -14,7 +14,7 @@ product/
 ## 1. Chi Tiết Các Phân Mục
 
 ### A. Đề Cương Mini Proposal (`product/proposal/`)
-- [SE374_MINI_PROPOSAL_NHOM6_WEAKLY_SUPERVISED_WSI.md](file:///c:/Users/Nguyen%20Trong%20Khoi/Downloads/Y_KHOA/product/proposal/SE374_MINI_PROPOSAL_NHOM6_WEAKLY_SUPERVISED_WSI.md): File mã nguồn Markdown chứa toàn bộ nội dung đề cương, bảng biểu và công thức toán học.
+- [SE374_MINI_PROPOSAL_NHOM6_WEAKLY_SUPERVISED_WSI.md](product/proposal/SE374_MINI_PROPOSAL_NHOM6_WEAKLY_SUPERVISED_WSI.md): File mã nguồn Markdown chứa toàn bộ nội dung đề cương, bảng biểu và công thức toán học.
 - `SE374_MINI_PROPOSAL_NHOM6_WEAKLY_SUPERVISED_WSI.docx`: Bản Word biên dịch tự động qua Pandoc với mẫu `--reference-doc=docs/templates/01_Mau_Mini_Proposal_Thay_Nghiep_GOC.docx`.
 - `SE374_MINI_PROPOSAL_NHOM6_WEAKLY_SUPERVISED_WSI.html`: Bản web độc lập với công thức toán MathJax, cho phép xem trước trực quan.
 

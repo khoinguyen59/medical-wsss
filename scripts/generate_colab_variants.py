@@ -10,6 +10,7 @@ Each generated notebook is pre-configured with:
 import copy
 import json
 from pathlib import Path
+from typing import Optional
 
 MASTER_NOTEBOOK = Path("notebooks/SE374_Colab_WSSS_Pipeline.ipynb")
 
@@ -236,8 +237,14 @@ else:
     raise FileNotFoundError(f"Không tìm thấy tệp checkpoint Stage 2 tại: {CKPT_FILE.resolve()}")"""
 
 
-def build_variants() -> None:
+def build_variants(
+    output_dir: Optional[Path] = None,
+    update_master: Optional[bool] = None,
+) -> None:
     master_data = json.loads(MASTER_NOTEBOOK.read_text(encoding="utf-8"))
+    should_update_master = (output_dir is None) if update_master is None else bool(update_master)
+    target_dir = Path(output_dir) if output_dir is not None else MASTER_NOTEBOOK.parent
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     # Upgrade Master Notebook Cell 6 (Dataset Download) & Cell 10 (Checkpoint Download) & Cell 12 (PyTorch 2.6+ safe_torch_load & CGM-consistent M3/M5)
     master_data["cells"][6]["source"] = _to_nb_lines(CELL_6_RESILIENT_DATASET)
@@ -279,7 +286,8 @@ def build_variants() -> None:
     )
     master_data["cells"][18]["source"] = _to_nb_lines(cell_18_master_src)
 
-    MASTER_NOTEBOOK.write_text(json.dumps(master_data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    if should_update_master:
+        MASTER_NOTEBOOK.write_text(json.dumps(master_data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
     for cfg in VARIANTS:
         nb = copy.deepcopy(master_data)
@@ -316,7 +324,7 @@ def build_variants() -> None:
             cell_18_src.splitlines()[-1]
         ]
 
-        out_path = MASTER_NOTEBOOK.parent / cfg["filename"]
+        out_path = target_dir / cfg["filename"]
         if out_path.is_file():
             try:
                 existing_nb = json.loads(out_path.read_text(encoding="utf-8"))

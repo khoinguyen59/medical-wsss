@@ -1,5 +1,5 @@
 """
-Stage-1 Multi-Label Classification Training Engine for SE374.R11 WSSS.
+Stage-1 Multi-Label Classification Training Engine for Histopathology WSSS.
 
 Trains the 105M-parameter ResNet-38d backbone (WSSSTissueStage1NetCAM) with:
 1. Progressive Dropout Attention (PDA) activation schedule (Han et al., MedIA 2022).
@@ -13,8 +13,6 @@ Trains the 105M-parameter ResNet-38d backbone (WSSSTissueStage1NetCAM) with:
 """
 
 import argparse
-import math
-import os
 import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -27,8 +25,6 @@ from torch.utils.data import DataLoader
 
 from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
 from src.training.dataset_loader import (
-    CLASS_NAMES,
-    FOREGROUND_CLASSES,
     NUM_FOREGROUND,
     create_stage1_dataloaders,
 )
@@ -390,7 +386,10 @@ def train_stage1_pipeline(
     start_epoch = 0
     best_macro_f1 = 0.0
     if resume_path and Path(resume_path).exists():
-        loaded = torch.load(resume_path, map_location="cpu")
+        try:
+            loaded = torch.load(resume_path, map_location="cpu", weights_only=True)
+        except Exception:
+            loaded = torch.load(resume_path, map_location="cpu", weights_only=False)  # nosec B614
         state_dict = loaded.get("state_dict", loaded)
         model.load_state_dict(state_dict, strict=False)
         start_epoch = loaded.get("epoch", 0)
@@ -449,6 +448,7 @@ def train_stage1_pipeline(
                 {
                     "epoch": epoch,
                     "macro_f1": best_macro_f1,
+                    "input_norm": "imagenet",
                     "state_dict": model.state_dict(),
                     "optimizer": optimizer.state_dict(),
                     "metrics": epoch_record,

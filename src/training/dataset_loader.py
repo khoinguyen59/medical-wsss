@@ -22,16 +22,15 @@ Key Architectural Guarantees:
 import json
 import os
 import re
+import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import numpy as np
-from PIL import Image
 import torch
-import torch.nn.functional as F
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-
 
 CLASS_NAMES: Tuple[str, ...] = ("TUM", "STR", "LYM", "NEC", "BACK")
 FOREGROUND_CLASSES: Tuple[str, ...] = ("TUM", "STR", "LYM", "NEC")
@@ -62,7 +61,7 @@ def extract_patient_id(filepath_or_name: Union[str, Path]) -> str:
     basename = os.path.basename(str(filepath_or_name))
     fname = os.path.splitext(basename)[0]
 
-    tcga_match = re.match(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", fname, re.IGNORECASE)
+    tcga_match = re.search(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", fname, re.IGNORECASE)
     if tcga_match:
         return tcga_match.group(1).upper()
 
@@ -289,6 +288,13 @@ class BCSSStage2MultiMaskDataset(Dataset):
         self.pm_b5_2_dir = self.pm_root_dir / "PM_b5_2"
         self.pm_b4_5_dir = self.pm_root_dir / "PM_b4_5"
 
+        if self.is_train and self.fallback_mask and not self.pm_bn7_dir.is_dir():
+            warnings.warn(
+                f"Pseudo-mask directory '{self.pm_bn7_dir}' not found; missing pseudo-masks fall back to ignore_index=255.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         all_files = find_image_files(self.img_dir)
         allowed_set: Optional[Set[str]] = (
             {p.upper() for p in patient_ids} if patient_ids is not None else None
@@ -321,11 +327,13 @@ class BCSSStage2MultiMaskDataset(Dataset):
                 arr = np.array(mask_img.convert("L"), dtype=np.int64)
             if arr.ndim == 3:
                 arr = arr[:, :, 0]
+            ignore_mask = arr == 255
             arr = np.clip(arr, 0, 4)
+            arr[ignore_mask] = 255
             return arr
         elif self.fallback_mask:
-            # Fallback to zeros (class 0 or background) if layer mask is missing
-            return np.zeros((224, 224), dtype=np.int64)
+            # Fallback to ignore_index (255) so missing pseudo-masks never train as Tumor (0)
+            return np.full((224, 224), 255, dtype=np.int64)
         else:
             raise FileNotFoundError(f"Pseudo-mask not found at: {mask_path}")
 
@@ -454,10 +462,12 @@ class BCSSEvalDataset(Dataset):
                 mask_np = np.array(mask_img.convert("L"), dtype=np.int64)
             if mask_np.ndim == 3:
                 mask_np = mask_np[:, :, 0]
+            ignore_mask = mask_np == 255
             mask_np = np.clip(mask_np, 0, 4)
+            mask_np[ignore_mask] = 255
         else:
-            # Fallback zero mask if mask folder is absent
-            mask_np = np.zeros((224, 224), dtype=np.int64)
+            # Fallback ignore_index (255) if ground-truth mask is absent
+            mask_np = np.full((224, 224), 255, dtype=np.int64)
 
         img_tensor = self.transform(image)
         mask_tensor = torch.from_numpy(mask_np).long()

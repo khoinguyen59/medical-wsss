@@ -12,7 +12,8 @@ Strict adherence to:
 - Invariant 07: Genuine PyTorch implementation with zero mockup.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -26,6 +27,16 @@ from src.models.backbone import (
     SimpleConvBlock,
 )
 from src.models.pda_generator import ProgressiveDropoutAttention
+
+__all__ = [
+    "HistopathologyClassifierBackbone",
+    "MultiStageFeatureBackbone",
+    "ResidualConvBlock",
+    "SimpleConvBlock",
+    "ProgressiveDropoutAttention",
+    "SpatialAffinityRelocalization",
+    "WSSSBenchmarkingEngine",
+]
 
 
 class SpatialAffinityRelocalization(nn.Module):
@@ -245,11 +256,23 @@ class WSSSBenchmarkingEngine:
 
             # Step 7: Apply Uncertainty Regularization on ambiguous boundary pixels
             if self.mode == "proposed":
-                # For high-uncertainty boundary pixels (entropy > 0.85) where top-1 and top-2 scores
-                # are within margin 0.05, regularize prediction to prevent boundary bleeding
+                # Compute both 5-class normalized entropy and top-2 binary normalized entropy
+                # so 2-way histological interface ties (e.g. Tumor vs Stroma [0.5, 0.5, 0, 0, 0],
+                # where H/ln(5) ~ 0.431 but H_top2/ln(2) = 1.0) are accurately detected.
+                sorted_probs, _ = torch.sort(probs, dim=1, descending=True)
+                p1 = sorted_probs[:, 0, :, :]
+                p2 = sorted_probs[:, 1, :, :]
+                p_top2_sum = (p1 + p2).clamp(min=1e-7)
+                q1 = (p1 / p_top2_sum).clamp(min=1e-7, max=1.0 - 1e-7)
+                q2 = (p2 / p_top2_sum).clamp(min=1e-7, max=1.0 - 1e-7)
+                top2_entropy = (
+                    -(q1 * torch.log(q1) + q2 * torch.log(q2)) / (np.log(2.0) + 1e-7)
+                ).squeeze(0).cpu().numpy()
+                self.last_top2_entropy_map = top2_entropy
+
                 sorted_scores = np.sort(all_scores, axis=0)
                 margin = sorted_scores[-1, :, :] - sorted_scores[-2, :, :]
-                boundary_ambiguous = (uncertainty_map > 0.85) & (margin < 0.05)
+                boundary_ambiguous = ((uncertainty_map > 0.85) | (top2_entropy > 0.85)) & (margin < 0.05)
                 # If ambiguous between foreground tissue and background, favor background gating
                 bg_class_idx = self.num_classes - 1
                 pred_mask[boundary_ambiguous & (sorted_scores[-1, :, :] < effective_thr * 1.2)] = bg_class_idx

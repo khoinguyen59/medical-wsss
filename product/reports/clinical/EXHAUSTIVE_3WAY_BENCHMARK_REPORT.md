@@ -2,7 +2,7 @@
 
 > **Course:** SE374.R11 - Medical Image Processing Software Development (UIT)  
 > **Topic:** Weakly-Supervised Semantic Segmentation (WSSS) on BCSS-WSSS Histopathology  
-> **Evaluation Protocol:** 100% Zero-Mockup Streaming Inference across 23 Active Test Patients  
+> **Evaluation Protocol:** [DRY-RUN ARCHIVE: 2 Sample Patches / 1 Patient] - Pending Full 4,986-Patch / 23-Patient Colab Run  
 > **Governance Standard:** Invariant 07 (Zero Mockup), Invariant 08 (Patient-Level Separation), Invariant 12 (ASCII Hyphens Only)  
 
 ---

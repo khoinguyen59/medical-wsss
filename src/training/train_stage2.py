@@ -1,10 +1,11 @@
 """
-Stage-2 DeepLabV3+ Segmentation Training Engine for SE374.R11 WSSS.
+Stage-2 DeepLabV3+ Segmentation Training Engine for Histopathology WSSS.
 
 Trains the 59M-parameter DeepLabV3+ (ResNet-101 backbone + ASPP) from scratch on generated
 multi-layer pseudo-masks with:
 1. Multi-Layer Pseudo-Supervision (MLPS) Loss (Han et al., MedIA 2022):
-   L_total = 0.60 * L(bn7) + 0.20 * L(b5_2) + 0.20 * L(b4_5) + 0.10 * L_unc
+   L_total = L_mlps + 0.50 * L_unc
+   with canonical layer weights: bn7=1.0, b5_2=0.5, b4_5=0.25.
 2. Boundary Uncertainty Regularization Loss: down-weights ambiguous transition pixels.
 3. Classification Gate Mechanism (CGM) during validation and evaluation.
 4. Synchronized patient-level separation and zero patient leakage (Invariant 08).
@@ -14,26 +15,30 @@ multi-layer pseudo-masks with:
 """
 
 import argparse
-import math
-import os
 import random
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+# Ensure project root is in sys.path
+_CURRENT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _CURRENT_DIR.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from src.losses_metrics.losses import (
     MultiLayerPseudoSupervisionLoss,
+    UncertaintyAwareBoundaryLoss,
     UncertaintyRegularizationLoss,
 )
-from src.models.deeplabv3plus import DeepLabV3PlusWithCGM
-from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+from src.models.stain_deconv import StainDeconvLayer
+from src.models.wsss_inference_methods import DeepLabV3Plus, WSSSTissueStage1NetCAM
 from src.training.dataset_loader import (
-    CLASS_NAMES,
     NUM_CLASSES,
     NUM_FOREGROUND,
     create_eval_dataloader,
@@ -41,42 +46,130 @@ from src.training.dataset_loader import (
     load_bcss_patient_splits,
 )
 
+IMAGENET_MEAN: Tuple[float, float, float] = (0.485, 0.456, 0.406)
+IMAGENET_STD: Tuple[float, float, float] = (0.229, 0.224, 0.225)
+VALID_STAGE1_NORM_MODES: Tuple[str, ...] = ("auto", "zero_one", "imagenet")
+
+
+def infer_stage1_norm_mode(
+    checkpoint_obj: Any,
+    checkpoint_path: Optional[Union[str, Path]] = None,
+    requested_mode: str = "auto",
+) -> str:
+    """Infers expected Stage-1 input normalization mode ('zero_one' or 'imagenet')."""
+    mode = str(requested_mode or "auto").strip().lower()
+    if mode not in VALID_STAGE1_NORM_MODES:
+        raise ValueError(
+            f"Unsupported stage1_norm_mode={requested_mode!r}. Expected one of {VALID_STAGE1_NORM_MODES}."
+        )
+    if mode != "auto":
+        return mode
+
+    if isinstance(checkpoint_obj, dict):
+        if "input_norm" in checkpoint_obj and checkpoint_obj["input_norm"] is not None:
+            norm_val = str(checkpoint_obj["input_norm"]).strip().lower()
+            if norm_val not in ("zero_one", "imagenet"):
+                raise ValueError(
+                    f"Unsupported checkpoint input_norm={checkpoint_obj['input_norm']!r}. "
+                    "Expected 'zero_one' or 'imagenet'."
+                )
+            return norm_val
+        if "state_dict" in checkpoint_obj and any(
+            k in checkpoint_obj for k in ("epoch", "macro_f1", "optimizer", "metrics")
+        ):
+            return "imagenet"
+
+    return "zero_one"
+
+
+def prepare_stage1_input(
+    images: torch.Tensor,
+    stage1_norm_mode: str,
+    images_are_imagenet_norm: bool = True,
+) -> torch.Tensor:
+    """Aligns input tensor range/normalization with Stage-1 checkpoint expectations."""
+    mode = str(stage1_norm_mode or "zero_one").strip().lower()
+    view_shape = (1, 3, 1, 1) if images.dim() == 4 else (3, 1, 1)
+
+    if mode == "zero_one" and images_are_imagenet_norm:
+        mean = torch.tensor(IMAGENET_MEAN, device=images.device, dtype=images.dtype).view(*view_shape)
+        std = torch.tensor(IMAGENET_STD, device=images.device, dtype=images.dtype).view(*view_shape)
+        return torch.clamp(images * std + mean, 0.0, 1.0)
+
+    if mode == "imagenet" and not images_are_imagenet_norm:
+        mean = torch.tensor(IMAGENET_MEAN, device=images.device, dtype=images.dtype).view(*view_shape)
+        std = torch.tensor(IMAGENET_STD, device=images.device, dtype=images.dtype).view(*view_shape)
+        return (images - mean) / std
+
+    return images
+
+
+def load_imagenet_pretrained_resnet101(model: DeepLabV3Plus) -> None:
+    """Loads torchvision ImageNet pretrained weights into DeepLabV3Plus ResNet101 backbone."""
+    try:
+        import torchvision.models as tv_models
+        try:
+            weights = tv_models.ResNet101_Weights.IMAGENET1K_V1
+            tv_model = tv_models.resnet101(weights=weights)
+        except Exception:
+            tv_model = tv_models.resnet101(pretrained=True)
+        pretrained_dict = tv_model.state_dict()
+        model_dict = model.backbone.state_dict()
+        filtered = {
+            k: v for k, v in pretrained_dict.items()
+            if k in model_dict and v.shape == model_dict[k].shape
+        }
+        model_dict.update(filtered)
+        model.backbone.load_state_dict(model_dict)
+        print(f"[STAGE 2] Loaded {len(filtered)} layers from ImageNet ResNet-101 into backbone.")
+    except Exception as e:
+        print(f"[STAGE 2] ImageNet weights not loaded ({e}); continuing with initialized backbone.")
+
 
 class Stage2Trainer:
     """Orchestrates Stage-2 DeepLabV3+ segmentation training and evaluation."""
 
     def __init__(
         self,
-        model: DeepLabV3PlusWithCGM,
+        model: DeepLabV3Plus,
         optimizer: torch.optim.Optimizer,
         scheduler: Optional[Any] = None,
         stage1_model: Optional[WSSSTissueStage1NetCAM] = None,
         device: Optional[torch.device] = None,
         enable_amp: bool = True,
-        unc_weight: float = 0.10,
+        unc_weight: float = 0.50,
+        uabl_weight: float = 0.0,
+        stage1_norm_mode: str = "zero_one",
     ) -> None:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.stage1_model = stage1_model.to(self.device).eval() if stage1_model else None
+        self.stage1_norm_mode = str(stage1_norm_mode or "zero_one").strip().lower()
 
         self.enable_amp = enable_amp and (self.device.type == "cuda")
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.enable_amp)
 
         self.mlps_loss = MultiLayerPseudoSupervisionLoss(
-            weights={"bn7": 0.60, "b5_2": 0.20, "b4_5": 0.20},
+            weights={"bn7": 1.0, "b5_2": 0.5, "b4_5": 0.25},
             ignore_index=255,
         )
         self.unc_loss = UncertaintyRegularizationLoss(entropy_threshold=0.65, ignore_index=255)
         self.unc_weight = unc_weight
+        self.uabl_weight = uabl_weight
+        self.uabl_loss = UncertaintyAwareBoundaryLoss() if uabl_weight > 0.0 else None
+        self.stain_deconv = StainDeconvLayer().to(self.device).eval() if uabl_weight > 0.0 else None
 
-    def _prepare_logits(self, logits: torch.Tensor, target_masks: torch.Tensor) -> torch.Tensor:
-        """Ensure logits have 5 channels (incorporating Mode A background channel if model outputs 4)."""
+    def _prepare_logits(self, logits: torch.Tensor, target_masks: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Ensure logits have 5 channels without leaking target_masks into model predictions."""
         if logits.shape[1] == 4:
-            # Mode A: append background logit channel where pseudo-mask target == 4
-            one = torch.ones((logits.shape[0], 1, logits.shape[2], logits.shape[3]), device=logits.device)
-            bg_channel = 100.0 * one * (target_masks == 4).unsqueeze(1).float()
+            # Append neutral background logit (0.0) without reading target_masks (Zero GT leakage)
+            bg_channel = torch.zeros(
+                (logits.shape[0], 1, logits.shape[2], logits.shape[3]),
+                device=logits.device,
+                dtype=logits.dtype,
+            )
             return torch.cat([logits, bg_channel], dim=1)
         return logits
 
@@ -113,6 +206,18 @@ class Stage2Trainer:
                 l_mlps = self.mlps_loss(full_logits, pseudo_masks)
                 l_unc = self.unc_loss(full_logits, mask_bn7)
                 loss = l_mlps + self.unc_weight * l_unc
+                if self.uabl_loss is not None and self.stain_deconv is not None:
+                    # Compute optical stain boundary gradient from normalized input images
+                    mean = torch.tensor([0.485, 0.456, 0.406], device=images.device, dtype=images.dtype).view(1, 3, 1, 1)
+                    std = torch.tensor([0.229, 0.224, 0.225], device=images.device, dtype=images.dtype).view(1, 3, 1, 1)
+                    img_01 = torch.clamp(images * std + mean, 0.0, 1.0)
+                    he_channels, _, _ = self.stain_deconv(img_01)
+                    stain_grad = self.stain_deconv.compute_stain_gradient(he_channels)
+                    pred_probs = F.softmax(full_logits, dim=1)
+                    entropy = -(pred_probs * torch.log(pred_probs.clamp(min=1e-6))).sum(dim=1, keepdim=True)
+                    entropy_norm = entropy / np.log(float(full_logits.shape[1]))
+                    l_uabl = self.uabl_loss(pred_probs, stain_grad, entropy_norm.detach())
+                    loss = loss + self.uabl_weight * l_uabl
 
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
@@ -150,7 +255,12 @@ class Stage2Trainer:
 
             # Apply Classification Gate Mechanism (CGM) if available
             if use_cgm and self.stage1_model is not None:
-                stage1_cam, stage1_probs = self.stage1_model.forward_cam(images)
+                s1_images = prepare_stage1_input(
+                    images,
+                    stage1_norm_mode=self.stage1_norm_mode,
+                    images_are_imagenet_norm=True,
+                )
+                stage1_cam, stage1_probs = self.stage1_model.forward_cam(s1_images)
                 active_classes = (stage1_probs > 0.10).float()
                 # Suppress inactive foreground channels (0..3)
                 for c in range(NUM_FOREGROUND):
@@ -207,7 +317,7 @@ class Stage2Trainer:
 
 
 def build_stage2_optimizer_and_scheduler(
-    model: DeepLabV3PlusWithCGM,
+    model: DeepLabV3Plus,
     lr: float = 1e-4,
     weight_decay: float = 1e-4,
     epochs: int = 30,
@@ -250,6 +360,8 @@ def train_stage2_pipeline(
     dry_run: bool = False,
     device_str: Optional[str] = None,
     seed: int = 42,
+    use_uabl: bool = False,
+    stage1_norm_mode: str = "auto",
 ) -> Dict[str, Any]:
     """Execute end-to-end Stage 2 DeepLabV3+ segmentation training pipeline."""
     random.seed(seed)
@@ -292,22 +404,35 @@ def train_stage2_pipeline(
     train_patients = splits.get("train", [])
     val_patients = splits.get("val", [])
 
-    # Initialize Stage 2 DeepLabV3PlusWithCGM (5 classes: TUM, STR, LYM, NEC, BACK)
-    model = DeepLabV3PlusWithCGM(num_classes=5)
+    # Initialize Stage 2 DeepLabV3Plus (5 classes: TUM, STR, LYM, NEC, BACK)
+    model = DeepLabV3Plus(num_classes=5, output_stride=16)
+    load_imagenet_pretrained_resnet101(model)
 
     # Optionally load Stage 1 model for CGM gating during eval
     stage1_model: Optional[WSSSTissueStage1NetCAM] = None
+    resolved_stage1_norm = infer_stage1_norm_mode(
+        None, checkpoint_path=stage1_checkpoint, requested_mode=stage1_norm_mode
+    )
     if stage1_checkpoint and Path(stage1_checkpoint).exists():
         stage1_model = WSSSTissueStage1NetCAM(n_class=NUM_FOREGROUND)
-        st = torch.load(stage1_checkpoint, map_location="cpu")
-        st_dict = st.get("state_dict", st)
+        try:
+            st = torch.load(stage1_checkpoint, map_location="cpu", weights_only=True)
+        except Exception:
+            st = torch.load(stage1_checkpoint, map_location="cpu", weights_only=False)  # nosec B614
+        resolved_stage1_norm = infer_stage1_norm_mode(
+            st, checkpoint_path=stage1_checkpoint, requested_mode=stage1_norm_mode
+        )
+        st_dict = st.get("state_dict", st) if isinstance(st, dict) else st
         stage1_model.load_state_dict(st_dict, strict=False)
 
     # Resume from checkpoint if requested
     start_epoch = 0
     best_miou = 0.0
     if resume_path and Path(resume_path).exists():
-        loaded = torch.load(resume_path, map_location="cpu")
+        try:
+            loaded = torch.load(resume_path, map_location="cpu", weights_only=True)
+        except Exception:
+            loaded = torch.load(resume_path, map_location="cpu", weights_only=False)  # nosec B614
         state_dict = loaded.get("state_dict", loaded)
         model.load_state_dict(state_dict, strict=False)
         start_epoch = loaded.get("epoch", 0)
@@ -349,6 +474,9 @@ def train_stage2_pipeline(
         stage1_model=stage1_model,
         device=device,
         enable_amp=not dry_run,
+        unc_weight=0.50,
+        uabl_weight=0.15 if use_uabl else 0.0,
+        stage1_norm_mode=resolved_stage1_norm,
     )
 
     history: List[Dict[str, Any]] = []
@@ -390,12 +518,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=str, default="data/BCSS-WSSS", help="Dataset directory")
     parser.add_argument("--pm-dir", type=str, default=None, help="Pseudo-masks root directory")
     parser.add_argument("--stage1-checkpoint", type=str, default="checkpoints/stage1_retrained_best.pth")
+    parser.add_argument(
+        "--stage1-norm-mode",
+        type=str,
+        default="auto",
+        choices=["auto", "zero_one", "imagenet"],
+        help="Stage-1 input normalization mode (auto, zero_one, or imagenet)",
+    )
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Save directory")
     parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=16, help="Mini-batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--resume", type=str, default=None, help="Resume checkpoint path")
     parser.add_argument("--dry-run", action="store_true", help="Run 1-step dry run for testing")
+    parser.add_argument("--use-uabl", action="store_true", help="Enable Uncertainty-Aware Optical Stain Boundary Loss")
     parser.add_argument("--device", type=str, default=None, help="Device ('cuda' or 'cpu')")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     return parser.parse_args()
@@ -415,6 +551,8 @@ def main() -> None:
         dry_run=args.dry_run,
         device_str=args.device,
         seed=args.seed,
+        use_uabl=args.use_uabl,
+        stage1_norm_mode=args.stage1_norm_mode,
     )
     print("Stage 2 Training Complete.")
     print(f"Best mIoU: {results['best_mIoU']:.4f}")

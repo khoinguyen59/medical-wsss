@@ -28,8 +28,8 @@ Strict adherence to:
 - Invariant 07: Genuine PyTorch implementation with zero mockup.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
-import numpy as np
+from typing import List, Optional, Tuple, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -51,8 +51,12 @@ class ProgressiveDropoutAttention(nn.Module):
         boundary_bleeding_control: bool = True,
         spatial_masking: bool = True,
         channel_masking: bool = True,
+        cumulative_mask: bool = True,
     ) -> None:
         """Args:
+            cumulative_mask: If True (default), the spatial mask is accumulated across
+                steps via torch.minimum(running_mask, step_mask), so regions erased at an
+                earlier step cannot re-appear at later steps.
             num_steps: Number of progressive dropout iterations T (default: 3).
             top_p: Fraction of highest-activation regions/channels to mask (default: 0.25).
             base_dropout_rate: Initial dropout attenuation rate delta_0 (default: 0.50).
@@ -73,6 +77,7 @@ class ProgressiveDropoutAttention(nn.Module):
         self.boundary_bleeding_control = boundary_bleeding_control
         self.spatial_masking = spatial_masking
         self.channel_masking = channel_masking
+        self.cumulative_mask = cumulative_mask
 
         # Precompute normalized step weights: w_t = gamma^t / sum(gamma^j)
         raw_weights = [self.step_weight_decay ** t for t in range(self.num_steps + 1)]
@@ -95,7 +100,7 @@ class ProgressiveDropoutAttention(nn.Module):
         """
         if weight.dim() == 2:
             weight = weight.unsqueeze(-1).unsqueeze(-1)
-        
+
         d_feat = feature_map.shape[1]
         d_weight = weight.shape[1]
         if d_feat != d_weight:
@@ -277,6 +282,7 @@ class ProgressiveDropoutAttention(nn.Module):
 
         # Iterative steps t = 1 ... T
         prev_cam = cam_0_norm
+        running_mask: Optional[torch.Tensor] = None  # used only if cumulative_mask
         for t in range(1, self.num_steps + 1):
             # Progressive dropout rate increases with step depth
             delta_t = min(self.base_dropout_rate * (1.0 + 0.20 * (t - 1)), 1.0)
@@ -284,6 +290,10 @@ class ProgressiveDropoutAttention(nn.Module):
             # 1. Spatial Masking based on active regions of previous step
             if self.spatial_masking:
                 spatial_mask = self._compute_spatial_mask(prev_cam, delta_t=delta_t)
+                if self.cumulative_mask:
+                    if running_mask is not None:
+                        spatial_mask = torch.minimum(running_mask, spatial_mask)
+                    running_mask = spatial_mask
             else:
                 spatial_mask = torch.ones((b, c, h, w), device=feature_map.device, dtype=feature_map.dtype)
 
