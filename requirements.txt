@@ -1,4 +1,4 @@
-# SE374.R11: Đồ Án Cuối Kỳ - Trí Tuệ Nhân Tạo Trong Y Tế & Xử Lý Ảnh Y Khoa
+# BCSS-WSSS Research Engine & Clinical Workstation - Medical AI & Healthcare Deep Learning
 # Python Dependencies Specification (Reproducibility & Medical AI Standard)
 
 # Core Deep Learning & Medical Frameworks
@@ -7,6 +7,9 @@ torchvision>=0.17.0
 monai>=1.3.0
 timm>=0.9.16
 einops>=0.7.0
+
+# Optional MedSAM / SAM ViT-B Backbone (install on Colab GPU when not using surrogate):
+# pip install git+https://github.com/facebookresearch/segment-anything.git
 
 # Medical Imaging Formats & Volume/WSI Processing
 pydicom>=2.4.4
@@ -28,7 +31,11 @@ seaborn>=0.13.0
 # Survival Analysis & Bio-statistics (Topic 4)
 lifelines>=0.28.0
 
-# Interactive Visualization & Web Application (Radiology Demo)
+# Interactive Visualization & Web Application (Clinical Workstation)
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.6.0
+python-multipart>=0.0.9
 streamlit>=1.32.0
 
 # Document Automation & Inspection (Pandoc / Word / PDF)
@@ -39,6 +46,7 @@ pywin32>=306; sys_platform == 'win32'
 
 # Testing, Linting & CI/CD
 pytest>=8.0.0
+ruff>=0.4.0
 flake8>=7.0.0
 black>=24.0.0
 isort>=5.13.0

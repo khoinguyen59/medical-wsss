@@ -19,10 +19,10 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
-from PIL import Image
 import pytest
 import torch
 import torch.nn as nn
+from PIL import Image
 
 from src.training.dataset_loader import (
     BCSS_PALETTE,
@@ -46,16 +46,17 @@ from src.training.generate_pseudo_masks import (
     generate_pseudo_masks_pipeline,
     save_palette_mask,
 )
+from src.training.train_proposed_sam import (
+    CompositeWSSSLoss,
+)
 from src.training.train_stage1 import (
     AsymmetricLoss,
     AttentionModule,
     train_stage1_pipeline,
 )
 from src.training.train_stage2 import (
+    infer_stage1_norm_mode,
     train_stage2_pipeline,
-)
-from src.training.train_proposed_sam import (
-    CompositeWSSSLoss,
 )
 
 
@@ -297,6 +298,8 @@ def test_train_stage1_dry_run(mock_dataset_dir: Path, tmp_path: Path):
     ckpt = torch.load(saved_path, map_location="cpu")
     assert "state_dict" in ckpt
     assert "macro_f1" in ckpt
+    assert ckpt.get("input_norm") == "imagenet"
+    assert infer_stage1_norm_mode(ckpt, saved_path, "auto") == "imagenet"
 
 
 def test_generate_pseudo_masks_dry_run(mock_dataset_dir: Path, tmp_path: Path):
@@ -451,4 +454,148 @@ def test_composite_wsss_loss_backward():
     assert torch.isfinite(logits.grad).all()
     assert iou_preds.grad is not None
     assert torch.isfinite(iou_preds.grad).all()
+
+
+def test_one_batch_overfit_sanity_loss_strictly_decreases():
+    """Overfit Sanity Check: 4 steps of gradient descent on a fixed real batch from data/sample_dataset
+    must strictly decrease the training loss for both Stage-1 and MedSAM Adapter.
+    """
+    from src.models.sam_wsss_adapter import MedSAM_WSSS_Adapter
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.dataset_loader import BCSSStage1Dataset
+
+    torch.manual_seed(42)
+    sample_train_dir = Path("data/sample_dataset/train")
+    ds = BCSSStage1Dataset(root_dir=sample_train_dir, is_train=False, max_samples=2)
+    img0, lbl0, _ = ds[0]
+    img1, lbl1, _ = ds[1]
+    batch_imgs = torch.stack([img0, img1], dim=0)
+    batch_lbls = torch.stack([lbl0, lbl1], dim=0)
+
+    # 1. Stage-1 ResNet38d Net_CAM 1-batch overfit check
+    s1_model = WSSSTissueStage1NetCAM(num_classes=4)
+    s1_model.train()
+    s1_opt = torch.optim.AdamW(s1_model.parameters(), lr=1e-4)
+    s1_crit = AsymmetricLoss(gamma_neg=2.0, clip=0.05)
+
+    crop_imgs = batch_imgs[:, :, :64, :64]
+    s1_losses = []
+    for _ in range(4):
+        s1_opt.zero_grad()
+        logits = s1_model(crop_imgs)
+        loss = s1_crit(logits, batch_lbls)
+        loss.backward()
+        s1_opt.step()
+        s1_losses.append(loss.item())
+
+    assert s1_losses[-1] < s1_losses[0], (
+        f"Stage-1 overfit sanity failed: initial loss={s1_losses[0]:.4f}, final loss={s1_losses[-1]:.4f}"
+    )
+
+    # 2. Proposed MedSAM_WSSS_Adapter 1-batch overfit check on 64x64 crop
+    sam_model = MedSAM_WSSS_Adapter(
+        num_classes=5,
+        freeze_image_encoder=True,
+        use_surrogate_if_missing=True,
+    )
+    sam_model.train()
+    trainable_params = [p for p in sam_model.parameters() if p.requires_grad]
+    assert len(trainable_params) > 0
+    sam_opt = torch.optim.AdamW(trainable_params, lr=5e-4)
+    sam_crit = CompositeWSSSLoss(num_classes=5)
+
+    target_masks = torch.zeros((2, 64, 64), dtype=torch.long)
+    target_masks[:, 32:, :] = 1
+
+    sam_losses = []
+    for _ in range(4):
+        sam_opt.zero_grad()
+        out = sam_model(crop_imgs)
+        loss_dict = sam_crit(out["logits"], target_masks, out["iou_predictions"])
+        loss_dict["total_loss"].backward()
+        sam_opt.step()
+        sam_losses.append(loss_dict["total_loss"].item())
+
+    assert sam_losses[-1] < sam_losses[0], (
+        f"MedSAM Adapter overfit sanity failed: initial={sam_losses[0]:.4f}, final={sam_losses[-1]:.4f}"
+    )
+
+
+def test_generate_pseudo_masks_stage1_norm_routing(
+    mock_dataset_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Verify generate_pseudo_masks_pipeline routes [0,1] vs ImageNet tensors based on Stage-1 checkpoint metadata."""
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+
+    s1_dummy = WSSSTissueStage1NetCAM(n_class=NUM_FOREGROUND)
+    raw_ckpt = tmp_path / "official_stage1_raw.pth"
+    torch.save(s1_dummy.state_dict(), raw_ckpt)
+
+    retrained_ckpt = tmp_path / "stage1_retrained_best.pth"
+    torch.save(
+        {
+            "epoch": 0,
+            "macro_f1": 0.5,
+            "input_norm": "imagenet",
+            "state_dict": s1_dummy.state_dict(),
+        },
+        retrained_ckpt,
+    )
+
+    captured_batches: List[torch.Tensor] = []
+    orig_forward_backbone = WSSSTissueStage1NetCAM.forward_backbone
+
+    def _spy_forward_backbone(self_mod, x: torch.Tensor) -> torch.Tensor:
+        captured_batches.append(x.detach().cpu().clone())
+        return orig_forward_backbone(self_mod, x)
+
+    monkeypatch.setattr(WSSSTissueStage1NetCAM, "forward_backbone", _spy_forward_backbone)
+
+    # 1. Official raw state_dict checkpoint -> unnormalized [0, 1] tensors
+    res_raw = generate_pseudo_masks_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_path=raw_ckpt,
+        output_dir=tmp_path / "pm_raw",
+        batch_size=2,
+        dry_run=True,
+        device_str="cpu",
+        stage1_norm_mode="auto",
+    )
+    assert res_raw["stage1_norm_mode"] == "zero_one"
+    assert len(captured_batches) > 0
+    for batch_t in captured_batches:
+        assert float(batch_t.min()) >= 0.0
+        assert float(batch_t.max()) <= 1.0
+
+    captured_batches.clear()
+
+    # 2. Retrained Stage-1 checkpoint ('input_norm': 'imagenet') -> ImageNet-normalized tensors
+    res_imgnet = generate_pseudo_masks_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_path=retrained_ckpt,
+        output_dir=tmp_path / "pm_imgnet",
+        batch_size=2,
+        dry_run=True,
+        device_str="cpu",
+        stage1_norm_mode="auto",
+    )
+    assert res_imgnet["stage1_norm_mode"] == "imagenet"
+    assert len(captured_batches) > 0
+    assert any(float(batch_t.min()) < 0.0 for batch_t in captured_batches)
+
+    # 3. Invalid stage1_norm_mode raises ValueError
+    with pytest.raises(ValueError, match="Unsupported stage1_norm_mode"):
+        generate_pseudo_masks_pipeline(
+            data_dir=mock_dataset_dir,
+            checkpoint_path=raw_ckpt,
+            output_dir=tmp_path / "pm_bad",
+            batch_size=2,
+            dry_run=True,
+            device_str="cpu",
+            stage1_norm_mode="invalid",
+        )
+
+
 

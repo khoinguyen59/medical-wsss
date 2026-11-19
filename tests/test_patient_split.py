@@ -1,21 +1,29 @@
-import numpy as np
-import torch
-import pytest
-import os
 import glob
+import os
+from pathlib import Path
 
+import numpy as np
+import pytest
+import torch
+from hypothesis import given
+from hypothesis import strategies as st
+from PIL import Image
+from torch.utils.data import DataLoader
 
+from src.colab_pkg.downloader import resolve_split_dirs
+from src.datasets.bcss_dataset import BCSSDataset
+from src.datasets.otsu_filter import compute_otsu_tissue_mask
 from src.datasets.patient_split import (
     extract_patient_id,
     load_patient_splits,
-    verify_patient_leakage,
     split_patients_kfold,
+    verify_patient_leakage,
 )
-from src.datasets.bcss_dataset import BCSSDataset
+from src.training.dataset_loader import parse_patch_filename
 
 
-def test_extract_patient_id_tcga():
-    """Verify TCGA patient ID extraction from diverse filename patterns."""
+def test_extract_patient_id_tcga_and_luad():
+    """Verify TCGA and LUAD patient ID extraction from diverse filename patterns."""
     f1 = "TCGA-A2-A0T2_1024_2048_[1 0 0 1].png"
     assert extract_patient_id(f1) == "TCGA-A2-A0T2"
 
@@ -27,6 +35,23 @@ def test_extract_patient_id_tcga():
 
     f4 = "GDPH_1234_patch_05.png"
     assert extract_patient_id(f4) == "GDPH"
+
+
+def test_parse_patch_filename_all_label_formats():
+    """Verify parse_patch_filename handles space-separated, comma-separated, and contiguous labels."""
+    pid1, x1, y1, lbl1 = parse_patch_filename("TCGA-A2-A0T2_1024_2048_[1 0 1 0].png")
+    assert pid1 == "TCGA-A2-A0T2"
+    assert (x1, y1) == (1024, 2048)
+    np.testing.assert_array_equal(lbl1, np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32))
+
+    pid2, x2, y2, lbl2 = parse_patch_filename("TCGA-BH-A0B8_512_256_[0,1,0,1].png")
+    assert pid2 == "TCGA-BH-A0B8"
+    assert (x2, y2) == (512, 256)
+    np.testing.assert_array_equal(lbl2, np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32))
+
+    pid3, _, _, lbl3 = parse_patch_filename("TCGA-E2-A14N_0_0_[1100].png")
+    assert pid3 == "TCGA-E2-A14N"
+    np.testing.assert_array_equal(lbl3, np.array([1.0, 1.0, 0.0, 0.0], dtype=np.float32))
 
 
 def test_verify_patient_leakage_on_sample_dataset():
@@ -71,78 +96,149 @@ def test_split_patients_kfold():
         assert len(train_p) + len(val_p) == 10
 
 
-def test_bcss_dataset_loader_dry_run():
-    """Sanity dry-run: load batches and verify tensor shapes and memory."""
+def test_bcss_dataset_loader_and_dataloader_batching():
+    """Load real sample_dataset via BCSSDataset and PyTorch DataLoader(batch_size=2)."""
     sample_root = os.path.join("data", "sample_dataset")
 
     train_ds = BCSSDataset(root_dir=sample_root, split="train")
     assert len(train_ds) == 4
-    img, label, fname = train_ds[0]
+    loader = DataLoader(train_ds, batch_size=2, shuffle=False)
+    imgs, labels, fnames = next(iter(loader))
 
-    assert isinstance(img, torch.Tensor)
-    assert img.shape == (3, 224, 224)
-    assert isinstance(label, torch.Tensor)
-    assert label.shape == (4,)
+    assert imgs.shape == (2, 3, 224, 224)
+    assert imgs.dtype == torch.float32
+    assert labels.shape == (2, 4)
+    assert len(fnames) == 2
 
     val_ds = BCSSDataset(root_dir=sample_root, split="valid")
     assert len(val_ds) == 2
-    img_v, mask_v, fname_v = val_ds[0]
+    img_v, mask_v, _ = val_ds[0]
     assert img_v.shape == (3, 224, 224)
     assert mask_v.shape == (224, 224)
+    assert set(np.unique(mask_v.numpy())).issubset({0, 1, 2, 3, 4, 255})
 
 
-def test_151_patient_split_manifest_zero_leakage():
-    """Verify that the 151-patient split manifest exists, has exactly 151 distinct patients,
-    adheres to the 91/30/30 split ratio, and achieves 0.0% patient leakage.
-    """
+def test_bcss_dataset_nested_topologies_and_missing_mask_with_transform(tmp_path: Path):
+    """Test BCSSDataset across nested BCSS-WSSS/train/img topologies, custom transform, and missing mask fallback."""
+    # Topology 1: Nested BCSS-WSSS/train/img/*.png
+    nested_train = tmp_path / "BCSS-WSSS" / "train" / "img"
+    nested_train.mkdir(parents=True)
+    rgb = np.full((64, 64, 3), fill_value=180, dtype=np.uint8)
+    Image.fromarray(rgb).save(nested_train / "TCGA-A2-A0T2_0_0_[1 0 1 0].png")
+
+    ds_train = BCSSDataset(root_dir=str(tmp_path), split="train")
+    assert len(ds_train) == 1
+    img_t, lbl_t, _ = ds_train[0]
+    assert img_t.shape == (3, 64, 64)
+    np.testing.assert_array_equal(lbl_t.numpy(), np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32))
+
+    # Topology 2: Test split with custom transform AND missing mask directory (regression test for img_np UnboundLocalError)
+    nested_test_img = tmp_path / "BCSS-WSSS" / "test" / "img"
+    nested_test_img.mkdir(parents=True)
+    Image.fromarray(rgb).save(nested_test_img / "TCGA-D8-A27F_0_0.png")
+
+    def custom_transform(pil_img: Image.Image) -> torch.Tensor:
+        arr = np.array(pil_img, dtype=np.float32) / 255.0
+        return torch.from_numpy(arr).permute(2, 0, 1)
+
+    ds_test_no_mask = BCSSDataset(
+        root_dir=str(tmp_path),
+        split="test",
+        transform=custom_transform,
+    )
+    assert len(ds_test_no_mask) == 1
+    img_te, mask_te, fname_te = ds_test_no_mask[0]
+    assert img_te.shape == (3, 64, 64)
+    assert mask_te.shape == (64, 64)
+    assert torch.all(mask_te == 0)
+    assert fname_te == "TCGA-D8-A27F_0_0.png"
+
+    # Topology 3: Mask containing ignore_index=255 must preserve 255 while clamping 0..4
+    nested_test_mask = tmp_path / "BCSS-WSSS" / "test" / "mask"
+    nested_test_mask.mkdir(parents=True)
+    mask_arr = np.zeros((64, 64), dtype=np.uint8)
+    mask_arr[:20, :] = 1
+    mask_arr[20:40, :] = 255
+    Image.fromarray(mask_arr, mode="L").save(nested_test_mask / "TCGA-D8-A27F_0_0.png")
+
+    ds_test_with_mask = BCSSDataset(root_dir=str(tmp_path), split="test", transform=custom_transform)
+    _, loaded_mask, _ = ds_test_with_mask[0]
+    assert torch.all(loaded_mask[:20, :] == 1)
+    assert torch.all(loaded_mask[20:40, :] == 255)
+
+
+def test_resolve_split_dirs_nested_archive_and_mock_rejection(tmp_path: Path):
+    """Verify resolve_split_dirs finds deeply nested cohorts while rejecting sample_dataset mocks."""
+    # 1. Create a mock sample_dataset directory that must be ignored
+    mock_img_dir = tmp_path / "sample_dataset" / "test" / "img"
+    mock_img_dir.mkdir(parents=True)
+    for i in range(12):
+        Image.new("RGB", (16, 16)).save(mock_img_dir / f"TCGA-AA-A0{i:02d}_{i}.png")
+
+    root_found, img_found, _ = resolve_split_dirs(tmp_path, split="test")
+    assert root_found is None and img_found is None
+
+    # 2. Create a genuine nested archive structure with >= 10 images across >= 2 patients
+    real_img_dir = tmp_path / "extracted_archive" / "BCSS-WSSS" / "test" / "img"
+    real_mask_dir = tmp_path / "extracted_archive" / "BCSS-WSSS" / "test" / "mask"
+    real_img_dir.mkdir(parents=True)
+    real_mask_dir.mkdir(parents=True)
+    for i in range(6):
+        Image.new("RGB", (16, 16)).save(real_img_dir / f"TCGA-D8-A27F_{i}.png")
+        Image.new("RGB", (16, 16)).save(real_img_dir / f"TCGA-E2-A14N_{i}.png")
+
+    root_found, img_found, mask_found = resolve_split_dirs(tmp_path, split="test")
+    assert root_found == tmp_path / "extracted_archive" / "BCSS-WSSS"
+    assert img_found == real_img_dir
+    assert mask_found == real_mask_dir
+
+
+def test_otsu_tissue_preservation_on_pale_mucinous_vs_glass():
+    """Verify Otsu tissue mask retains >75% of pale mucinous H&E tissue while rejecting >90% of white glass."""
+    # Left half: pale lavender/pink mucinous tumor (RGB ~ [225, 195, 220], low-moderate saturation, gray < 220)
+    # Right half: bright white microscope glass slide (RGB = [250, 250, 250])
+    img = np.full((128, 128, 3), fill_value=250, dtype=np.uint8)
+    img[:, :64] = [225, 195, 220]
+
+    mask = compute_otsu_tissue_mask(img)
+    pale_tissue_retained = float(np.mean(mask[:, :64]))
+    glass_retained = float(np.mean(mask[:, 64:]))
+
+    assert pale_tissue_retained > 0.75, (
+        f"Pale mucinous tissue was over-erased by Otsu filter: retained={pale_tissue_retained:.3f}"
+    )
+    assert glass_retained < 0.10, (
+        f"Pure glass background was not rejected by Otsu filter: glass={glass_retained:.3f}"
+    )
+
+
+def test_151_patient_split_manifest_exact_canonical_counts_and_zero_leakage():
+    """Verify that the canonical 151-patient split manifest has exact 106/22/23 counts and 0.0% leakage."""
     manifest_path = os.path.join("src", "config", "bcss_patient_splits.json")
     assert os.path.exists(manifest_path), f"Manifest file must exist at {manifest_path}"
 
-    # Load splits using loader function
     splits = load_patient_splits(manifest_path)
-
     train = splits["train"]
     val = splits["val"]
     test = splits["test"]
 
-    # Check exact counts per specification
-    assert len(train) == 91, f"Expected 91 train patients, got {len(train)}"
-    assert len(val) == 30, f"Expected 30 val patients, got {len(val)}"
-    assert len(test) == 30, f"Expected 30 test patients, got {len(test)}"
+    # Enforce the single canonical 106 / 22 / 23 = 151 patient split
+    assert len(train) == 106, f"Expected exactly 106 train patients, got {len(train)}"
+    assert len(val) == 22, f"Expected exactly 22 val patients, got {len(val)}"
+    assert len(test) == 23, f"Expected exactly 23 test patients, got {len(test)}"
+    assert len(train) + len(val) + len(test) == 151
 
-    # Check total patient count
-    total_count = len(train) + len(val) + len(test)
-    assert total_count == 151, f"Expected exactly 151 patients, got {total_count}"
+    train_set, val_set, test_set = set(train), set(val), set(test)
+    assert len(train_set | val_set | test_set) == 151
+    assert len(train_set & val_set) == 0
+    assert len(train_set & test_set) == 0
+    assert len(val_set & test_set) == 0
 
-    # Check all IDs are unique (no duplicates within or across splits)
-    all_unique = set(train) | set(val) | set(test)
-    assert len(all_unique) == 151, f"Expected 151 unique patient IDs, got {len(all_unique)}"
-
-    # Check pairwise disjoint sets (Zero Patient Leakage)
-    train_set = set(train)
-    val_set = set(val)
-    test_set = set(test)
-
-    train_val_overlap = train_set & val_set
-    train_test_overlap = train_set & test_set
-    val_test_overlap = val_set & test_set
-
-    assert len(train_val_overlap) == 0, f"Patient leakage between Train and Val: {train_val_overlap}"
-    assert len(train_test_overlap) == 0, f"Patient leakage between Train and Test: {train_test_overlap}"
-    assert len(val_test_overlap) == 0, f"Patient leakage between Val and Test: {val_test_overlap}"
-
-    # Verify via verify_patient_leakage utility
     leakage_result = verify_patient_leakage(train, val, test)
     assert leakage_result["has_leakage"] is False
-    assert leakage_result["train_patients_count"] == 91
-    assert leakage_result["val_patients_count"] == 30
-    assert leakage_result["test_patients_count"] == 30
-
-    # Verify sample dataset patients consistency
-    assert "TCGA-A2-A0T2" in train_set
-    assert "TCGA-BH-A0B8" in train_set
-    assert "TCGA-E2-A152" in val_set
-    assert "TCGA-C8-A1HJ" in test_set
+    assert leakage_result["train_patients_count"] == 106
+    assert leakage_result["val_patients_count"] == 22
+    assert leakage_result["test_patients_count"] == 23
 
 
 def test_load_patient_splits_invalid_path():
@@ -150,3 +246,17 @@ def test_load_patient_splits_invalid_path():
     with pytest.raises(FileNotFoundError):
         load_patient_splits("non_existent_manifest.json")
 
+
+@given(st.from_regex(r"^TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}_[0-9]+_[0-9]+_\[[01 ]+\]\.png$", fullmatch=True))
+def test_hypothesis_extract_patient_id_tcga_format(filename):
+    """Property test: TCGA filenames always yield valid 12-char patient ID."""
+    pid = extract_patient_id(filename)
+    assert pid.startswith("TCGA-")
+    assert len(pid) == 12
+
+
+@given(st.text())
+def test_hypothesis_extract_patient_id_never_crashes(text):
+    """Property test: extract_patient_id must be resilient to arbitrary text input."""
+    result = extract_patient_id(text)
+    assert isinstance(result, str)

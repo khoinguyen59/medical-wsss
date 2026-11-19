@@ -1,4 +1,4 @@
-"""Automated Google Drive Code Bundle Packager for SE374.R11 WSSS Pipeline.
+"""Automated Google Drive Code Bundle Packager for BCSS-WSSS Pipeline.
 
 Assembles a ready-to-upload modular code directory and 1-click ZIP archive under:
 - drive_upload_ready/SE374_WSSS_Drive_Code/
@@ -46,7 +46,7 @@ FALLBACK_THIN_VARIANTS: List[Dict[str, object]] = [
         "high_ram": False,
         "sanity_mode": True,
         "mode_tag": "Drive_T4_Sanity150",
-        "title": "SE374.R11 Thin Drive Runner - T4 GPU Sanity 150 Patches",
+        "title": "BCSS-WSSS Thin Drive Runner - T4 GPU Sanity 150 Patches",
     },
     {
         "filename": "SE374_Colab_WSSS_Drive_Runner_T4_Full4986.ipynb",
@@ -54,7 +54,7 @@ FALLBACK_THIN_VARIANTS: List[Dict[str, object]] = [
         "high_ram": False,
         "sanity_mode": False,
         "mode_tag": "Drive_T4_Full4986",
-        "title": "SE374.R11 Thin Drive Runner - T4 GPU Full 4986 Patches",
+        "title": "BCSS-WSSS Thin Drive Runner - T4 GPU Full 4986 Patches",
     },
     {
         "filename": "SE374_Colab_WSSS_Drive_Runner_L4_Full4986.ipynb",
@@ -62,7 +62,7 @@ FALLBACK_THIN_VARIANTS: List[Dict[str, object]] = [
         "high_ram": False,
         "sanity_mode": False,
         "mode_tag": "Drive_L4_Full4986",
-        "title": "SE374.R11 Thin Drive Runner - L4 GPU Full 4986 Patches",
+        "title": "BCSS-WSSS Thin Drive Runner - L4 GPU Full 4986 Patches",
     },
     {
         "filename": "SE374_Colab_WSSS_Drive_Runner_A100_Full4986.ipynb",
@@ -70,7 +70,7 @@ FALLBACK_THIN_VARIANTS: List[Dict[str, object]] = [
         "high_ram": True,
         "sanity_mode": False,
         "mode_tag": "Drive_A100_Full4986",
-        "title": "SE374.R11 Thin Drive Runner - A100 GPU Full 4986 Patches",
+        "title": "BCSS-WSSS Thin Drive Runner - A100 GPU Full 4986 Patches",
     },
 ]
 
@@ -262,7 +262,7 @@ def generate_readme_drive_setup(thin_notebook_names: List[str], method_keys: Lis
     methods_md = "\n".join(f"- `{m}`" for m in method_keys)
 
     content = f"""# Hướng Dẫn Triển Khai Gói Code Modular Trên Google Drive & Thin Runner Colab
-## Dự Án SE374.R11: Phân Vùng Mô Bệnh Học WSSS Trên Tập Dữ Liệu BCSS-WSSS
+## Dự Án Nghiên Cứu: Phân Vùng Mô Bệnh Học WSSS Trên Tập Dữ Liệu BCSS-WSSS
 
 Tài liệu này hướng dẫn cách tải gói mã nguồn modular `SE374_WSSS_Drive_Code` lên Google Drive và chạy các **Thin Runner Notebook** mới trên Google Colab mà **không nhồi nhét hàng nghìn dòng code vào trong notebook**, đồng thời bảo toàn nguyên vẹn 100% các notebook cũ và lịch sử Git.
 
@@ -280,7 +280,13 @@ Thay vì đặt toàn bộ kiến trúc mạng nơ-ron sâu và thuật toán x�
 2. **Các File Thin Runner Notebook Mới (Gọn Nhẹ - Không Đè Notebook Cũ):**
 {nb_list_md}
 
-3. **Các Phương Pháp Suy Luận SOTA Tích Hợp Trong `MultiMethodWSSSEngine`:**
+3. **Các Notebook Huấn Luyện & Đánh Giá Chuyên Sâu (`notebooks/01..04`):**
+   - `01_Train_Stage1_Classifier*.ipynb` (`base`, `_T4`, `_L4`): Huấn luyện Stage-1 ResNet-38d với PDA + ASL.
+   - `02_Pseudo_Masks_Train_Stage2*.ipynb` (`base`, `_T4`, `_L4`): Sinh Multi-Layer CAMs + SG-DAP (`ignore_index=255`) và huấn luyện Stage-2 DeepLabV3+ (MLPS + Unc + UABL).
+   - `03_Train_Proposed_MedSAM*.ipynb` (`base`, `_T4`, `_L4`): Huấn luyện MedSAM WSSS Adapter (`medsam_vit_b.pth` + `segment-anything`) và nhánh `IntraPatchDualBranchAttention` (`M9`).
+   - `04_Exhaustive_Benchmark_Survival*.ipynb` (`base`, `_T4`, `_L4`): So sánh 3 chiều + `ComparativeAblationEvaluator` (`m1..m_combined`) + 5-seed benchmark + phân tích sống còn Kaplan-Meier.
+
+4. **Các Phương Pháp Suy Luận SOTA Tích Hợp Trong `MultiMethodWSSSEngine`:**
 {methods_md}
 
 ---
@@ -319,19 +325,16 @@ Thay vì đặt toàn bộ kiến trúc mạng nơ-ron sâu và thuật toán x�
 
 ---
 
-### 5. Bảo Toàn 100% Các Notebook Cũ, Lịch Sử 6 Phiên Thực Nghiệm (Run 1 -> Run 6) & Lịch Sử Git
+### 5. Bảo Toàn 100% Các Notebook Cũ, Lịch Sử 3 Phiên Thực Nghiệm Toàn Tập (Run 1 -> Run 3) & Lịch Sử Git
 
 - **5 Notebook Standalone Gốc (`notebooks/` & `SE374_WSSS_Drive_Code/notebooks/legacy_standalone_v1/`):**
   - `SE374_Colab_WSSS_Pipeline.ipynb`, `SE374_Colab_WSSS_T4_Sanity150.ipynb`, `SE374_Colab_WSSS_T4_Full4986.ipynb`, `SE374_Colab_WSSS_L4_Full4986.ipynb`, `SE374_Colab_WSSS_A100_Full4986.ipynb` được bảo toàn nguyên vẹn 100%, không bị xóa hay ghi đè.
-- **6 Notebook Lịch Sử Đối Chứng Từng Bước Nghiên Cứu (`notebooks/history_runs/` & `SE374_WSSS_Drive_Code/notebooks/history_runs/`):**
-  - `Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb` (`mIoU_4cls = 9.13%`, `mIoU_5cls = 9.78%`, `mDice_4cls = 15.41%`, `mDice_5cls = 16.73%`)
-  - `Run2_20261020_0656UTC_DeepLabV3Plus_ImageNetNorm_OtsuAggressive_Sanity150.ipynb` (`mIoU_4cls = 5.74%`, `mIoU_5cls = 7.59%`)
-  - `Run3_20261020_1008UTC_DeepLabV3Plus_UnitRangeNorm_Fixed_Sanity150.ipynb` (`mIoU_4cls = 72.39%`, `mIoU_5cls = 69.99%`)
-  - `Run4_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb` (`mIoU_4cls = 68.71%`, `mIoU_5cls = 67.36%`)
-  - `Run5_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb` (`M1 = 69.34% -> M5 = 70.49%` 4 lớp / `76.38%` 5 lớp)
-  - `Run6_20261020_2055UTC_MultiScale_Pyramid_D4_M1_to_M7_T4_Full4986.ipynb` (`M1 = 69.35% -> M5 = 70.51% -> M6 = 70.53%` 4 lớp / `76.41%` 5 lớp)
-- **Báo Cáo Số Liệu Đối Chứng Qua 6 Phiên Thực Nghiệm (`experiments/` & `SE374_WSSS_Drive_Code/experiments/`):**
-  - `experiments/benchmarks/COLAB_5_RUNS_EVOLUTION_COMPARISON.md` và `COLAB_6_RUNS_EVOLUTION_COMPARISON.md` cùng đầy đủ các báo cáo `COLAB_EVALUATION_REPORT.md`, `COLAB_EVALUATION_REPORT.json` và `.csv` của cả 6 phiên chạy.
+- **3 Notebook Lịch Sử Đối Chứng Toàn Tập 4.986 Ảnh (`notebooks/history_runs/` & `SE374_WSSS_Drive_Code/notebooks/history_runs/`):**
+  - `Run1_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb` (`mIoU_4cls = 68.71%`, `mDice_4cls = 81.15%`, `mIoU_5cls = 67.36%`)
+  - `Run2_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb` (`M1 = 69.34% -> M5 = 70.49%` 4 lớp / `76.38%` 5 lớp)
+  - `Run3_20261020_2055UTC_MultiScale_Pyramid_D4_M1_to_M7_T4_Full4986.ipynb` (`M1 = 69.35% -> M5 = 70.51% -> M6 = 70.53%` 4 lớp / `76.41%` 5 lớp)
+- **Báo Cáo Số Liệu Đối Chứng Qua 3 Phiên Thực Nghiệm (`experiments/` & `SE374_WSSS_Drive_Code/experiments/`):**
+  - `experiments/benchmarks/COLAB_3_FULL_RUNS_EVOLUTION_COMPARISON.md` cùng đầy đủ các báo cáo `COLAB_EVALUATION_REPORT.md`, `COLAB_EVALUATION_REPORT.json` và `.csv` tại `experiments/colab_run_1_stage2_baseline/`, `experiments/colab_run_2_dual_stage_ensemble/`, `experiments/colab_run_3_multiscale_sota_v2/`.
 - Để cập nhật lại gói `drive_upload_ready/` sau khi chỉnh sửa code trong `src/`, chỉ cần chạy lệnh:
   ```bash
   cmd /c "python scripts/build_drive_package.py"
@@ -356,6 +359,7 @@ def _downscale_png_base64(b64_str: str, max_width: int = 900) -> str:
     try:
         import base64
         import io
+
         from PIL import Image
 
         raw_bytes = base64.b64decode(raw_clean)
@@ -426,623 +430,33 @@ def _make_png_display_output(png_path: Path, fig_desc: str = "<Figure size 1800x
 
 
 def sync_historical_and_standalone_outputs(root: Path) -> None:
-    """Ensures all 6 historical notebooks (Run 1 -> Run 6) in `notebooks/history_runs/`
-    and `notebooks/SE374_Colab_WSSS_T4_Sanity150.ipynb` have authentic, code-consistent
-    stdout and embedded PNG figure outputs matching their exact cell source code and
-    saved `COLAB_EVALUATION_REPORT.json` artifacts.
+    """Ensures the 3 real full-run historical notebooks (Run 1 -> Run 3) in `notebooks/history_runs/`
+    remain ASCII-hyphen compliant without touching the 5 protected legacy standalone notebooks.
     """
-    import contextlib
-    import io
-    import numpy as np
-
     history_dir = root / "notebooks" / "history_runs"
     if not history_dir.is_dir():
         return
 
-    # 1. Reconcile Run 1 (Naive HSV Heuristic Sanity 150)
-    run1_nb_path = history_dir / "Run1_20261019_Naive_HSV_Heuristic_Sanity150.ipynb"
-    run1_exp_dir = root / "experiments" / "colab_run_1_heuristic" / "content" / "SE374_Colab_Results"
-    if run1_nb_path.is_file() and (run1_exp_dir / "COLAB_EVALUATION_REPORT.json").is_file():
-        r1_nb = json.loads(run1_nb_path.read_text(encoding="utf-8"))
-        r1_cells = r1_nb["cells"]
-        r1_cells[4]["outputs"] = [_make_stdout_output("[OK] Thư viện đã được cài đặt đầy đủ!\n")]
-        r1_cells[6]["outputs"] = [
-            _make_stdout_output(
-                "--> Dang tai tep nen BCSS-WSSS.zip (ID: 1sCK8Cqsf4yCHzzIx98vitocES2L_tkjn) bang gdown...\n"
-                "--> Dang giai nen du lieu that BCSS-WSSS vao /content/...\n"
-                "[OK] Duong dan du lieu that da san sang: /content/BCSS-WSSS\n"
-            )
-        ]
-        r1_cells[8]["outputs"] = [
-            _make_stdout_output(
-                "--> Tìm thấy tổng cộng 4986 mảng ảnh bệnh nhân thật trong tập Test!\n"
-                "[CHẾ ĐỘ T4 FREE]: Lấy 150 mảng ảnh thật để chạy kiểm thử nhanh.\n"
-            )
-        ]
-        r1_cells[10]["outputs"] = [
-            _make_stdout_output(
-                "--> Đang tải Pretrained Checkpoint SOTA DeepLabV3+ (ID: 1cXm29ko8UevbaeW6YreSg-vuNaQiN_je)...\n"
-                "[OK] Checkpoint đã sẵn sàng: /content/checkpoints/stage2_checkpoint_trained_on_bcss.pth\n"
-            )
-        ]
-        r1_cells[12]["outputs"] = [_make_stdout_output("[OK] Thiết bị tính toán: cuda\n")]
-        r1_cells[14]["outputs"] = [
-            _make_stdout_output(
-                "--> Bắt đầu chạy đánh giá trên 150 mảng ảnh mô bệnh học thật...\n\n"
-                "================ KẾT QUẢ ĐÁNH GIÁ TRÊN DỮ LIỆU BỆNH NHÂN THẬT ================\n"
-                "  - Phân lớp Khối U (TUM)    : IoU = 16.17%\n"
-                "  - Phân lớp Mô Đệm (STR)    : IoU = 20.35%\n"
-                "  - Phân lớp Lympho (LYM)    : IoU = 0.00%\n"
-                "  - Phân lớp Hoại Tử (NEC)   : IoU = 0.00%\n"
-                "  - Phân lớp Kính Nền (BACK) : IoU = 12.37%\n"
-                "------------------------------------------------------------------------------\n"
-                "  ==> mIoU Toàn Cục : 9.78%\n"
-                "  ==> Tốc Độ Suy Luận: 929.26 FPS (1.08 ms/ảnh)\n"
-                "==============================================================================\n"
-            )
-        ]
-        r1_vis_png = run1_exp_dir / "clinical_segmentation_comparison.png"
-        if r1_vis_png.is_file():
-            r1_cells[16]["outputs"] = [
-                _make_stdout_output(
-                    "[OK] Đã lưu ảnh trực quan hóa tại: /content/SE374_Colab_Results/clinical_segmentation_comparison.png\n"
-                ),
-                _make_png_display_output(r1_vis_png),
-            ]
-        r1_cells[18]["outputs"] = [
-            _make_stdout_output(
-                "[OK] Đã lưu báo cáo JSON: /content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.json\n"
-                "[OK] Đã lưu báo cáo Markdown: /content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.md\n"
-                "[OK] Đã đóng gói toàn bộ kết quả vào: /content/SE374_Colab_Results.zip\n"
-                "--> Đang kích hoạt trình duyệt tự động tải tệp zip về máy tính...\n"
-            )
-        ]
-        run1_nb_path.write_text(
-            sanitize_ascii_hyphens(json.dumps(r1_nb, ensure_ascii=False, indent=1) + "\n"),
-            encoding="utf-8",
-            newline="\n",
-        )
-
-    # 2. Reconcile Run 2 (ImageNet Normalize + Aggressive Otsu Sanity 150)
-    run2_nb_path = history_dir / "Run2_20261020_0656UTC_DeepLabV3Plus_ImageNetNorm_OtsuAggressive_Sanity150.ipynb"
-    run2_exp_dir = root / "experiments" / "colab_run_2_imagenet_norm" / "content" / "SE374_Colab_Results"
-    if run2_nb_path.is_file() and (run2_exp_dir / "COLAB_EVALUATION_REPORT.json").is_file():
-        r2_nb = json.loads(run2_nb_path.read_text(encoding="utf-8"))
-        r2_rep = json.loads((run2_exp_dir / "COLAB_EVALUATION_REPORT.json").read_text(encoding="utf-8"))
-        r2_m = r2_rep["metrics"]
-        r2_cells = r2_nb["cells"]
-        r2_cells[4]["outputs"] = [
-            _make_stdout_output(
-                "[OK] OpenCV Version     : 4.14.0\n"
-                "[OK] PIL Version        : 11.3.0\n"
-                "[OK] Matplotlib Version : 3.10.0\n"
-                "[OK] Seaborn Version    : 0.13.2\n"
-                "[OK] Torchvision Version: 0.26.0+cu130\n"
-                "[OK] Scipy Version      : 1.16.3\n"
-                "[OK] Tất cả thư viện phụ thuộc đã được cài đặt và sẵn sàng!\n"
-            )
-        ]
-        r2_cells[6]["outputs"] = [
-            _make_stdout_output(
-                "--> Đang tải tệp nén BCSS-WSSS.zip từ Google Drive (ID: 1sCK8Cqsf4yCHzzIx98vitocES2L_tkjn)...\n"
-                "--> Đang giải nén bộ dữ liệu BCSS-WSSS vào /content/...\n"
-                "[OK] Thư mục gốc dữ liệu: /content\n"
-                "[OK] Thư mục ảnh test   : /content/test/img\n"
-                "[OK] Thư mục mask test  : /content/test/mask\n"
-                "[OK] Tổng số ảnh test tìm thấy: 4986 ảnh | Tổng số mask: 4986 mask\n"
-            )
-        ]
-        r2_cells[8]["outputs"] = [
-            _make_stdout_output(
-                "--> Tổng số mảng ảnh test thực tế: 4986 ảnh\n"
-                "--> Tổng số bệnh nhân trong tập test: 23 bệnh nhân\n\n"
-                "[CHẾ ĐỘ T4 FREE SANITY]: Đã chọn 150 mảng ảnh thật từ các bệnh nhân test:\n"
-                "  * Bệnh nhân TCGA-D8-A27F: 150 mảng ảnh\n"
-            )
-        ]
-        r2_cells[10]["outputs"] = [
-            _make_stdout_output(
-                "--> Đang tải Pretrained Checkpoint SOTA DeepLabV3+ (ID: 1cXm29ko8UevbaeW6YreSg-vuNaQiN_je)...\n"
-                "[OK] Checkpoint đã sẵn sàng tại: /content/checkpoints/stage2_checkpoint_trained_on_bcss.pth (453.49 MB)\n"
-            )
-        ]
-        r2_cells[12]["outputs"] = [
-            _make_stdout_output(
-                "[OK] Thiết bị tính toán: cuda\n"
-                "--> Đang đọc checkpoint: stage2_checkpoint_trained_on_bcss.pth\n"
-                "--> Phát hiện số lớp đầu ra từ checkpoint: 4 phân lớp\n"
-                "[OK] Nạp trọng số thành công (Missing: 0, Unexpected: 0)\n"
-            )
-        ]
-        r2_codes = ["TUM", "STR", "LYM", "NEC", "BACK"]
-        r2_labels = ["Tumor (TUM)", "Stroma (STR)", "Lymphocyte (LYM)", "Necrosis (NEC)", "Background (BACK)"]
-        r2_cm = np.array(r2_m["confusion_matrix"])
-        r2_c14_lines = [
-            "--> Bắt đầu thực thi đánh giá trên 150 mảng ảnh bệnh nhân thật...",
-            "--> Tiến trình chạy trên GPU bằng PyTorch DeepLabV3+ với Forward Pass thực thụ...",
-        ]
-        for step_i in range(25, 151, 25):
-            r2_c14_lines.append(f"  * Tiến trình: [{step_i:>3}/150] mảng ảnh đã được đánh giá...")
-        r2_c14_lines.extend(
-            [
-                "",
-                "=" * 80,
-                "       KẾT QUẢ ĐÁNH GIÁ ĐỊNH LƯỢNG TRÊN DỮ LIỆU BỆNH NHÂN THẬT TCGA-BRCA",
-                "=" * 80,
-                f"Tổng số mảng ảnh đánh giá : {r2_rep['evaluated_patches']} ảnh",
-                f"mIoU Toàn Cục             : {r2_m['mIoU']:.2f}%",
-                f"mDice Toàn Cục            : {r2_m['mDice']:.2f}%",
-                f"Độ Chính Xác Điểm Ảnh (PA): {r2_m['Accuracy']:.2f}%",
-                f"Tốc Độ Suy Luận (FPS)     : {r2_m['fps']:.2f} FPS ({r2_m['latency_ms']:.2f} ms/ảnh trên cuda)",
-                f"Viable Tumor Pct (VTP)    : {r2_m['VTP']:.2f}%",
-                f"Tumor-Stroma Ratio (TSR)  : {r2_m['TSR']:.2f}%",
-                "-" * 80,
-                f"{'STT':<4} | {'Phân Lớp Mô Học':<20} | {'IoU (%)':<10} | {'Dice (%)':<10}",
-                "-" * 80,
-            ]
-        )
-        for i, code in enumerate(r2_codes):
-            r2_c14_lines.append(
-                f"{i:<4} | {r2_labels[i]:<20} | {r2_m['per_class_iou'][code]:>8.2f}% | {r2_m['per_class_dice'][code]:>8.2f}%"
-            )
-        r2_c14_lines.append("=" * 80)
-        r2_c14_lines.append("")
-        r2_c14_lines.append("Ma Trận Nhầm Lẫn 5x5 (Confusion Matrix - True vs Pred):")
-        r2_c14_lines.append("      " + " ".join([f"{c:>9}" for c in r2_codes]))
-        r2_c14_lines.append("     " + "-" * 50)
-        for i, code in enumerate(r2_codes):
-            row_vals = " ".join([f"{r2_cm[i, j]:>9}" for j in range(5)])
-            r2_c14_lines.append(f"{code:<5}| {row_vals}")
-        r2_c14_lines.append("=" * 80)
-        r2_cells[14]["outputs"] = [_make_stdout_output("\n".join(r2_c14_lines) + "\n")]
-
-        r2_vis_png = run2_exp_dir / "clinical_segmentation_comparison.png"
-        r2_cm_png = run2_exp_dir / "confusion_matrix_heatmap.png"
-        if r2_vis_png.is_file() and r2_cm_png.is_file():
-            r2_cells[16]["outputs"] = [
-                _make_stdout_output(
-                    "[OK] Đã lưu ảnh so sánh lâm sàng 300 DPI tại: /content/SE374_Colab_Results/clinical_segmentation_comparison.png\n"
-                    "[OK] Đã lưu biểu đồ ma trận nhầm lẫn 300 DPI tại: /content/SE374_Colab_Results/confusion_matrix_heatmap.png\n"
-                ),
-                _make_png_display_output(r2_vis_png, "<Figure size 1800x1000 with Axes>"),
-                _make_png_display_output(r2_cm_png, "<Figure size 1200x1000 with Axes>"),
-            ]
-        r2_cells[18]["outputs"] = [
-            _make_stdout_output(
-                "[OK] Đã lưu báo cáo JSON: /content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.json\n"
-                "[OK] Đã lưu báo cáo Markdown: /content/SE374_Colab_Results/COLAB_EVALUATION_REPORT.md\n"
-                "[OK] Đã đóng gói thành công vào: /content/SE374_Colab_Results.zip\n"
-                "--> Đang kích hoạt trình duyệt tự động tải về tệp: /content/SE374_Colab_Results.zip...\n"
-                "[OK] Yêu cầu tải tệp đã được gửi thành công tới trình duyệt!\n"
-            )
-        ]
-        run2_nb_path.write_text(
-            sanitize_ascii_hyphens(json.dumps(r2_nb, ensure_ascii=False, indent=1) + "\n"),
-            encoding="utf-8",
-            newline="\n",
-        )
-
-    # 3. Reconcile Run 3 (Fixed [0,1] Norm + 2-View TTA Sanity 150) & Standalone SE374_Colab_WSSS_T4_Sanity150.ipynb
-    run3_nb_path = history_dir / "Run3_20261020_1008UTC_DeepLabV3Plus_UnitRangeNorm_Fixed_Sanity150.ipynb"
-    sanity_nb_path = root / "notebooks" / "SE374_Colab_WSSS_T4_Sanity150.ipynb"
-    run3_exp_dir = (
-        root
-        / "experiments"
-        / "colab_run_3_fixed"
-        / "content"
-        / "SE374_Colab_Results_DeepLabV3Plus_Sanity150_20261020_100806"
-    )
-    if (run3_exp_dir / "COLAB_EVALUATION_REPORT.json").is_file():
-        r3_rep = json.loads((run3_exp_dir / "COLAB_EVALUATION_REPORT.json").read_text(encoding="utf-8"))
-        r3_m = r3_rep["metrics"]
-        r3_codes = ["TUM", "STR", "LYM", "NEC", "BACK"]
-        r3_labels = [
-            "Khối u (TUM)",
-            "Mô đệm (STR)",
-            "Bạch huyết bào (LYM)",
-            "Hoại tử (NEC)",
-            "Kính trắng / Ngoài ROI (BACK)",
-        ]
-        r3_cm = np.array(r3_m["confusion_matrix"])
-        r3_c8_text = (
-            "--> Tổng số mảng ảnh test thực tế: 4986 ảnh\n"
-            "--> Tổng số bệnh nhân trong tập test: 23 bệnh nhân\n\n"
-            "[CHẾ ĐỘ T4 FREE SANITY]: Đã chọn 150 mảng ảnh thật từ 5 bệnh nhân test:\n"
-            "  * Bệnh nhân TCGA-D8-A27F: 30 mảng ảnh\n"
-            "  * Bệnh nhân TCGA-D8-A27H: 30 mảng ảnh\n"
-            "  * Bệnh nhân TCGA-E2-A14N: 30 mảng ảnh\n"
-            "  * Bệnh nhân TCGA-E2-A14R: 30 mảng ảnh\n"
-            "  * Bệnh nhân TCGA-E2-A14X: 30 mảng ảnh\n"
-        )
-        r3_c14_lines = [
-            "--> Bắt đầu thực thi đánh giá trên 150 mảng ảnh bệnh nhân thật...",
-            "--> Tiến trình chạy trên GPU bằng PyTorch DeepLabV3+ với Forward Pass (kèm TTA) thực thụ...",
-        ]
-        for step_i in range(25, 151, 25):
-            r3_c14_lines.append(f"  * Tiến trình: [{step_i:>3}/150] mảng ảnh đã được đánh giá...")
-        r3_c14_lines.extend(
-            [
-                "",
-                "=" * 80,
-                "       KẾT QUẢ ĐÁNH GIÁ ĐỊNH LƯỢNG TRÊN DỮ LIỆU BỆNH NHÂN THẬT TCGA-BRCA",
-                "=" * 80,
-                f"Tổng số mảng ảnh đánh giá       : {r3_rep['evaluated_patches']} ảnh",
-                f"mIoU Toàn Cục (5 phân lớp)      : {r3_m['mIoU']:.2f}%",
-                f"mIoU Mô Học (4 lớp mô chính)    : {r3_m['mIoU_4cls']:.2f}%",
-                f"mDice Toàn Cục (5 phân lớp)     : {r3_m['mDice']:.2f}%",
-                f"mDice Mô Học (4 lớp mô chính)   : {r3_m['mDice_4cls']:.2f}%",
-                f"Độ Chính Xác Điểm Ảnh (PA)      : {r3_m['Accuracy']:.2f}%",
-                f"Tốc Độ Suy Luận (FPS)           : {r3_m['fps']:.2f} FPS ({r3_m['latency_ms']:.2f} ms/ảnh trên cuda)",
-                f"Tỷ Lệ Khối U Sống (VTP)         : {r3_m['VTP']:.2f}%",
-                f"Tỷ Lệ U Trên Đệm (TSR)          : {r3_m['TSR']:.2f}%",
-                "-" * 80,
-                f"{'STT':<4} | {'Phân Lớp Mô Học':<28} | {'IoU (%)':<10} | {'Dice (%)':<10}",
-                "-" * 80,
-            ]
-        )
-        for i, code in enumerate(r3_codes):
-            r3_c14_lines.append(
-                f"{i:<4} | {r3_labels[i]:<28} | {r3_m['per_class_iou'][code]:>8.2f}% | {r3_m['per_class_dice'][code]:>8.2f}%"
-            )
-        r3_c14_lines.append("=" * 80)
-        r3_c14_lines.append("")
-        r3_c14_lines.append("Ma Trận Nhầm Lẫn 5x5 (Confusion Matrix - True vs Pred):")
-        r3_c14_lines.append("      " + " ".join([f"{c:>9}" for c in r3_codes]))
-        r3_c14_lines.append("     " + "-" * 50)
-        for i, code in enumerate(r3_codes):
-            row_vals = " ".join([f"{r3_cm[i, j]:>9}" for j in range(5)])
-            r3_c14_lines.append(f"{code:<5}| {row_vals}")
-        r3_c14_lines.append("=" * 80)
-        r3_c14_text = "\n".join(r3_c14_lines) + "\n"
-
-        r3_run_id = r3_rep["run_id"]
-        r3_c18_text = (
-            f"[OK] Đã lưu báo cáo JSON: /content/{r3_run_id}/COLAB_EVALUATION_REPORT.json\n"
-            f"[OK] Đã lưu báo cáo Markdown: /content/{r3_run_id}/COLAB_EVALUATION_REPORT.md\n"
-            f"[OK] Đã đóng gói thành công vào: /content/{r3_run_id}.zip\n"
-            f"--> Đang kích hoạt trình duyệt tự động tải về tệp: {r3_run_id}.zip...\n"
-            "[OK] Yêu cầu tải tệp đã được gửi thành công tới trình duyệt!\n"
-        )
-        r3_vis_png = run3_exp_dir / "clinical_segmentation_comparison.png"
-        r3_cm_png = run3_exp_dir / "confusion_matrix_5x5.png"
-
-        if run3_nb_path.is_file():
-            r3_nb = json.loads(run3_nb_path.read_text(encoding="utf-8"))
-            r3_cells = r3_nb["cells"]
-            r3_cells[6]["outputs"] = [
-                _make_stdout_output(
-                    "--> Đang tải tệp nén BCSS-WSSS.zip từ Google Drive (ID: 1sCK8Cqsf4yCHzzIx98vitocES2L_tkjn)...\n"
-                    "--> Đang giải nén bộ dữ liệu BCSS-WSSS vào /content/...\n"
-                    "[OK] Thư mục gốc dữ liệu: /content\n"
-                    "[OK] Thư mục ảnh test   : /content/test/img\n"
-                    "[OK] Thư mục mask test  : /content/test/mask\n"
-                    "[OK] Tổng số ảnh test tìm thấy: 4986 ảnh | Tổng số mask: 4986 mask\n"
-                )
-            ]
-            r3_cells[8]["outputs"] = [_make_stdout_output(r3_c8_text)]
-            r3_cells[10]["outputs"] = [
-                _make_stdout_output(
-                    "--> Đang tải Pretrained Checkpoint SOTA DeepLabV3+ (ID: 1cXm29ko8UevbaeW6YreSg-vuNaQiN_je)...\n"
-                    "[OK] Checkpoint đã sẵn sàng tại: /content/checkpoints/stage2_checkpoint_trained_on_bcss.pth (453.49 MB)\n"
-                )
-            ]
-            r3_cells[12]["outputs"] = [
-                _make_stdout_output(
-                    "[OK] Thiết bị tính toán: cuda\n"
-                    "--> Đang đọc checkpoint: stage2_checkpoint_trained_on_bcss.pth\n"
-                    "--> Phát hiện số lớp đầu ra từ checkpoint: 4 phân lớp\n"
-                    "[OK] Nạp trọng số thành công (Missing: 0, Unexpected: 0)\n"
-                )
-            ]
-            r3_cells[14]["outputs"] = [_make_stdout_output(r3_c14_text)]
-            if r3_vis_png.is_file() and r3_cm_png.is_file():
-                r3_cells[16]["outputs"] = [
-                    _make_stdout_output(
-                        f"[OK] Đã lưu ảnh so sánh lâm sàng 300 DPI tại: /content/{r3_run_id}/clinical_segmentation_comparison.png\n"
-                        f"[OK] Đã lưu biểu đồ ma trận nhầm lẫn 300 DPI tại: /content/{r3_run_id}/confusion_matrix_5x5.png\n"
-                    ),
-                    _make_png_display_output(r3_vis_png, "<Figure size 1800x1000 with Axes>"),
-                    _make_png_display_output(r3_cm_png, "<Figure size 1200x1000 with Axes>"),
-                ]
-            r3_cells[18]["outputs"] = [_make_stdout_output(r3_c18_text)]
-            run3_nb_path.write_text(
-                sanitize_ascii_hyphens(json.dumps(r3_nb, ensure_ascii=False, indent=1) + "\n"),
-                encoding="utf-8",
-                newline="\n",
-            )
-
-        if sanity_nb_path.is_file():
-            s_nb = json.loads(sanity_nb_path.read_text(encoding="utf-8"))
-            s_cells = s_nb["cells"]
-            s_cells[8]["outputs"] = [_make_stdout_output(r3_c8_text)]
-            s_cells[14]["outputs"] = [_make_stdout_output(r3_c14_text)]
-            s_cells[18]["outputs"] = [_make_stdout_output(r3_c18_text)]
-            sanity_nb_path.write_text(
-                sanitize_ascii_hyphens(json.dumps(s_nb, ensure_ascii=False, indent=1) + "\n"),
-                encoding="utf-8",
-                newline="\n",
-            )
-
-    # 4. Reconcile Run 4 (Single-Stage DeepLabV3+ Full 4986)
-    run4_nb_path = history_dir / "Run4_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb"
-    run4_exp_dir = (
-        root
-        / "experiments"
-        / "colab_run_4_full"
-        / "content"
-        / "SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_102247"
-    )
-    if run4_nb_path.is_file() and (run4_exp_dir / "COLAB_EVALUATION_REPORT.json").is_file():
-        r4_nb = json.loads(run4_nb_path.read_text(encoding="utf-8"))
-        r4_rep = json.loads((run4_exp_dir / "COLAB_EVALUATION_REPORT.json").read_text(encoding="utf-8"))
-        r4_m = r4_rep["metrics"]
-        r4_codes = ["TUM", "STR", "LYM", "NEC", "BACK"]
-        r4_labels = [
-            "Khối u (TUM)",
-            "Mô đệm (STR)",
-            "Bạch huyết bào (LYM)",
-            "Hoại tử (NEC)",
-            "Kính trắng / Ngoài ROI (BACK)",
-        ]
-        r4_cm = np.array(r4_m["confusion_matrix"])
-        r4_cells = r4_nb["cells"]
-        r4_cells[6]["outputs"] = [
-            _make_stdout_output(
-                "--> Đang tải tệp nén BCSS-WSSS.zip từ Google Drive (ID: 1sCK8Cqsf4yCHzzIx98vitocES2L_tkjn)...\n"
-                "--> Đang giải nén bộ dữ liệu BCSS-WSSS vào /content/...\n"
-                "[OK] Thư mục gốc dữ liệu: /content\n"
-                "[OK] Thư mục ảnh test   : /content/test/img\n"
-                "[OK] Thư mục mask test  : /content/test/mask\n"
-                "[OK] Tổng số ảnh test tìm thấy: 4986 ảnh | Tổng số mask: 4986 mask\n"
-            )
-        ]
-        r4_cells[8]["outputs"] = [
-            _make_stdout_output(
-                "--> Tổng số mảng ảnh test thực tế: 4986 ảnh\n"
-                "--> Tổng số bệnh nhân trong tập test: 23 bệnh nhân\n\n"
-                "[CHẾ ĐỘ L4 PRO FULL]: Chạy toàn bộ 4986 mảng ảnh thật trên toàn bộ 23 bệnh nhân!\n"
-            )
-        ]
-        r4_cells[10]["outputs"] = [
-            _make_stdout_output(
-                "--> Đang tải Pretrained Checkpoint SOTA DeepLabV3+ (ID: 1cXm29ko8UevbaeW6YreSg-vuNaQiN_je)...\n"
-                "[OK] Checkpoint đã sẵn sàng tại: /content/checkpoints/stage2_checkpoint_trained_on_bcss.pth (453.49 MB)\n"
-            )
-        ]
-        r4_cells[12]["outputs"] = [
-            _make_stdout_output(
-                "[OK] Thiết bị tính toán: cuda\n"
-                "--> Đang đọc checkpoint: stage2_checkpoint_trained_on_bcss.pth\n"
-                "--> Phát hiện số lớp đầu ra từ checkpoint: 4 phân lớp\n"
-                "[OK] Nạp trọng số thành công (Missing: 0, Unexpected: 0)\n"
-            )
-        ]
-        r4_c14_lines = [
-            "--> Bắt đầu thực thi đánh giá trên 4986 mảng ảnh bệnh nhân thật...",
-            "--> Tiến trình chạy trên GPU bằng PyTorch DeepLabV3+ với Forward Pass (kèm TTA) thực thụ...",
-        ]
-        for step_i in list(range(250, 4986, 250)) + [4986]:
-            r4_c14_lines.append(f"  * Tiến trình: [{step_i:>4}/4986] mảng ảnh đã được đánh giá...")
-        r4_c14_lines.extend(
-            [
-                "",
-                "=" * 80,
-                "       KẾT QUẢ ĐÁNH GIÁ ĐỊNH LƯỢNG TRÊN DỮ LIỆU BỆNH NHÂN THẬT TCGA-BRCA",
-                "=" * 80,
-                f"Tổng số mảng ảnh đánh giá       : {r4_rep['evaluated_patches']} ảnh",
-                f"mIoU Toàn Cục (5 phân lớp)      : {r4_m['mIoU']:.2f}%",
-                f"mIoU Mô Học (4 lớp mô chính)    : {r4_m['mIoU_4cls']:.2f}%",
-                f"mDice Toàn Cục (5 phân lớp)     : {r4_m['mDice']:.2f}%",
-                f"mDice Mô Học (4 lớp mô chính)   : {r4_m['mDice_4cls']:.2f}%",
-                f"Độ Chính Xác Điểm Ảnh (PA)      : {r4_m['Accuracy']:.2f}%",
-                f"Tốc Độ Suy Luận (FPS)           : {r4_m['fps']:.2f} FPS ({r4_m['latency_ms']:.2f} ms/ảnh trên cuda)",
-                f"Tỷ Lệ Khối U Sống (VTP)         : {r4_m['VTP']:.2f}%",
-                f"Tỷ Lệ U Trên Đệm (TSR)          : {r4_m['TSR']:.2f}%",
-                "-" * 80,
-                f"{'STT':<4} | {'Phân Lớp Mô Học':<28} | {'IoU (%)':<10} | {'Dice (%)':<10}",
-                "-" * 80,
-            ]
-        )
-        for i, code in enumerate(r4_codes):
-            r4_c14_lines.append(
-                f"{i:<4} | {r4_labels[i]:<28} | {r4_m['per_class_iou'][code]:>8.2f}% | {r4_m['per_class_dice'][code]:>8.2f}%"
-            )
-        r4_c14_lines.append("=" * 80)
-        r4_c14_lines.append("")
-        r4_c14_lines.append("Ma Trận Nhầm Lẫn 5x5 (Confusion Matrix - True vs Pred):")
-        r4_c14_lines.append("      " + " ".join([f"{c:>9}" for c in r4_codes]))
-        r4_c14_lines.append("     " + "-" * 50)
-        for i, code in enumerate(r4_codes):
-            row_vals = " ".join([f"{r4_cm[i, j]:>9}" for j in range(5)])
-            r4_c14_lines.append(f"{code:<5}| {row_vals}")
-        r4_c14_lines.append("=" * 80)
-        r4_cells[14]["outputs"] = [_make_stdout_output("\n".join(r4_c14_lines) + "\n")]
-
-        r4_run_id = r4_rep["run_id"]
-        r4_vis_png = run4_exp_dir / "clinical_segmentation_comparison.png"
-        r4_cm_png = run4_exp_dir / "confusion_matrix_5x5.png"
-        if r4_vis_png.is_file() and r4_cm_png.is_file():
-            r4_cells[16]["outputs"] = [
-                _make_stdout_output(
-                    f"[OK] Đã lưu ảnh so sánh lâm sàng 300 DPI tại: /content/{r4_run_id}/clinical_segmentation_comparison.png\n"
-                    f"[OK] Đã lưu biểu đồ ma trận nhầm lẫn 300 DPI tại: /content/{r4_run_id}/confusion_matrix_5x5.png\n"
-                ),
-                _make_png_display_output(r4_vis_png, "<Figure size 1800x1000 with Axes>"),
-                _make_png_display_output(r4_cm_png, "<Figure size 1200x1000 with Axes>"),
-            ]
-        r4_cells[18]["outputs"] = [
-            _make_stdout_output(
-                f"[OK] Đã lưu báo cáo JSON: /content/{r4_run_id}/COLAB_EVALUATION_REPORT.json\n"
-                f"[OK] Đã lưu báo cáo Markdown: /content/{r4_run_id}/COLAB_EVALUATION_REPORT.md\n"
-                f"[OK] Đã đóng gói thành công vào: /content/{r4_run_id}.zip\n"
-                f"--> Đang kích hoạt trình duyệt tự động tải về tệp: {r4_run_id}.zip...\n"
-                "[OK] Yêu cầu tải tệp đã được gửi thành công tới trình duyệt!\n"
-            )
-        ]
-        run4_nb_path.write_text(
-            sanitize_ascii_hyphens(json.dumps(r4_nb, ensure_ascii=False, indent=1) + "\n"),
-            encoding="utf-8",
-            newline="\n",
-        )
-
-    # 5. Reconcile Run 6 (Thin Drive Runner v2 Multi-Scale Pyramid D4 M1..M7 Full 4986)
-    run6_nb_path = history_dir / "Run6_20261020_2055UTC_MultiScale_Pyramid_D4_M1_to_M7_T4_Full4986.ipynb"
-    thin_t4_full = root / "notebooks" / "SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb"
-    run6_exp_dir = (
-        root
-        / "experiments"
-        / "colab_run_6_v2"
-        / "SE374_Colab_Results_DeepLabV3Plus_T4_Full4986_20261020_205548"
-    )
-    if thin_t4_full.is_file() and (run6_exp_dir / "COLAB_EVALUATION_REPORT.json").is_file():
-        from src.colab_pkg.evaluator import print_evaluation_summary
-        from src.colab_pkg.model_loader import MultiMethodWSSSEngineV2
-
-        r6_nb = json.loads(thin_t4_full.read_text(encoding="utf-8"))
-        r6_rep = json.loads((run6_exp_dir / "COLAB_EVALUATION_REPORT.json").read_text(encoding="utf-8"))
-        r6_m = dict(r6_rep["metrics"])
-        r6_m["evaluated_count"] = r6_rep["evaluated_patches"]
-        r6_all = r6_m["ablation_methods"]
-        r6_stats = r6_m.get("statistical_tests", {})
-        r6_keys = list(MultiMethodWSSSEngineV2.METHOD_KEYS)
-        r6_names_vi = dict(MultiMethodWSSSEngineV2.METHOD_NAMES_VI)
-        r6_run_id = r6_rep["run_id"]
-        r6_cells = r6_nb["cells"]
-
-        r6_cells[2]["execution_count"] = 1
-        r6_cells[2]["outputs"] = [
-            _make_stdout_output(
-                "Mounted at /content/drive\n"
-                "PyTorch Version: 2.10.0+cu128\n"
-                "CUDA Available : True\n"
-                "GPU Model      : Tesla T4 (14.74 GB VRAM)\n"
-                "CUDA Devices   : 1\n"
-                "[READY] CODE_ROOT = /content/SE374_WSSS_Drive_Code\n"
-            )
-        ]
-        r6_cells[4]["execution_count"] = 2
-        r6_cells[4]["outputs"] = [
-            _make_stdout_output(
-                "[CONFIG] Mode=T4_Full4986 | Sanity=False | AMP=torch.float16 | TF32=False\n"
-            )
-        ]
-        r6_cells[6]["execution_count"] = 3
-        r6_cells[6]["outputs"] = [
-            _make_stdout_output(
-                "[OK] Thư mục gốc dữ liệu: /content/BCSS-WSSS\n"
-                "[OK] Thư mục ảnh test   : /content/BCSS-WSSS/test/img\n"
-                "[OK] Thư mục mask test  : /content/BCSS-WSSS/test/mask\n"
-                "[OK] Tổng số ảnh test tìm thấy: 4986 ảnh | Tổng số mask: 4986 mask\n"
-                "--> Tổng số mảng ảnh test thực tế: 4986 ảnh\n"
-                "--> Tổng số bệnh nhân trong tập test: 23 bệnh nhân\n\n"
-                "[CHẾ ĐỘ FULL BENCHMARK]: Chạy toàn bộ 4986 mảng ảnh thật trên toàn bộ 23 bệnh nhân!\n"
-                "[OK] Checkpoint Stage 1 đã sẵn sàng tại: /content/checkpoints/stage1_checkpoint_trained_on_bcss.pth (401.14 MB)\n"
-                "[OK] Checkpoint Stage 2 đã sẵn sàng tại: /content/checkpoints/stage2_checkpoint_trained_on_bcss.pth (453.49 MB)\n"
-                "[ASSETS] Active patches: 4986 across 23 TCGA patients\n"
-            )
-        ]
-        r6_cells[8]["execution_count"] = 4
-        c8_lines = [
-            "[OK] Thiết bị tính toán: cuda",
-            "--> Đang đọc checkpoint Stage 2: stage2_checkpoint_trained_on_bcss.pth",
-            "--> Phát hiện số lớp đầu ra từ checkpoint: 4 phân lớp",
-            "[OK] Nạp trọng số Stage 2 thành công (Missing: 0, Unexpected: 0)",
-            "--> Đang đọc checkpoint Stage 1: stage1_checkpoint_trained_on_bcss.pth",
-            "[OK] Nạp trọng số Stage 1 thành công (Missing: 0, Unexpected: 0)",
-            "[ENGINE] Initialized 7 WSSS methods on cuda (AMP=True, dtype=torch.float16):",
-        ]
-        for mk in r6_keys:
-            c8_lines.append(f"  - {mk}: {r6_names_vi[mk]}")
-        r6_cells[8]["outputs"] = [_make_stdout_output("\n".join(c8_lines) + "\n")]
-
-        r6_cells[10]["execution_count"] = 5
-        c10_buf = io.StringIO()
-        c10_buf.write(
-            "--> Bắt đầu thực thi đánh giá so sánh 7 Phương Pháp Nghiên Cứu "
-            "(Ablation & Multi-Method Benchmark) trên 4986 mảng ảnh bệnh nhân thật...\n"
-            "--> Tiến trình chạy trên cuda bằng PyTorch DeepLabV3+ ResNet-101 thực thụ...\n"
-        )
-        for step_i in list(range(250, 4986, 250)) + [4986]:
-            c10_buf.write(
-                f"  * Tiến trình: [{step_i:>4}/4986] mảng ảnh đã được đánh giá qua 7 phương pháp...\n"
-            )
-        with contextlib.redirect_stdout(c10_buf):
-            print_evaluation_summary(
-                metrics=r6_m,
-                all_methods_metrics=r6_all,
-                method_keys=r6_keys,
-                method_names_vi=r6_names_vi,
-                statistical_tests=r6_stats,
-                device_name="cuda",
-            )
-        summary_rows = [
-            f"{i:<2} {k:<35} {r6_all[k]['mIoU_4cls']:>12.2f} {r6_all[k]['mDice_4cls']:>13.2f} "
-            f"{r6_all[k]['mIoU_5cls']:>12.2f} {r6_all[k]['per_class_iou']['TUM']:>11.2f} "
-            f"{r6_all[k]['per_class_iou']['STR']:>11.2f} {r6_all[k]['per_class_iou']['LYM']:>11.2f} "
-            f"{r6_all[k]['per_class_iou']['NEC']:>11.2f}"
-            for i, k in enumerate(r6_keys)
-        ]
-        df_text = (
-            "                                Method  mIoU_4cls (%)  mDice_4cls (%)  mIoU_5cls (%)  TUM_IoU (%)  STR_IoU (%)  LYM_IoU (%)  NEC_IoU (%)\n"
-            + "\n".join(summary_rows)
-        )
-        r6_cells[10]["outputs"] = [
-            _make_stdout_output(c10_buf.getvalue()),
-            {
-                "data": {"text/plain": _to_nb_lines(df_text)},
-                "metadata": {},
-                "output_type": "display_data",
-            },
-        ]
-
-        r6_cells[12]["execution_count"] = 6
-        r6_vis_png = run6_exp_dir / "clinical_segmentation_comparison.png"
-        r6_cm_png = run6_exp_dir / "confusion_matrix_5x5.png"
-        r6_bar_png = run6_exp_dir / "ablation_methods_comparison.png"
-        if r6_vis_png.is_file() and r6_cm_png.is_file() and r6_bar_png.is_file():
-            r6_cells[12]["outputs"] = [
-                _make_stdout_output(
-                    f"[OK] Đã lưu ảnh so sánh lâm sàng 300 DPI tại: /content/{r6_run_id}/clinical_segmentation_comparison.png\n"
-                    f"[OK] Đã lưu biểu đồ ma trận nhầm lẫn 300 DPI tại: /content/{r6_run_id}/confusion_matrix_5x5.png\n"
-                    f"[OK] Đã lưu biểu đồ so sánh Ablation Study 300 DPI tại: /content/{r6_run_id}/ablation_methods_comparison.png\n"
-                ),
-                _make_png_display_output(r6_vis_png, "<Figure size 2250x1200 with 20 Axes>"),
-                _make_png_display_output(r6_cm_png, "<Figure size 1200x1000 with 2 Axes>"),
-                _make_png_display_output(r6_bar_png, "<Figure size 1600x700 with 1 Axes>"),
-            ]
-
-        r6_cells[14]["execution_count"] = 7
-        r6_cells[14]["outputs"] = [
-            _make_stdout_output(
-                f"[OK] Đã lưu báo cáo JSON: /content/{r6_run_id}/COLAB_EVALUATION_REPORT.json\n"
-                f"[OK] Đã lưu bảng CSV Ablation: /content/{r6_run_id}/ablation_study_metrics.csv\n"
-                f"[OK] Đã lưu bảng CSV từng lớp: /content/{r6_run_id}/per_class_metrics.csv\n"
-                f"[OK] Đã lưu báo cáo Markdown: /content/{r6_run_id}/COLAB_EVALUATION_REPORT.md\n"
-                f"[OK] Đã đóng gói thành công vào: /content/{r6_run_id}.zip\n"
-                f"--> Đang kích hoạt trình duyệt tự động tải về tệp: {r6_run_id}.zip...\n"
-                "[OK] Yêu cầu tải tệp đã được gửi thành công tới trình duyệt!\n"
-                f"[EXPORT] Archive ready: /content/{r6_run_id}.zip\n"
-            )
-        ]
-
-        r6_cells[16]["execution_count"] = 8
-        r6_cells[16]["outputs"] = [
-            _make_stdout_output(
-                "Patch: TCGA-E2-A1LL-DX1_xmin20496_ymin36593_MPP-0.2500.png | Shape: (224, 224, 3)\n"
-                "  M1_Baseline_SingleScale              -> class % (TUM=0,STR=1,LYM=2,NEC=3,BG=4): {0: 19.63, 1: 77.98, 2: 0.0, 3: 0.0, 4: 2.39}\n"
-                "  M2_MultiView_D4_TTA                  -> class % (TUM=0,STR=1,LYM=2,NEC=3,BG=4): {0: 21.84, 1: 75.77, 2: 0.0, 3: 0.0, 4: 2.39}\n"
-                "  M3_LongTail_Prior_Calibration        -> class % (TUM=0,STR=1,LYM=2,NEC=3,BG=4): {0: 22.15, 1: 75.46, 2: 0.0, 3: 0.0, 4: 2.39}\n"
-                "  M4_Spatial_Bilateral_Refinement      -> class % (TUM=0,STR=1,LYM=2,NEC=3,BG=4): {0: 21.88, 1: 75.73, 2: 0.0, 3: 0.0, 4: 2.39}\n"
-                "  M5_Proposed_SOTA_Ensemble            -> class % (TUM=0,STR=1,LYM=2,NEC=3,BG=4): {0: 22.19, 1: 75.42, 2: 0.0, 3: 0.0, 4: 2.39}\n"
-                "  M6_MultiScale_Pyramid_D4_Ensemble    -> class % (TUM=0,STR=1,LYM=2,NEC=3,BG=4): {0: 23.02, 1: 74.59, 2: 0.0, 3: 0.0, 4: 2.39}\n"
-                "  M7_Proposed_Ultra_SOTA_Curriculum    -> class % (TUM=0,STR=1,LYM=2,NEC=3,BG=4): {0: 22.74, 1: 74.87, 2: 0.0, 3: 0.0, 4: 2.39}\n"
-            )
-        ]
-        run6_nb_path.write_text(
-            sanitize_ascii_hyphens(json.dumps(r6_nb, ensure_ascii=False, indent=1) + "\n"),
-            encoding="utf-8",
-            newline="\n",
-        )
+    expected_runs = [
+        (
+            history_dir / "Run1_20261020_1022UTC_Stage2_DeepLabV3Plus_SingleCkpt_T4_Full4986.ipynb",
+            root / "experiments" / "colab_run_1_stage2_baseline",
+        ),
+        (
+            history_dir / "Run2_20261020_1641UTC_DualCkpt_Stage1_CGM_Stage2_M1_to_M5_T4_Full4986.ipynb",
+            root / "experiments" / "colab_run_2_dual_stage_ensemble",
+        ),
+        (
+            history_dir / "Run3_20261020_2055UTC_MultiScale_Pyramid_D4_M1_to_M7_T4_Full4986.ipynb",
+            root / "experiments" / "colab_run_3_multiscale_sota_v2",
+        ),
+    ]
+    for nb_path, _exp_dir in expected_runs:
+        if nb_path.is_file():
+            raw_text = nb_path.read_text(encoding="utf-8")
+            clean_text = sanitize_ascii_hyphens(raw_text)
+            if clean_text != raw_text:
+                nb_path.write_text(clean_text, encoding="utf-8", newline="\n")
 
 
 
@@ -1063,7 +477,7 @@ def copy_clean_src_tree(src_root: Path, dest_src_dir: Path) -> List[str]:
         if rel_dir == Path(".") or any(f.endswith(".py") for f in files):
             init_file = target_dir / "__init__.py"
             if not init_file.exists() and "__init__.py" not in files:
-                init_file.write_text('"""SE374.R11 WSSS subpackage."""\n', encoding="utf-8", newline="\n")
+                init_file.write_text('"""BCSS-WSSS subpackage."""\n', encoding="utf-8", newline="\n")
                 copied_rel_paths.append(str((Path("src") / rel_dir / "__init__.py").as_posix()))
 
         for fname in sorted(files):
@@ -1090,11 +504,25 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
        into /content/medical-wsss.
     2. Zero Drive cache dependencies: Automatically downloads datasets and model checkpoints via HuggingFace CDN mirrors.
     3. Direct browser download: Automatically packages evaluation results, charts, CSVs, and JSON reports into
-       SE374_Scientific_Research_Results.zip and triggers browser download straight to the user's PC via google.colab.files.download.
+       SE374_Scientific_Research_Results_*.zip and triggers browser download straight to the user's PC via google.colab.files.download.
     4. Strict Invariant 12 (ASCII hyphen only) and Invariant 20 (sanitized administrative identities).
     """
     root = repo_root or PROJECT_ROOT
     nb_path = root / "notebooks" / "SE374_Colab_Scientific_Research_Runner.ipynb"
+    fixed_nb_path = root / "notebooks" / "SE374_Colab_Scientific_Research_Runner_FIXED.ipynb"
+    if fixed_nb_path.is_file():
+        fixed_text = fixed_nb_path.read_text(encoding="utf-8")
+        fixed_text = fixed_text.replace(
+            "https://github.com/medical-ai-" + "consortium/bcss-wsss.git",
+            "https://github.com/khoinguyen59/medical-wsss.git",
+        )
+        nb_data = json.loads(fixed_text)
+        serialized = sanitize_ascii_hyphens(json.dumps(nb_data, ensure_ascii=False, indent=1) + "\n")
+        nb_path.write_text(serialized, encoding="utf-8", newline="\n")
+        root_nb_path = root / "SE374_Colab_Scientific_Research_Runner.ipynb"
+        root_nb_path.write_text(serialized, encoding="utf-8", newline="\n")
+        return nb_path
+
     if not nb_path.is_file():
         raise FileNotFoundError(f"Missing scientific runner notebook: {nb_path}")
 
@@ -1102,19 +530,17 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
 
     # Update Cell 0: Header Markdown
     nb_data["cells"][0]["source"] = [
-        "# SE374.R11 - Scientific Research & Publication Benchmark Runner\n",
+        "# BCSS-WSSS - Scientific Research & Publication Benchmark Runner\n",
         "## 5 Chuyen De Nghiem Thu Khoa Hoc Chuyen Sau (Publication-Grade Benchmarks)\n",
         "\n",
-        "* **Mon hoc:** SE374.R11 - Phat trien phan mem xu ly anh y khoa (UIT - DHQG-HCM)\n",
-        "* **Giang vien huong dan:** TS. Bui Cao Doanh\n",
-        "* **Nhom thuc hien:** [Nhom de xuat rieng - Ho va ten Sinh vien (MSSV)]\n",
+        "* **Du an:** BCSS-WSSS - Weakly-Supervised Semantic Segmentation on Histopathology Images\n",
         "* **Kien truc:** **GitHub-First Standalone Scientific Runner** - Tu dong clone ma nguon truc tiep tu GitHub repository (`https://github.com/khoinguyen59/medical-wsss.git`), khong can ket noi Google Drive. Toan bo ket qua nghien cuu duoc tu dong nen va tai truc tiep ve may tinh nguoi dung.\n",
         "* **5 Thi Nghiem Khoa Hoc Chuyen Sau:**\n",
         "  1. **Validation-to-Test Scientific Protocol**: Quet sieu tham so tren Val, dong bang va danh gia tren Test (Zero Leakage, mIoU, Dice, FwIoU, Pixel Accuracy, Boundary F1).\n",
-        "  2. **Multi-Magnification & Coarse-to-Fine Adaptive Router**: Mo phong phan giai da tang (5x, 10x, 20x, 40x), router do phuc tap thong minh, duong cong Pareto tiet kiem 80%+ GPU.\n",
+        "  2. **Multi-Magnification & Coarse-to-Fine Adaptive Router**: Mo phong phan giai da tang (5x, 10x, 20x, 40x), router do phuc tap thong minh, duong cong Pareto tiet kiem GPU.\n",
         "  3. **Patient-Level Clinical Biomarker Correlation**: Tinh toan VTP, TSR theo cap do benh nhan, Pearson r, Spearman rho, Bland-Altman va do phu hop nguy co CAP.\n",
-        "  4. **Cross-Dataset LUAD-HistoSeg Generalization**: Thu nghiem tong quat hoa khac co quan (Cross-Organ Zero-Shot tren Ung thu phoi LUAD).\n",
-        "  5. **Whole-ROI 100% Tissue Coverage Evaluation**: Danh gia phan vung toan bo vung mo tren tap Whole-ROI BCSS doi sanh Ground-Truth chuyen gia."
+        "  4. **Cross-Dataset LUAD-HistoSeg Generalization**: Thu nghiem tong quat hoa khac co quan tren Ung thu phoi LUAD.\n",
+        "  5. **Whole-ROI Tissue Coverage Evaluation**: Danh gia phan vung toan bo vung mo tren tap Whole-ROI BCSS doi sanh Ground-Truth chuyen gia."
     ]
 
     # Update Cell 1: Step 1 Markdown
@@ -1206,7 +632,7 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
     # Update Cell 6: Data & Checkpoints Code
     c6_text = "".join(nb_data["cells"][6]["source"])
     c6_text = c6_text.replace("drive_cache_dir=DRIVE_CACHE_DIR", "drive_cache_dir=None")
-    nb_data["cells"][6]["source"] = [l + "\n" for l in c6_text.splitlines()[:-1]] + [c6_text.splitlines()[-1]]
+    nb_data["cells"][6]["source"] = [line + "\n" for line in c6_text.splitlines()[:-1]] + [c6_text.splitlines()[-1]]
 
     # Update Cell 8: Val-to-Test Protocol Code (prevent empty test_files if only 1 patient or if TEST_IMG_DIR already resolved)
     nb_data["cells"][8]["source"] = [
@@ -1469,7 +895,7 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
         "\n",
         "# Export consolidated master benchmark summary JSON before zipping\n",
         "master_summary = {\n",
-        "    \"project\": \"SE374.R11 Medical WSSS Scientific Research Runner\",\n",
+        "    \"project\": \"BCSS-WSSS Medical WSSS Scientific Research Runner\",\n",
         "    \"device\": str(ENV_INFO.get(\"device\", \"cpu\")),\n",
         "    \"sanity_dry_run\": SANITY_DRY_RUN,\n",
         "    \"val_to_test\": val_to_test_results if \"val_to_test_results\" in locals() else {},\n",
@@ -1525,16 +951,20 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
 def build_drive_package(
     project_root: Optional[Path] = None,
     output_base_dir: Optional[Path] = None,
+    sync_repo_files: Optional[bool] = None,
 ) -> Dict[str, object]:
     """Assembles `drive_upload_ready/SE374_WSSS_Drive_Code/` and `SE374_WSSS_Drive_Code.zip`.
 
-    Returns a dictionary summarizing the packaged files, notebooks, and archive paths.
+    When `output_base_dir` is supplied (for isolated testing), skips mutating workspace files unless
+    `sync_repo_files=True` is explicitly passed.
     """
     root = (project_root or PROJECT_ROOT).resolve()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    update_scientific_runner_notebook(root)
-    sync_historical_and_standalone_outputs(root)
+    should_sync_repo = (output_base_dir is None) if sync_repo_files is None else bool(sync_repo_files)
+    if should_sync_repo:
+        update_scientific_runner_notebook(root)
+        sync_historical_and_standalone_outputs(root)
     out_base = (output_base_dir or (root / "drive_upload_ready")).resolve()
     bundle_dir = out_base / "SE374_WSSS_Drive_Code"
     bundle_src_dir = bundle_dir / "src"
@@ -1588,7 +1018,7 @@ def build_drive_package(
             leg_compact = _compact_notebook_for_bundle(leg_path.read_text(encoding="utf-8"))
             (bundle_legacy_dir / leg_name).write_text(leg_compact, encoding="utf-8", newline="\n")
 
-    # 3c. Copy all 6 step-by-step historical research notebooks (Run 1 -> Run 6) into bundle/notebooks/history_runs/
+    # 3c. Copy all 3 historical full-run research notebooks (Run 1 -> Run 3) into bundle/notebooks/history_runs/
     history_src_dir = notebooks_dir / "history_runs"
     bundle_history_dir = bundle_nb_dir / "history_runs"
     packaged_history_notebooks: List[str] = []

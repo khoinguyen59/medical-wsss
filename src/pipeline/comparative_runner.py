@@ -1,5 +1,5 @@
 """
-Comparative Benchmarking Runner for SE374.R11 Medical AI.
+Comparative Benchmarking Runner for BCSS-WSSS Medical AI.
 Executes rigorous, multi-seed comparative experiments across the 4 benchmark configurations:
 1. Configuration 1: Vanilla CAM Baseline
 2. Configuration 2: Data-Centric (+ ClassMix)
@@ -19,9 +19,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
+
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 
 # Add project root to sys.path for standalone execution
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -31,7 +31,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.datasets.bcss_dataset import BCSSDataset
 from src.losses_metrics.metrics import MedicalSegmentationMetrics
 from src.models.wsss_tissue import WSSSBenchmarkingEngine
-
 
 DEFAULT_SEEDS: List[int] = [42, 100, 2024, 2025, 2026]
 CONFIGURATIONS: List[str] = ["baseline", "classmix", "relocalization", "proposed"]
@@ -179,7 +178,7 @@ def run_comparative_benchmark(
     # Format Markdown Report
     md_file = os.path.join(output_dir, "BENCHMARK_REPORT.md")
     with open(md_file, "w", encoding="utf-8") as f:
-        f.write("# SE374.R11 Comparative Benchmarking Results\n\n")
+        f.write("# BCSS-WSSS Comparative Benchmarking Results\n\n")
         f.write(f"- Multi-Seed Runs: {seeds}\n")
         f.write(f"- Samples per Run: {dry_run_samples}\n\n")
         f.write("| Configuration | mIoU (%) | mDice (%) | TUM IoU (%) | STR IoU (%) | LYM IoU (%) | NEC IoU (%) | BACK IoU (%) | FPS |\n")
@@ -205,7 +204,7 @@ def run_comparative_benchmark(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="SE374.R11 Comparative Benchmarking Runner")
+    parser = argparse.ArgumentParser(description="BCSS-WSSS Comparative Benchmarking Runner")
     parser.add_argument(
         "--data-root",
         type=str,
@@ -217,6 +216,25 @@ if __name__ == "__main__":
         type=str,
         default="experiments/benchmarks",
         help="Output directory for benchmark logs",
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default=None,
+        help="Dataset split ('test' or 'valid'; auto-falls back to 'valid' for data/sample_dataset if test/ is absent)",
+    )
+    parser.add_argument(
+        "--seeds",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Random seeds for multi-seed reproducibility (default: 42 100 2024 2025 2026)",
+    )
+    parser.add_argument(
+        "--configurations",
+        nargs="+",
+        default=None,
+        help="Benchmark configurations to evaluate (default: baseline classmix relocalization proposed)",
     )
     parser.add_argument(
         "--dry-run-samples",
@@ -232,9 +250,20 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    resolved_split = args.split
+    if resolved_split is None:
+        data_root_p = Path(args.data_root)
+        if data_root_p.name == "sample_dataset" and not (data_root_p / "test").is_dir():
+            resolved_split = "valid"
+        else:
+            resolved_split = "test"
+
     run_comparative_benchmark(
         data_root=args.data_root,
         output_dir=args.output_dir,
+        split=resolved_split,
+        seeds=args.seeds,
+        configurations=args.configurations,
         dry_run_samples=args.dry_run_samples,
         device=args.device,
     )

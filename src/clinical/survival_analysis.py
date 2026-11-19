@@ -6,7 +6,8 @@ Provides:
    - Tumor-Stroma Ratio (TSR = Area_TUM / (Area_TUM + Area_STR) * 100%)
    - Stroma Proportion (Area_STR / (Area_TUM + Area_STR) * 100% = 100% - TSR)
    - Viable Tumor Percentage (VTP = Area_TUM / Area_Total_Tissue * 100%)
-2. CAP (College of American Pathologists) Risk Stratification:
+2. TSR Risk Stratification (Mesker et al. 2007 / van Pelt et al. 2018 UNITED, 50% stroma cut-off;
+   function/key names retain the legacy 'cap' prefix for backward compatibility):
    - Stroma-Rich High Risk (TSR <= 50.0% / Stroma Proportion > 50.0%)
    - Stroma-Poor Low Risk (TSR > 50.0% / Stroma Proportion <= 50.0%)
 3. Grounded Clinical Metadata for 23 BCSS-WSSS test patients from TCGA-BRCA cohort.
@@ -18,20 +19,18 @@ Provides:
 Strict Invariant 12 compliance: 100% standard keyboard ASCII hyphens '-' (0x2D) only.
 """
 
-from collections import defaultdict
 import json
 import math
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy import stats
 import torch
-
+from scipy import stats
 
 # ==============================================================================
 # 1. Grounded TCGA-BRCA 23 Test Patients Clinical Manifest
@@ -433,6 +432,119 @@ def compute_viable_tumor_percentage(
     return float((tum / tissue) * 100.0)
 
 
+def compute_vtp_rcb(
+    mask_or_tum: Union[np.ndarray, torch.Tensor, int, float],
+    necrosis_pixels: Optional[Union[int, float]] = None,
+    tumor_class_idx: int = 0,
+    necrosis_class_idx: int = 3,
+) -> float:
+    """Computes Residual Cancer Burden (RCB) Viable Tumor Percentage in [0.0, 100.0].
+
+    Formula (Symmans et al., JCO 2007 / Dossier Section 6.7):
+        VTP_RCB = Area_TUM / (Area_TUM + Area_NEC) * 100%
+
+    Parameters
+    ----------
+    mask_or_tum : Union[np.ndarray, torch.Tensor, int, float]
+        Either a 2D/3D integer segmentation mask or scalar count of tumor pixels.
+    necrosis_pixels : Optional[Union[int, float]]
+        Scalar count of necrosis pixels if mask_or_tum is a scalar.
+    tumor_class_idx : int
+        Class index for viable tumor (default: 0).
+    necrosis_class_idx : int
+        Class index for tumor necrosis (default: 3).
+
+    Returns
+    -------
+    float
+        VTP_RCB percentage value in [0.0, 100.0]. Returns 0.0 if tumor + necrosis is zero.
+    """
+    if necrosis_pixels is not None:
+        tum = float(mask_or_tum)
+        nec = float(necrosis_pixels)
+    else:
+        if isinstance(mask_or_tum, torch.Tensor):
+            mask_arr = mask_or_tum.detach().cpu().numpy()
+        else:
+            mask_arr = np.asarray(mask_or_tum)
+        tum = float(np.sum(mask_arr == tumor_class_idx))
+        nec = float(np.sum(mask_arr == necrosis_class_idx))
+
+    total = tum + nec
+    if total <= 0.0:
+        return 0.0
+    return float((tum / total) * 100.0)
+
+
+def compute_hotspot_tumor_stroma_ratio(
+    mask_or_patches: Union[np.ndarray, torch.Tensor, Sequence[Union[np.ndarray, torch.Tensor]]],
+    window_size: int = 64,
+    stride: int = 32,
+    min_tumor_fraction: float = 0.05,
+    tumor_class_idx: int = 0,
+    stroma_class_idx: int = 1,
+) -> Dict[str, Any]:
+    """Computes Invasive-Front Hotspot TSR per UNITED Consortium (van Pelt et al. 2018 / Mesker et al. 2007).
+
+    In clinical histopathology, TSR is scored at the most stroma-rich invasive tumor field
+    (where neoplastic epithelial cells are present and desmoplastic stroma is maximal),
+    corresponding to the minimum TSR (maximum stroma proportion) across valid tumor-bearing fields.
+    """
+    fields: List[np.ndarray] = []
+    if isinstance(mask_or_patches, (np.ndarray, torch.Tensor)):
+        arr = (
+            mask_or_patches.detach().cpu().numpy()
+            if isinstance(mask_or_patches, torch.Tensor)
+            else np.asarray(mask_or_patches)
+        )
+        if arr.ndim == 2:
+            h, w = arr.shape
+            if h <= window_size and w <= window_size:
+                fields.append(arr)
+            else:
+                win_h = min(window_size, h)
+                win_w = min(window_size, w)
+                st_h = max(1, min(stride, win_h))
+                st_w = max(1, min(stride, win_w))
+                for y in range(0, max(1, h - win_h + 1), st_h):
+                    for x in range(0, max(1, w - win_w + 1), st_w):
+                        fields.append(arr[y : y + win_h, x : x + win_w])
+        elif arr.ndim == 3:
+            for idx in range(arr.shape[0]):
+                fields.append(arr[idx])
+    else:
+        for item in mask_or_patches:
+            arr_i = item.detach().cpu().numpy() if isinstance(item, torch.Tensor) else np.asarray(item)
+            fields.append(arr_i)
+
+    tot_tum = 0
+    tot_str = 0
+    candidate_tsrs: List[float] = []
+
+    for f in fields:
+        if f.size == 0:
+            continue
+        n_tum = int(np.sum(f == tumor_class_idx))
+        n_str = int(np.sum(f == stroma_class_idx))
+        tot_tum += n_tum
+        tot_str += n_str
+        tum_frac = float(n_tum) / float(f.size)
+        if tum_frac >= min_tumor_fraction and (n_tum + n_str) > 0:
+            field_tsr = float(n_tum) / float(n_tum + n_str) * 100.0
+            candidate_tsrs.append(field_tsr)
+
+    global_tsr = compute_tumor_stroma_ratio(tot_tum, tot_str)
+    hotspot_tsr = float(min(candidate_tsrs)) if candidate_tsrs else global_tsr
+    hotspot_stroma_prop = max(0.0, 100.0 - hotspot_tsr) if (tot_tum + tot_str) > 0 else 0.0
+
+    return {
+        "hotspot_tsr": hotspot_tsr,
+        "hotspot_stroma_proportion": hotspot_stroma_prop,
+        "global_tsr": global_tsr,
+        "evaluated_fields": len(candidate_tsrs),
+    }
+
+
 def compute_patient_biomarkers(
     patch_masks: Sequence[Union[np.ndarray, torch.Tensor]],
     tumor_class_idx: int = 0,
@@ -459,7 +571,7 @@ def compute_patient_biomarkers(
     -------
     Dict[str, float]
         Dictionary with aggregated tumor_pixels, stroma_pixels, tissue_pixels,
-        tsr, stroma_proportion, and vtp.
+        tsr, stroma_proportion, hotspot_tsr, hotspot_stroma_proportion, and vtp.
     """
     tot_tum = 0
     tot_str = 0
@@ -477,6 +589,11 @@ def compute_patient_biomarkers(
     tsr = compute_tumor_stroma_ratio(tot_tum, tot_str)
     stroma_prop = compute_stroma_proportion(tot_tum, tot_str)
     vtp = compute_viable_tumor_percentage(tot_tum, tot_tissue)
+    hotspot_info = compute_hotspot_tumor_stroma_ratio(
+        patch_masks,
+        tumor_class_idx=tumor_class_idx,
+        stroma_class_idx=stroma_class_idx,
+    )
 
     return {
         "tumor_pixels": float(tot_tum),
@@ -484,12 +601,15 @@ def compute_patient_biomarkers(
         "total_tissue_pixels": float(tot_tissue),
         "tsr": tsr,
         "stroma_proportion": stroma_prop,
+        "hotspot_tsr": float(hotspot_info["hotspot_tsr"]),
+        "hotspot_stroma_proportion": float(hotspot_info["hotspot_stroma_proportion"]),
         "vtp": vtp,
     }
 
 
 # ==============================================================================
-# 3. CAP (College of American Pathologists) Risk Stratification
+# 3. TSR Risk Stratification (Mesker et al. 2007 / van Pelt et al. 2018 UNITED, 50% cut-off)
+# (legacy 'cap' naming kept for API compatibility; not a College of American Pathologists guideline)
 # ==============================================================================
 
 def stratify_cap_risk(
@@ -497,7 +617,9 @@ def stratify_cap_risk(
     stroma_proportion: Optional[float] = None,
     threshold: float = 50.0,
 ) -> Dict[str, Any]:
-    """Stratifies breast carcinoma patients according to CAP / International TSR consensus.
+    """Stratifies breast carcinoma patients by TSR (Mesker et al. 2007 / van Pelt et al. 2018 UNITED, 50% stroma cut-off).
+
+    Name retains legacy 'cap' prefix for backward compatibility; attribution is NOT to CAP.
 
     Clinical Guideline (van Pelt et al., Mesker et al.):
     - Stroma-Rich (High Risk): TSR <= 50.0% (Stroma Proportion > 50.0%).
@@ -531,7 +653,7 @@ def stratify_cap_risk(
             "threshold": float(threshold),
             "is_stroma_rich": False,
             "clinical_assessment": "Unmeasurable tumor-stroma ratio due to absence of diagnostic tumor and stroma tissue in specimen.",
-            "guideline_authority": "College of American Pathologists (CAP) / International TSR Guidelines",
+            "guideline_authority": "Mesker et al. 2007 / van Pelt et al. 2018 (UNITED), 50% stroma cut-off",
         }
 
     if stroma_proportion is None:
@@ -567,12 +689,12 @@ def stratify_cap_risk(
         "threshold": float(threshold),
         "is_stroma_rich": bool(is_stroma_rich),
         "clinical_assessment": description,
-        "guideline_authority": "College of American Pathologists (CAP) / International TSR Guidelines",
+        "guideline_authority": "Mesker et al. 2007 / van Pelt et al. 2018 (UNITED), 50% stroma cut-off",
     }
 
 
 def stratify_cap_risk_category(tsr: float, threshold: float = 50.0) -> str:
-    """Convenience function returning the formatted CAP risk string."""
+    """Convenience function returning the formatted TSR risk string (legacy 'cap' name)."""
     info = stratify_cap_risk(tsr, threshold=threshold)
     return f"{info['risk_group']} ({info['risk_level']})"
 
@@ -986,7 +1108,7 @@ class KaplanMeierSurvivalAnalysis:
                 p_text = "Log-rank p < 0.001"
             else:
                 p_text = f"Log-rank p = {p_val:.4f}"
-            anno_text = f"{p_text}\nChi-sq = {chi2_val:.2f} (df=1)\nCAP Criteria: TSR <= 50%"
+            anno_text = f"{p_text}\nChi-sq = {chi2_val:.2f} (df=1)\nTSR Criteria (50% cut-off) <= 50%"
             ax.text(
                 0.04,
                 0.15,

@@ -34,6 +34,16 @@ from src.training.generate_pseudo_masks import (
     generate_pseudo_masks_pipeline,
     save_palette_mask,
 )
+from src.training.train_proposed_sam import (
+    CompositeWSSSLoss,
+    SyntheticHistologyDataset,
+)
+from src.training.train_proposed_sam import (
+    evaluate as evaluate_proposed_sam,
+)
+from src.training.train_proposed_sam import (
+    train_one_epoch as train_proposed_sam_epoch,
+)
 from src.training.train_stage1 import (
     AsymmetricLoss,
     AttentionModule,
@@ -45,12 +55,6 @@ from src.training.train_stage2 import (
     Stage2Trainer,
     build_stage2_optimizer_and_scheduler,
     train_stage2_pipeline,
-)
-from src.training.train_proposed_sam import (
-    CompositeWSSSLoss,
-    SyntheticHistologyDataset,
-    evaluate as evaluate_proposed_sam,
-    train_one_epoch as train_proposed_sam_epoch,
 )
 
 __all__ = [

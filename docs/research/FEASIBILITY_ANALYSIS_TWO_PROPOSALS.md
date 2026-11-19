@@ -1,5 +1,7 @@
 # Phân Tích Độ Khả Thi Toàn Diện: Đối Chiếu Hai Bản Mini Proposal SE374.R11
 
+> **Ghi chú Định hướng Đề tài:** Hệ thống đã lựa chọn lộ trình thực dụng khả thi cao, tập trung toàn diện vào **bộ dữ liệu chuẩn BCSS-WSSS** (kết hợp kiểm chứng chéo **LUAD-HistoSeg**). Các tập dữ liệu WSI thô quy mô hàng trăm GB ngoài phạm vi (như toàn bộ Camelyon16 thô) được tinh giản để bảo đảm 100% tái lập thực nghiệm trên tài nguyên điện toán hiện có.  
+
 Tài liệu đối chiếu và đánh giá khả thi kỹ thuật giữa hai bản đề cương:
 - **Bản 1:** `SE374_MINI_PROPOSAL_WSSS_WSI` (Bản Toàn Diện / SOTA Mở Rộng - Digital Pathology Workstation)
 - **Bản 2:** `SE374_MINI_PROPOSAL_WSSS_TISSUE` (Bản Vừa Sức / Thực Dụng - WSSS-Tissue MLPS & CGM)

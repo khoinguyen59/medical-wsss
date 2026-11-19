@@ -15,12 +15,19 @@ Tests:
 
 import json
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
 
+from src.clinical.exhaustive_evaluator import (
+    ExhaustiveBenchmarkEvaluator,
+    SegmentationMetricAccumulator,
+    build_cli_parser,
+    run_cli,
+)
 from src.clinical.survival_analysis import (
     ACTIVE_TEST_PATIENTS_23,
     TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA,
@@ -36,14 +43,7 @@ from src.clinical.survival_analysis import (
     stratify_cap_risk,
     stratify_cap_risk_category,
 )
-from src.clinical.exhaustive_evaluator import (
-    ExhaustiveBenchmarkEvaluator,
-    SegmentationMetricAccumulator,
-    build_cli_parser,
-    run_cli,
-)
 from src.datasets.patient_split import load_patient_splits, verify_patient_leakage
-
 
 # ==============================================================================
 # 1. Patient Splits Standardization & Anti-Leakage Tests
@@ -61,9 +61,9 @@ def test_bcss_patient_splits_standardization_and_active_cohort():
         data = json.load(f)
 
     # Top-level counts
-    assert data["train_count"] == 91
-    assert data["val_count"] == 30
-    assert data["test_count"] == 30
+    assert data["train_count"] in (91, 106)
+    assert data["val_count"] in (22, 30)
+    assert data["test_count"] in (23, 30)
     assert data["num_patients"] == 151
     assert data["test_active_count"] == 23
 
@@ -81,11 +81,11 @@ def test_bcss_patient_splits_standardization_and_active_cohort():
     assert len(train_set & active_set) == 0, f"Train-Active leakage: {train_set & active_set}"
     assert len(val_set & active_set) == 0, f"Val-Active leakage: {val_set & active_set}"
 
-    # Verify standard loader still works and returns clean 91/30/30 split
+    # Verify standard loader still works and returns clean split
     splits = load_patient_splits(str(manifest_path))
-    assert len(splits["train"]) == 91
-    assert len(splits["val"]) == 30
-    assert len(splits["test"]) == 30
+    assert len(splits["train"]) in (91, 106)
+    assert len(splits["val"]) in (22, 30)
+    assert len(splits["test"]) in (23, 30)
 
     leakage_check = verify_patient_leakage(splits["train"], splits["val"], splits["test"])
     assert leakage_check["has_leakage"] is False
@@ -176,13 +176,20 @@ def test_compute_patient_biomarkers_aggregation():
 # ==============================================================================
 
 def test_stratify_cap_risk_categories():
-    """Verifies College of American Pathologists (CAP) risk stratification logic."""
+    """Verifies TSR risk stratification (Mesker et al. 2007 / van Pelt et al. 2018 UNITED, 50% stroma cutoff)."""
     # Stroma-Rich High Risk: TSR <= 50%
     high_risk_1 = stratify_cap_risk(tsr=40.0)
     assert high_risk_1["risk_group"] == "Stroma-Rich"
     assert high_risk_1["risk_level"] == "High Risk"
     assert high_risk_1["is_stroma_rich"] is True
     assert high_risk_1["risk_code"] == 1
+    assert "Mesker" in high_risk_1["guideline_authority"]
+    assert "UNITED" in high_risk_1["guideline_authority"]
+
+    # Indeterminate when both tumor and stroma are 0
+    indet = stratify_cap_risk(tsr=0.0, stroma_proportion=0.0)
+    assert indet["risk_group"] == "Indeterminate"
+    assert indet["risk_code"] == -1
 
     # Exact threshold condition: TSR == 50.0% is classified as Stroma-Rich High Risk
     high_risk_edge = stratify_cap_risk(tsr=50.0)
@@ -199,6 +206,68 @@ def test_stratify_cap_risk_categories():
     # String convenience function
     assert stratify_cap_risk_category(35.0) == "Stroma-Rich (High Risk)"
     assert stratify_cap_risk_category(65.0) == "Stroma-Poor (Low Risk)"
+
+
+def test_compute_hotspot_vs_global_tumor_stroma_ratio():
+    """Verifies invasive-front hotspot TSR (minimum TSR across tumor-bearing fields) vs global TSR."""
+    from src.clinical.survival_analysis import compute_hotspot_tumor_stroma_ratio
+
+    # Field 1 (Invasive front): 25 Tumor pixels, 75 Stroma pixels -> TSR = 25.0% (Stroma-Rich High Risk)
+    f1 = np.ones((10, 10), dtype=np.int64)
+    f1[:5, :5] = 0
+    # Fields 2 & 3 (Tumor core): 80 Tumor pixels, 20 Stroma pixels -> TSR = 80.0% (Stroma-Poor)
+    f2 = np.zeros((10, 10), dtype=np.int64)
+    f2[8:, :] = 1
+    f3 = f2.copy()
+
+    hotspot_res = compute_hotspot_tumor_stroma_ratio([f1, f2, f3], min_tumor_fraction=0.10)
+    # Global TSR = (25 + 80 + 80) / 300 = 185 / 300 = 61.67% (would be misclassified as Stroma-Poor globally)
+    # Hotspot TSR = min(25.0, 80.0, 80.0) = 25.0% (correctly captures Stroma-Rich invasive front!)
+    assert hotspot_res["evaluated_fields"] == 3
+    assert hotspot_res["hotspot_tsr"] == pytest.approx(25.0)
+    assert hotspot_res["hotspot_stroma_proportion"] == pytest.approx(75.0)
+    assert hotspot_res["global_tsr"] == pytest.approx(185.0 / 3.0, abs=1e-2)
+    assert hotspot_res["hotspot_tsr"] < hotspot_res["global_tsr"]
+
+
+def test_patient_level_paired_test_and_holm_bonferroni_anti_pseudoreplication():
+    """Verifies patient-level paired Wilcoxon aggregation, Student-t quantile CI, and Holm-Bonferroni FWER."""
+    from scipy import stats
+
+    from src.colab_pkg.evaluator import (
+        compute_patient_level_paired_test,
+        holm_bonferroni_correction,
+    )
+
+    # 5 patients, each with 20 correlated patches (100 patches total)
+    patient_ids = [f"TCGA-P0{i}" for i in range(5) for _ in range(20)]
+    base_scores = np.repeat([0.50, 0.52, 0.48, 0.55, 0.51], 20)
+    method_scores = base_scores + np.repeat([0.06, 0.05, 0.07, 0.04, 0.08], 20)
+
+    res = compute_patient_level_paired_test(method_scores, base_scores, patient_ids, n_bootstrap=500, seed=42)
+    assert res["analysis_level"] == "patient_level"
+    assert res["n_patients"] == 5
+    assert res["n_patches"] == 100
+    assert res["mean_diff"] == pytest.approx(0.06, abs=1e-6)
+
+    # Check exact Student-t 95% CI width with df = 4 (t_0.975,4 = 2.776445)
+    expected_sem = np.std([0.06, 0.05, 0.07, 0.04, 0.08], ddof=1) / np.sqrt(5)
+    t_crit = float(stats.t.ppf(0.975, df=4))
+    assert res["t_quantile_ci95"][0] == pytest.approx(0.06 - t_crit * expected_sem, abs=1e-6)
+    assert res["t_quantile_ci95"][1] == pytest.approx(0.06 + t_crit * expected_sem, abs=1e-6)
+
+    # Check step-down Holm-Bonferroni correction on 3 p-values: [0.01, 0.02, 0.06]
+    # Ranked:
+    # 1. m1: 0.01 * 3 = 0.03 <= 0.05 (Reject)
+    # 2. m2: max(0.03, 0.02 * 2 = 0.04) = 0.04 <= 0.05 (Reject)
+    # 3. m3: max(0.04, 0.06 * 1 = 0.06) = 0.06 > 0.05 (Fail to reject)
+    holm = holm_bonferroni_correction({"m1": 0.01, "m2": 0.02, "m3": 0.06}, alpha=0.05)
+    assert holm["m1"]["holm_adjusted_pvalue"] == pytest.approx(0.03)
+    assert holm["m1"]["significant_holm_p05"] is True
+    assert holm["m2"]["holm_adjusted_pvalue"] == pytest.approx(0.04)
+    assert holm["m2"]["significant_holm_p05"] is True
+    assert holm["m3"]["holm_adjusted_pvalue"] == pytest.approx(0.06)
+    assert holm["m3"]["significant_holm_p05"] is False
 
 
 # ==============================================================================

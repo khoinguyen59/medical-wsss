@@ -11,6 +11,12 @@ Provides:
 Strict Invariant 12 compliance: 100% standard keyboard ASCII hyphens '-' (0x2D) only.
 """
 
+from src.clinical.exhaustive_evaluator import (
+    ExhaustiveBenchmarkEvaluator,
+    SegmentationMetricAccumulator,
+    build_cli_parser,
+    run_cli,
+)
 from src.clinical.survival_analysis import (
     ACTIVE_TEST_PATIENTS_23,
     TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA,
@@ -19,19 +25,13 @@ from src.clinical.survival_analysis import (
     compute_stroma_proportion,
     compute_tumor_stroma_ratio,
     compute_viable_tumor_percentage,
+    compute_vtp_rcb,
     export_survival_summary_json,
     get_all_test_survival_data,
     get_patient_survival_data,
     load_active_test_patients,
     stratify_cap_risk,
     stratify_cap_risk_category,
-)
-
-from src.clinical.exhaustive_evaluator import (
-    ExhaustiveBenchmarkEvaluator,
-    SegmentationMetricAccumulator,
-    build_cli_parser,
-    run_cli,
 )
 
 __all__ = [
@@ -42,6 +42,7 @@ __all__ = [
     "compute_stroma_proportion",
     "compute_tumor_stroma_ratio",
     "compute_viable_tumor_percentage",
+    "compute_vtp_rcb",
     "export_survival_summary_json",
     "get_all_test_survival_data",
     "get_patient_survival_data",

@@ -1,7 +1,7 @@
 """
 MedSAM WSSS Adapter Architecture for Weakly-Supervised Histopathology Segmentation.
 
-Course: SE374.R11 - Medical Image Processing Software Development
+BCSS-WSSS Histopathology Semantic Segmentation Engine
 Grounding:
 - S2C (CVPR 2024): Automated CAM-to-prompt generation
 - SAM2PATH / MedSAM (Nature Communications 2024): Foundation model adaptation
@@ -13,9 +13,7 @@ Strict Invariant 12 compliance: 100% ASCII 0x2D hyphens only.
 
 import os
 import sys
-import copy
-import math
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 # Safeguard against OpenMP library collision on Windows
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -674,6 +672,7 @@ class SurrogatePromptEncoder(nn.Module):
     def forward(
         self,
         points: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        boxes: Optional[torch.Tensor] = None,
         masks: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Args:
@@ -683,24 +682,27 @@ class SurrogatePromptEncoder(nn.Module):
             dense_embeddings: Optional dense mask embeddings.
         """
         if points is None:
-            return torch.empty((1, 0, self.embed_dim)), None
+            dev = self.coord_proj.weight.device
+            return torch.empty((1, 0, self.embed_dim), device=dev), None
 
         coords, labels = points
         b, n, _ = coords.shape
 
         # Positional coordinate projection
         coord_emb = self.coord_proj(coords)
+        if b == 0 or n == 0:
+            return coord_emb, None
 
-        # Label embeddings: label 1 is pos, label 0 is neg, label -1 is pad
+        # Label embeddings: 0..3 map to point_embeddings[0..3], 4 maps to point_embeddings[3], -1 maps to not_a_point_embed
         label_weights = []
         for i in range(b):
             sample_lbl_emb = []
             for j in range(n):
-                lbl = labels[i, j].item()
-                if lbl == 1:
-                    sample_lbl_emb.append(self.point_embeddings[1].weight[0])
-                elif lbl == 0:
-                    sample_lbl_emb.append(self.point_embeddings[0].weight[0])
+                lbl = int(labels[i, j].item())
+                if lbl in (0, 1, 2, 3):
+                    sample_lbl_emb.append(self.point_embeddings[lbl].weight[0])
+                elif lbl == 4:
+                    sample_lbl_emb.append(self.point_embeddings[3].weight[0])
                 else:
                     sample_lbl_emb.append(self.not_a_point_embed.weight[0])
             label_weights.append(torch.stack(sample_lbl_emb, dim=0))
@@ -791,6 +793,7 @@ class MedSAM_WSSS_Adapter(nn.Module):
         point_labels: Optional[torch.Tensor] = None,
         dense_prompts: Optional[torch.Tensor] = None,
         target_size: Optional[Tuple[int, int]] = None,
+        prompt_image_size: Optional[Tuple[int, int]] = None,
     ) -> Dict[str, torch.Tensor]:
         """Forward pass predicting 5-class segmentation logits and probabilities.
 
@@ -800,6 +803,7 @@ class MedSAM_WSSS_Adapter(nn.Module):
             point_labels: Optional tensor of shape (B, N) int64 (+1, 0, -1).
             dense_prompts: Optional dense mask embeddings (B, 256, H_feat, W_feat).
             target_size: Desired output resolution (H, W). Defaults to input image resolution.
+            prompt_image_size: Optional source (H, W) of point_coords when scaling to (1024, 1024).
 
         Returns:
             Dict containing:
@@ -810,12 +814,21 @@ class MedSAM_WSSS_Adapter(nn.Module):
         orig_h, orig_w = images.shape[-2:]
         out_size = target_size or (orig_h, orig_w)
 
+        encoder_images = images
+        if not self.is_surrogate and (orig_h, orig_w) != (1024, 1024):
+            encoder_images = F.interpolate(
+                images,
+                size=(1024, 1024),
+                mode="bilinear",
+                align_corners=False,
+            )
+
         # 1. Image Encoder pass (under torch.no_grad() if frozen)
         if not any(p.requires_grad for p in self.image_encoder.parameters()):
             with torch.no_grad():
-                image_embeddings = self.image_encoder(images)
+                image_embeddings = self.image_encoder(encoder_images)
         else:
-            image_embeddings = self.image_encoder(images)
+            image_embeddings = self.image_encoder(encoder_images)
 
         # Ensure image embeddings match (B, 256, H_feat, W_feat)
         if image_embeddings.shape[1] != 256:
@@ -824,8 +837,27 @@ class MedSAM_WSSS_Adapter(nn.Module):
         # 2. Prompt Encoder pass
         sparse_embeddings = None
         if point_coords is not None and point_labels is not None:
-            points_tuple = (point_coords, point_labels)
-            sparse_embeddings, _ = self.prompt_encoder(points=points_tuple, masks=None)
+            coords_in = point_coords.float()
+            if (
+                not self.is_surrogate
+                and prompt_image_size is not None
+                and tuple(prompt_image_size) != (1024, 1024)
+            ):
+                src_h, src_w = int(prompt_image_size[0]), int(prompt_image_size[1])
+                if src_h > 0 and src_w > 0:
+                    coords_in = coords_in.clone()
+                    coords_in[..., 0] = coords_in[..., 0] * (1024.0 / float(src_w))
+                    coords_in[..., 1] = coords_in[..., 1] * (1024.0 / float(src_h))
+            points_tuple = (coords_in, point_labels)
+            sparse_embeddings, _ = self.prompt_encoder(points=points_tuple, boxes=None, masks=None)
+
+        if dense_prompts is not None and dense_prompts.shape[-2:] != image_embeddings.shape[-2:]:
+            dense_prompts = F.interpolate(
+                dense_prompts,
+                size=image_embeddings.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            )
 
         # 3. Mask Decoder with Residual Adapters
         low_res_logits, iou_predictions = self.mask_decoder(

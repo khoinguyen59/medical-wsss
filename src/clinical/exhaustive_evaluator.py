@@ -1,5 +1,5 @@
 """
-Exhaustive 3-Way Benchmark Evaluator & Clinical Service (SE374.R11).
+Exhaustive 3-Way Benchmark Evaluator & Clinical Service (BCSS-WSSS).
 
 Provides:
 1. 3-Way Benchmark Evaluation:
@@ -17,7 +17,7 @@ Provides:
    - Cohen's d effect size and 95% Confidence Interval of metric improvements
 4. Clinical Biomarker Aggregation & Survival Analysis:
    - Patient-level TSR, Stroma Proportion, and VTP accumulation
-   - CAP (College of American Pathologists) risk stratification
+   - TSR risk stratification (Mesker et al. 2007 / van Pelt et al. 2018 UNITED, 50% stroma cut-off)
    - Kaplan-Meier survival curves and Mantel-Haenszel log-rank test on real TCGA-BRCA survival times
    - Bland-Altman biomarker agreement analysis
 5. CLI Interface with --dry-run (50 patches) and --full (all 4,986 patches) modes.
@@ -26,16 +26,17 @@ Strict Invariant 12 compliance: 100% standard keyboard ASCII hyphens '-' (0x2D) 
 """
 
 import argparse
-from collections import defaultdict
 import csv
-import glob
 import json
 import math
 import os
-from pathlib import Path
 import sys
 import time
+from collections import defaultdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 # Dynamic project root path insertion for standalone CLI execution
 _project_root = Path(__file__).resolve().parent.parent.parent
@@ -43,39 +44,334 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
-from scipy import stats
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from PIL import Image
+from scipy import stats
 
 from src.clinical.survival_analysis import (
-    ACTIVE_TEST_PATIENTS_23,
     KaplanMeierSurvivalAnalysis,
-    compute_patient_biomarkers,
     compute_stroma_proportion,
     compute_tumor_stroma_ratio,
     compute_viable_tumor_percentage,
     get_all_test_survival_data,
-    get_patient_survival_data,
     load_active_test_patients,
     stratify_cap_risk,
-    stratify_cap_risk_category,
 )
-from src.datasets.otsu_filter import apply_otsu_gating_to_prediction, compute_otsu_tissue_mask
+from src.datasets.otsu_filter import (
+    apply_otsu_gating_to_prediction,
+    compute_otsu_tissue_mask,
+)
 from src.datasets.patient_split import extract_patient_id
 from src.models.deeplabv3plus import DeepLabV3PlusWithCGM
+from src.models.pda_generator import ProgressiveDropoutAttention
 from src.models.sam_wsss_adapter import MedSAM_WSSS_Adapter
-
 
 CLASS_NAMES_5: List[str] = ["TUM", "STR", "LYM", "NEC", "BACK"]
 CLASS_NAMES_4: List[str] = ["TUM", "STR", "LYM", "NEC"]
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+
+# ==============================================================================
+# 0. Evaluator Baseline Prediction Methods (Uniform Multi-Scale & PDA Ablation)
+# ==============================================================================
+
+def predict_uniform_multiscale_baseline(
+    model: nn.Module,
+    img_tensor: torch.Tensor,
+    raw_rgb: Optional[np.ndarray] = None,
+    model_stage1: Optional[nn.Module] = None,
+    scales: Tuple[float, ...] = (0.75, 1.0, 1.25),
+    apply_cgm: bool = True,
+    cls_threshold: float = 0.10,
+    background_class_idx: int = 4,
+    device: Optional[torch.device] = None,
+) -> Tuple[np.ndarray, float]:
+    """Uniform Multi-Scale Baseline Prediction (1/3, 1/3, 1/3 equal weights without entropy weighting).
+
+    Averages predictions across scales [0.75, 1.0, 1.25] with uniform weighting,
+    providing the authoritative ablation baseline to prove that the performance gains of
+    M6 (Entropy-Weighted Multi-Scale) derive specifically from predictive confidence gating
+    rather than simply processing multiple resolutions.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Stage-2 DeepLabV3+ segmentation model.
+    img_tensor : torch.Tensor
+        Input image tensor (1, 3, H, W) or (3, H, W) normalized.
+    raw_rgb : Optional[np.ndarray]
+        Original unnormalized RGB image (H, W, 3) for Otsu gating.
+    model_stage1 : Optional[nn.Module]
+        Stage-1 Net_CAM model for Classification Gate Mechanism (CGM).
+    scales : Tuple[float, ...]
+        Tuple of pyramid scale factors (default: (0.75, 1.0, 1.25)).
+    apply_cgm : bool
+        Whether to apply Stage-1 CGM gating (suppressing absent classes).
+    cls_threshold : float
+        CGM threshold for tissue class presence (default: 0.10).
+    background_class_idx : int
+        Class index for glass/background (default: 4).
+    device : Optional[torch.device]
+        Execution device.
+
+    Returns
+    -------
+    pred_mask : np.ndarray
+        Discrete segmentation mask (H, W) in [0, 4].
+    latency_sec : float
+        Inference execution time in seconds.
+    """
+    t0 = time.perf_counter()
+    dev = device or next(model.parameters()).device
+    x_base = img_tensor.to(dev) if img_tensor.device != dev else img_tensor
+    if x_base.dim() == 3:
+        x_base = x_base.unsqueeze(0)
+
+    h_orig, w_orig = int(x_base.shape[-2]), int(x_base.shape[-1])
+    n_scales = len(scales)
+    uniform_weight = 1.0 / float(n_scales)
+
+    accumulated_probs = np.zeros((4, h_orig, w_orig), dtype=np.float32)
+
+    with torch.no_grad():
+        for s in scales:
+            if abs(float(s) - 1.0) < 1e-4:
+                x_scaled = x_base
+            else:
+                sh = max(8, int(round(h_orig * float(s))))
+                sw = max(8, int(round(w_orig * float(s))))
+                x_scaled = F.interpolate(
+                    x_base, size=(sh, sw), mode="bilinear", align_corners=True
+                )
+
+            output = model(x_scaled)
+            if isinstance(output, tuple):
+                logits = output[0]
+            elif isinstance(output, dict):
+                logits = output.get("out", output.get("logits", None))
+            else:
+                logits = output
+
+            probs = torch.softmax(logits.float(), dim=1)
+            if probs.shape[-2:] != (h_orig, w_orig):
+                probs = F.interpolate(
+                    probs, size=(h_orig, w_orig), mode="bilinear", align_corners=True
+                )
+
+            # Restrict to 4 foreground classes [TUM, STR, LYM, NEC]
+            probs_np = probs[0, :4].detach().cpu().numpy().astype(np.float32)
+            accumulated_probs += uniform_weight * probs_np
+
+        # Stage-1 Classification Gate Mechanism (CGM)
+        if model_stage1 is not None and apply_cgm:
+            dev_s1 = next(model_stage1.parameters()).device
+            x_s1 = x_base.to(dev_s1) if x_base.device != dev_s1 else x_base
+            if hasattr(model_stage1, "forward_cam"):
+                _, y_cls = model_stage1.forward_cam(x_s1)
+            else:
+                y_cls = model_stage1(x_s1)
+            y_cls_np = y_cls.squeeze(0).detach().cpu().numpy().astype(np.float32)
+            cgm_gate = (y_cls_np > cls_threshold).astype(np.float32)
+            if cgm_gate.sum() == 0:
+                cgm_gate = np.ones((4,), dtype=np.float32)
+            accumulated_probs *= cgm_gate.reshape(4, 1, 1)
+
+        denom = np.maximum(accumulated_probs.sum(axis=0, keepdims=True), 1e-8)
+        probs_normalized = (accumulated_probs / denom).astype(np.float32)
+        pred_mask = np.argmax(probs_normalized, axis=0).astype(np.uint8)
+
+        # Apply clinical Otsu saturation gating
+        if raw_rgb is not None:
+            pred_mask = apply_otsu_gating_to_prediction(
+                pred_mask, raw_rgb, background_class_idx=background_class_idx
+            )
+
+    t_elapsed = time.perf_counter() - t0
+    return pred_mask, t_elapsed
+
+
+def predict_pda_ablation(
+    model_stage1: nn.Module,
+    img_tensor: torch.Tensor,
+    raw_rgb: Optional[np.ndarray] = None,
+    mode: str = "full_pda_otsu",
+    num_steps: int = 3,
+    top_p: float = 0.25,
+    bg_threshold: float = 0.20,
+    cls_threshold: float = 0.10,
+    device: Optional[torch.device] = None,
+) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+    """Progressive Dropout Attention (PDA) Systematic Ablation Evaluator.
+
+    Generates segmentation predictions for the 3 key PDA ablation configurations:
+    1. 'raw_cam': Initial unexpanded Class Activation Map (T=0, baseline focal hotspot).
+    2. 'naive_erasing': Progressive spatial erasing without prototype cosine gating (boundary bleeding).
+    3. 'full_pda_otsu': Full PDA (spatial + channel dropout + prototype cosine gating) + Otsu clinical gating.
+
+    Parameters
+    ----------
+    model_stage1 : nn.Module
+        Stage-1 WSSSTissueStage1NetCAM model.
+    img_tensor : torch.Tensor
+        Input image tensor (1, 3, H, W) normalized.
+    raw_rgb : Optional[np.ndarray]
+        Original unnormalized RGB image (H, W, 3).
+    mode : str
+        Ablation configuration: 'raw_cam', 'naive_erasing', 'full_pda_otsu', or 'all'.
+    num_steps : int
+        Number of progressive erasing steps T (default: 3).
+    top_p : float
+        Top percentile fraction to extinguish (default: 0.25).
+    bg_threshold : float
+        Sensitivity threshold for tissue vs background (default: 0.20).
+    cls_threshold : float
+        Presence threshold for label gating (default: 0.10).
+    device : Optional[torch.device]
+        Device to execute inference on.
+
+    Returns
+    -------
+    Union[np.ndarray, Dict[str, np.ndarray]]
+        If mode is specific: (H, W) discrete mask in [0, 4].
+        If mode is 'all': Dict mapping mode_name -> (H, W) discrete mask.
+    """
+    valid_modes = {"raw_cam", "naive_erasing", "full_pda_otsu", "all"}
+    if mode not in valid_modes:
+        raise ValueError(f"Invalid mode '{mode}'. Expected one of {valid_modes}")
+
+    dev = device or next(model_stage1.parameters()).device
+    x_in = img_tensor.to(dev) if img_tensor.device != dev else img_tensor
+    if x_in.dim() == 3:
+        x_in = x_in.unsqueeze(0)
+
+    if raw_rgb is not None:
+        h_img, w_img = raw_rgb.shape[:2]
+    else:
+        h_img, w_img = int(x_in.shape[-2]), int(x_in.shape[-1])
+
+    with torch.no_grad():
+        if hasattr(model_stage1, "forward_backbone"):
+            conv6 = model_stage1.forward_backbone(x_in)
+        elif hasattr(model_stage1, "features"):
+            conv6 = model_stage1.features(x_in)
+        elif hasattr(model_stage1, "conv6"):
+            conv6 = model_stage1.conv6(x_in)
+        else:
+            conv6 = x_in
+
+        if hasattr(model_stage1, "fc8"):
+            fc_weight = model_stage1.fc8.weight
+        elif hasattr(model_stage1, "classifier"):
+            fc_weight = model_stage1.classifier.weight
+        elif hasattr(model_stage1, "fc"):
+            fc_weight = model_stage1.fc.weight
+        else:
+            fc_weight = None
+
+        if fc_weight is not None:
+            w = fc_weight.unsqueeze(-1).unsqueeze(-1) if fc_weight.dim() == 2 else fc_weight
+            d_feat = conv6.shape[1]
+            d_w = w.shape[1]
+            if d_feat != d_w:
+                w = w[:, :d_feat, :, :] if d_feat < d_w else F.pad(w, (0, 0, 0, 0, 0, d_feat - d_w))
+            fc_weight = w
+
+        if hasattr(model_stage1, "forward_cam"):
+            _, y_cls = model_stage1.forward_cam(x_in)
+        else:
+            y_cls = model_stage1(x_in)
+
+        y_cls_np = y_cls.squeeze(0).detach().cpu().numpy().astype(np.float32)
+        gate = (y_cls_np > cls_threshold).astype(np.float32)
+        if gate.sum() == 0:
+            gate = np.ones((4,), dtype=np.float32)
+
+        gate_t = torch.from_numpy(gate).to(dev).view(1, 4, 1, 1)
+        results: Dict[str, np.ndarray] = {}
+
+        # 1. Mode: raw_cam (Step 0 CAM, no erasing, no gating)
+        if mode in ("raw_cam", "all"):
+            if fc_weight is not None:
+                cam_0 = F.relu(F.conv2d(conv6, fc_weight))
+            else:
+                cam_0 = conv6[:, :4, :, :]
+            cam_0 = F.interpolate(cam_0, size=(h_img, w_img), mode="bilinear", align_corners=False)
+            cam_0 = cam_0 * gate_t
+
+            # Min-max normalization per class
+            b, c, h, w = cam_0.shape
+            flat = cam_0.view(b, c, -1)
+            min_v = flat.min(dim=-1, keepdim=True)[0].view(b, c, 1, 1)
+            max_v = flat.max(dim=-1, keepdim=True)[0].view(b, c, 1, 1)
+            norm_cam_0 = ((cam_0 - min_v) / (max_v - min_v + 1e-7)) * gate_t
+            cams_np = norm_cam_0[0].detach().cpu().numpy().astype(np.float32)
+
+            bg_channel = np.full((1, h_img, w_img), fill_value=bg_threshold, dtype=np.float32)
+            vol_raw = np.concatenate([cams_np, bg_channel], axis=0)
+            results["raw_cam"] = np.argmax(vol_raw, axis=0).astype(np.uint8)
+
+        # 2. Mode: naive_erasing (Progressive spatial erasing WITHOUT prototype cosine gating)
+        if mode in ("naive_erasing", "all"):
+            pda_naive = ProgressiveDropoutAttention(
+                num_steps=num_steps,
+                top_p=top_p,
+                base_dropout_rate=0.50,
+                step_weight_decay=0.80,
+                boundary_bleeding_control=False,
+                spatial_masking=True,
+                channel_masking=False,
+            )
+            w = fc_weight.unsqueeze(-1).unsqueeze(-1) if (fc_weight is not None and fc_weight.dim() == 2) else fc_weight
+            cam_naive = pda_naive(conv6, w) if w is not None else conv6[:, :4, :, :]
+            cam_naive = F.interpolate(cam_naive, size=(h_img, w_img), mode="bilinear", align_corners=False)
+            cam_naive = cam_naive * gate_t
+            cams_naive_np = cam_naive[0].detach().cpu().numpy().astype(np.float32)
+
+            bg_channel = np.full((1, h_img, w_img), fill_value=bg_threshold, dtype=np.float32)
+            vol_naive = np.concatenate([cams_naive_np, bg_channel], axis=0)
+            results["naive_erasing"] = np.argmax(vol_naive, axis=0).astype(np.uint8)
+
+        # 3. Mode: full_pda_otsu (Full PDA with Prototype Gating + Clinical Otsu Gating)
+        if mode in ("full_pda_otsu", "all"):
+            pda_full = ProgressiveDropoutAttention(
+                num_steps=num_steps,
+                top_p=top_p,
+                base_dropout_rate=0.50,
+                step_weight_decay=0.80,
+                boundary_bleeding_control=True,
+                spatial_masking=True,
+                channel_masking=True,
+            )
+            w = fc_weight.unsqueeze(-1).unsqueeze(-1) if (fc_weight is not None and fc_weight.dim() == 2) else fc_weight
+            cam_full = pda_full(conv6, w) if w is not None else conv6[:, :4, :, :]
+            cam_full = F.interpolate(cam_full, size=(h_img, w_img), mode="bilinear", align_corners=False)
+            cam_full = cam_full * gate_t
+            cams_full_np = cam_full[0].detach().cpu().numpy().astype(np.float32)
+
+            if raw_rgb is not None:
+                tissue_mask = compute_otsu_tissue_mask(raw_rgb)
+            else:
+                tissue_mask = np.ones((h_img, w_img), dtype=np.uint8)
+
+            bg_channel = np.full((1, h_img, w_img), fill_value=bg_threshold, dtype=np.float32)
+            bg_channel[0, tissue_mask == 0] = 1.0  # Force background on glass
+
+            vol_full = np.concatenate([cams_full_np, bg_channel], axis=0)
+            pred_full = np.argmax(vol_full, axis=0).astype(np.uint8)
+            pred_full[tissue_mask == 0] = 4
+            results["full_pda_otsu"] = pred_full
+
+    if mode == "all":
+        return results
+    return results[mode]
 
 
 # ==============================================================================
@@ -89,8 +385,10 @@ class SegmentationMetricAccumulator:
         self.num_classes = num_classes
         self.cm_5cls = np.zeros((5, 5), dtype=np.int64)
         self.cm_4cls = np.zeros((4, 4), dtype=np.int64)
+        self.fn_to_bg_4cls = np.zeros(4, dtype=np.int64)
         self.patch_miou_4cls: List[float] = []
         self.patch_mdice_4cls: List[float] = []
+        self.patch_patient_ids: List[str] = []
         self.latencies_sec: List[float] = []
 
     def update(
@@ -98,9 +396,14 @@ class SegmentationMetricAccumulator:
         pred_mask: np.ndarray,
         gt_mask: np.ndarray,
         latency_sec: float = 0.0,
+        patient_id: Optional[str] = None,
     ) -> None:
         """Updates confusion matrices with single patch prediction and ground truth.
 
+        Parameters
+        ----------
+        patient_id : Optional[str]
+            Patient ID of the patch (stored in patch_patient_ids, aligned with patch_miou_4cls).
         Parameters
         ----------
         pred_mask : np.ndarray
@@ -111,6 +414,7 @@ class SegmentationMetricAccumulator:
             Inference latency in seconds.
         """
         p = pred_mask.flatten().astype(np.int64)
+        self.patch_patient_ids.append(patient_id if patient_id is not None else "")
         g = gt_mask.flatten().astype(np.int64)
 
         # 1. 5-class accumulation (valid in [0, 4])
@@ -122,6 +426,15 @@ class SegmentationMetricAccumulator:
 
         # 2. 4-class accumulation (classes 0..3 without BACK, standard WSSS-Tissue ROI benchmark)
         valid_4 = (g >= 0) & (g < 4) & (p >= 0) & (p < 4)
+        # Track foreground GT pixels mispredicted as background (p == 4) so they still count as FN
+        fn_bg_mask = (g >= 0) & (g < 4) & (p == 4)
+        fn_bg_patch = (
+            np.bincount(g[fn_bg_mask], minlength=4)
+            if np.any(fn_bg_mask)
+            else np.zeros(4, dtype=np.int64)
+        )
+        if np.any(fn_bg_mask):
+            self.fn_to_bg_4cls += fn_bg_patch
         if np.any(valid_4):
             idx_4 = g[valid_4] * 4 + p[valid_4]
             counts_4 = np.bincount(idx_4, minlength=16)
@@ -131,7 +444,7 @@ class SegmentationMetricAccumulator:
             patch_cm = counts_4.reshape((4, 4))
             tp = np.diag(patch_cm)
             fp = patch_cm.sum(axis=0) - tp
-            fn = patch_cm.sum(axis=1) - tp
+            fn = (patch_cm.sum(axis=1) - tp) + fn_bg_patch
             denom = tp + fp + fn
             valid_cls = denom > 0
             if np.any(valid_cls):
@@ -160,7 +473,7 @@ class SegmentationMetricAccumulator:
         # 4-class metrics
         tp_4 = np.diag(self.cm_4cls).astype(np.float64)
         fp_4 = (self.cm_4cls.sum(axis=0) - tp_4).astype(np.float64)
-        fn_4 = (self.cm_4cls.sum(axis=1) - tp_4).astype(np.float64)
+        fn_4 = (self.cm_4cls.sum(axis=1) - tp_4 + self.fn_to_bg_4cls).astype(np.float64)
         denom_4 = tp_4 + fp_4 + fn_4
 
         iou_4cls = np.zeros(4, dtype=np.float64)
@@ -174,11 +487,11 @@ class SegmentationMetricAccumulator:
         dice_4cls[valid_dice_4] = (2.0 * tp_4[valid_dice_4]) / denom_dice_4[valid_dice_4]
         mdice_4cls = float(np.mean(dice_4cls[valid_dice_4])) if np.any(valid_dice_4) else 0.0
 
-        tot_4 = float(np.sum(self.cm_4cls))
+        tot_4 = float(np.sum(self.cm_4cls) + np.sum(self.fn_to_bg_4cls))
         pa_4cls = float(np.sum(tp_4) / tot_4) if tot_4 > 0 else 0.0
 
         # Frequency-Weighted IoU (4-class)
-        class_px_4 = np.sum(self.cm_4cls, axis=1).astype(np.float64)
+        class_px_4 = (np.sum(self.cm_4cls, axis=1) + self.fn_to_bg_4cls).astype(np.float64)
         freq_4 = class_px_4 / tot_4 if tot_4 > 0 else np.zeros(4)
         fwiou_4cls = float(np.sum(freq_4[valid_4] * iou_4cls[valid_4]))
 
@@ -241,9 +554,12 @@ class ExhaustiveBenchmarkEvaluator:
         checkpoint_author: Optional[Union[str, Path]] = None,
         checkpoint_retrained: Optional[Union[str, Path]] = None,
         checkpoint_medsam: Optional[Union[str, Path]] = None,
+        checkpoint_stage1: Optional[Union[str, Path]] = None,
+        include_baseline_comparisons: bool = False,
         output_dir: Optional[Union[str, Path]] = None,
         device: Optional[str] = None,
         batch_size: int = 8,
+        checkpoint_sam: Optional[Union[str, Path]] = None,
     ) -> None:
         self.device = self._resolve_device(device)
         self.dataset_dir = self._resolve_dataset_dir(dataset_dir)
@@ -253,17 +569,34 @@ class ExhaustiveBenchmarkEvaluator:
 
         self.checkpoint_author = checkpoint_author or "checkpoints/stage2_checkpoint_trained_on_bcss.pth"
         self.checkpoint_retrained = checkpoint_retrained or "checkpoints/stage2_retrained_best.pth"
-        self.checkpoint_medsam = checkpoint_medsam or "checkpoints/medsam_adapter_best.pth"
+        default_medsam = "checkpoints/medsam_adapter_best.pth"
+        if checkpoint_medsam is None and not Path(default_medsam).is_file():
+            alt_medsam = "checkpoints/medsam_wsss_adapter_best.pth"
+            if Path(alt_medsam).is_file():
+                default_medsam = alt_medsam
+        self.checkpoint_medsam = checkpoint_medsam or default_medsam
+        self.checkpoint_stage1 = checkpoint_stage1 or "checkpoints/stage1_checkpoint_trained_on_bcss.pth"
+        if checkpoint_sam is None and Path("checkpoints/medsam_vit_b.pth").is_file():
+            checkpoint_sam = "checkpoints/medsam_vit_b.pth"
+        self.checkpoint_sam = checkpoint_sam
+        self.include_baseline_comparisons = bool(include_baseline_comparisons)
 
         # Model containers
         self.model_author: Optional[nn.Module] = None
         self.model_retrained: Optional[nn.Module] = None
         self.model_medsam: Optional[nn.Module] = None
+        self.model_stage1: Optional[nn.Module] = None
 
         # Evaluator accumulators
         self.eval_author = SegmentationMetricAccumulator()
         self.eval_retrained = SegmentationMetricAccumulator()
         self.eval_medsam = SegmentationMetricAccumulator()
+
+        # Baseline comparison accumulators
+        self.eval_uniform_multiscale = SegmentationMetricAccumulator()
+        self.eval_pda_raw = SegmentationMetricAccumulator()
+        self.eval_pda_naive = SegmentationMetricAccumulator()
+        self.eval_pda_full = SegmentationMetricAccumulator()
 
         # Patient-level tissue area tracking: {pid: {"tum": int, "str": int, "lym": int, "nec": int, "tot": int}}
         self.patient_gt_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -300,8 +633,8 @@ class ExhaustiveBenchmarkEvaluator:
         return fallback.resolve()
 
     def load_models(self) -> None:
-        """Loads and prepares all 3 models onto the execution device."""
-        print(f"[EVALUATOR] Initializing 3-way benchmark models on device: {self.device}")
+        """Loads and prepares benchmark models onto the execution device."""
+        print(f"[EVALUATOR] Initializing benchmark models on device: {self.device}")
 
         # Model 1: Author SOTA Baseline (DeepLabV3+ ResNet-101)
         self.model_author = self._build_deeplabv3plus(self.checkpoint_author, tag="Author SOTA Baseline")
@@ -312,7 +645,17 @@ class ExhaustiveBenchmarkEvaluator:
         # Model 3: Proposed MedSAM Adapter
         self.model_medsam = self._build_medsam_adapter(self.checkpoint_medsam)
 
-        print("[EVALUATOR] All 3 benchmark models successfully initialized and ready for inference.")
+        # Stage 1 Net_CAM loader for PDA ablations and CGM
+        if self.include_baseline_comparisons and self.checkpoint_stage1 is not None and Path(self.checkpoint_stage1).is_file():
+            try:
+                from src.models.wsss_inference_methods import build_and_load_stage1_netcam
+                self.model_stage1 = build_and_load_stage1_netcam(self.checkpoint_stage1, device=self.device)
+                self.model_stage1.eval()
+                print(f"[EVALUATOR] Loaded Stage 1 Net_CAM from {self.checkpoint_stage1}")
+            except Exception as e:
+                print(f"[EVALUATOR] Warning: Could not load Stage 1 checkpoint ({e}).")
+
+        print("[EVALUATOR] Benchmark models successfully initialized and ready for inference.")
 
     def _build_deeplabv3plus(self, checkpoint_path: Union[str, Path], tag: str) -> nn.Module:
         """Instantiates DeepLabV3Plus with weights if present, else lightweight initialization."""
@@ -324,10 +667,29 @@ class ExhaustiveBenchmarkEvaluator:
                 from src.models.wsss_inference_methods import DeepLabV3Plus, safe_torch_load
                 state = safe_torch_load(ckpt_p, device=torch.device("cpu"))
                 sd = state.get("state_dict", state) if isinstance(state, dict) else state
-                cleaned = {k.replace("module.", ""): v for k, v in sd.items()}
-                n_cls = int(cleaned.get("decoder.last_conv.8.weight", torch.zeros(4, 1)).shape[0])
-                model = DeepLabV3Plus(num_classes=n_cls, output_stride=16)
-                model.load_state_dict(cleaned, strict=False)
+                cleaned = {(k[7:] if k.startswith("module.") else k): v for k, v in sd.items()}
+                head_w = cleaned.get("decoder.last_conv.8.weight")
+                if head_w is None:
+                    head_w = cleaned.get("decoder.classifier.weight")
+                n_cls = int(head_w.shape[0]) if head_w is not None else 4
+                if "decoder.last_conv.8.weight" not in cleaned and "decoder.classifier.weight" in cleaned:
+                    model = DeepLabV3PlusWithCGM(num_classes=n_cls, in_channels=3)
+                else:
+                    model = DeepLabV3Plus(num_classes=n_cls, output_stride=16)
+                incompat = model.load_state_dict(cleaned, strict=False)
+                non_buf_missing = [
+                    k for k in incompat.missing_keys if not k.endswith("num_batches_tracked")
+                ]
+                non_buf_unexpected = [
+                    k for k in incompat.unexpected_keys if not k.endswith("num_batches_tracked")
+                ]
+                if len(non_buf_missing) > 10 or len(non_buf_unexpected) > 10:
+                    print(
+                        f"[WARN] Checkpoint key mismatch for {tag} ({ckpt_p.name}): "
+                        f"missing={len(non_buf_missing)}, unexpected={len(non_buf_unexpected)}"
+                    )
+                # Chu Han et al. 4-class BCSS checkpoint uses direct [0.0, 1.0] RGB scaling
+                model._input_norm = "zero_one" if n_cls == 4 else "imagenet"
                 print(f"[EVALUATOR] Loaded checkpoint for {tag} from {ckpt_p}")
                 model.to(self.device)
                 model.eval()
@@ -340,31 +702,49 @@ class ExhaustiveBenchmarkEvaluator:
             num_classes=5,
             in_channels=3,
         )
+        model._input_norm = "imagenet"
 
         model.to(self.device)
         model.eval()
         return model
 
     def _build_medsam_adapter(self, checkpoint_path: Union[str, Path]) -> nn.Module:
-        """Instantiates MedSAM_WSSS_Adapter with fallback to surrogate image encoder."""
+        """Instantiates MedSAM_WSSS_Adapter and loads trained adapter weights if present."""
         ckpt_p = Path(checkpoint_path)
+        raw_sam_weights: Optional[str] = None
+        ckpt_is_full_sam = False
+        if ckpt_p.is_file():
+            # Only treat full SAM ViT-B checkpoint as base SAM path; adapter checkpoints load via load_state_dict
+            if "vit_b" in ckpt_p.name.lower() or ckpt_p.stat().st_size > 200 * 1024 * 1024:
+                raw_sam_weights = str(ckpt_p)
+                ckpt_is_full_sam = True
+        if raw_sam_weights is None and self.checkpoint_sam is not None and Path(self.checkpoint_sam).is_file():
+            raw_sam_weights = str(self.checkpoint_sam)
+
         model = MedSAM_WSSS_Adapter(
-            checkpoint_path=str(ckpt_p) if ckpt_p.is_file() else None,
+            checkpoint_path=raw_sam_weights,
             freeze_image_encoder=True,
             use_surrogate_if_missing=True,
         )
 
-        if ckpt_p.is_file():
+        if ckpt_p.is_file() and not ckpt_is_full_sam:
             try:
-                state = torch.load(ckpt_p, map_location="cpu", weights_only=False)
-                sd = state.get("model", state.get("state_dict", state))
+                from src.models.wsss_inference_methods import safe_torch_load
+                state = safe_torch_load(ckpt_p, device=torch.device("cpu"))
+                if isinstance(state, dict):
+                    sd = state.get("model_state_dict", state.get("model", state.get("state_dict", state)))
+                else:
+                    sd = state
+                if isinstance(sd, dict):
+                    sd = {(k[7:] if k.startswith("module.") else k): v for k, v in sd.items()}
                 model.load_state_dict(sd, strict=False)
                 print(f"[EVALUATOR] Loaded MedSAM Adapter checkpoint from {ckpt_p}")
             except Exception as e:
                 print(f"[EVALUATOR] Warning: Could not load {ckpt_p} ({e}). Using initialized adapter.")
-        else:
+        elif not ckpt_p.is_file():
             print(f"[EVALUATOR] MedSAM checkpoint {ckpt_p} not found. Using initialized adapter.")
 
+        model._input_norm = "imagenet"
         model.to(self.device)
         model.eval()
         return model
@@ -442,10 +822,15 @@ class ExhaustiveBenchmarkEvaluator:
         img_tensor: torch.Tensor,
         rgb_arr: np.ndarray,
     ) -> Tuple[np.ndarray, float]:
-        """Performs forward inference with timing and Otsu gating."""
+        """Performs forward inference with timing, normalization alignment, and Otsu gating."""
+        model_input = img_tensor
+        if getattr(model, "_input_norm", "imagenet") == "zero_one":
+            img_01 = rgb_arr.astype(np.float32) / 255.0
+            model_input = torch.from_numpy(img_01).permute(2, 0, 1).unsqueeze(0).to(self.device)
+
         t0 = time.perf_counter()
         with torch.no_grad():
-            output = model(img_tensor)
+            output = model(model_input)
 
             if isinstance(output, tuple):
                 logits = output[0]
@@ -481,15 +866,45 @@ class ExhaustiveBenchmarkEvaluator:
 
             # 1. Author Baseline Forward Pass
             pred_author, lat_author = self._infer_model(self.model_author, img_tensor, rgb_arr)
-            self.eval_author.update(pred_author, gt_mask, latency_sec=lat_author)
+            self.eval_author.update(pred_author, gt_mask, latency_sec=lat_author, patient_id=pid)
 
             # 2. Retrained Baseline Forward Pass
             pred_retrained, lat_retrained = self._infer_model(self.model_retrained, img_tensor, rgb_arr)
-            self.eval_retrained.update(pred_retrained, gt_mask, latency_sec=lat_retrained)
+            self.eval_retrained.update(pred_retrained, gt_mask, latency_sec=lat_retrained, patient_id=pid)
 
             # 3. Proposed MedSAM Adapter Forward Pass
             pred_medsam, lat_medsam = self._infer_model(self.model_medsam, img_tensor, rgb_arr)
-            self.eval_medsam.update(pred_medsam, gt_mask, latency_sec=lat_medsam)
+            self.eval_medsam.update(pred_medsam, gt_mask, latency_sec=lat_medsam, patient_id=pid)
+
+            # 4. Baseline Comparisons Forward Pass
+            if self.include_baseline_comparisons and self.model_author is not None:
+                author_tensor = img_tensor
+                if getattr(self.model_author, "_input_norm", "imagenet") == "zero_one":
+                    img_01 = rgb_arr.astype(np.float32) / 255.0
+                    author_tensor = torch.from_numpy(img_01).permute(2, 0, 1).unsqueeze(0).to(self.device)
+
+                pred_unif, lat_unif = predict_uniform_multiscale_baseline(
+                    model=self.model_author,
+                    img_tensor=author_tensor,
+                    raw_rgb=rgb_arr,
+                    model_stage1=self.model_stage1,
+                    device=self.device,
+                )
+                self.eval_uniform_multiscale.update(
+                    pred_unif, gt_mask, latency_sec=lat_unif, patient_id=pid
+                )
+
+                if self.model_stage1 is not None:
+                    pda_preds = predict_pda_ablation(
+                        model_stage1=self.model_stage1,
+                        img_tensor=author_tensor,
+                        raw_rgb=rgb_arr,
+                        mode="all",
+                        device=self.device,
+                    )
+                    self.eval_pda_raw.update(pda_preds["raw_cam"], gt_mask, patient_id=pid)
+                    self.eval_pda_naive.update(pda_preds["naive_erasing"], gt_mask, patient_id=pid)
+                    self.eval_pda_full.update(pda_preds["full_pda_otsu"], gt_mask, patient_id=pid)
 
             # Accumulate patient-level tissue counts
             self._accumulate_patient_pixels(pid, gt_mask, pred_author, pred_retrained, pred_medsam)
@@ -528,8 +943,47 @@ class ExhaustiveBenchmarkEvaluator:
             label_dict["nec"] += int(np.sum(mask == 3))
             label_dict["tot"] += int(np.sum(mask != 4))
 
+    def _compute_patient_level_tests(
+        self,
+        scores_a: np.ndarray,
+        scores_r: np.ndarray,
+        scores_m: np.ndarray,
+    ) -> Dict[str, Any]:
+        """Patient-level paired Wilcoxon + patient-cluster bootstrap CI on per-patient mean mIoU."""
+        pids = list(self.eval_medsam.patch_patient_ids)
+        if not pids or len(pids) != len(scores_m) or any(p == "" for p in pids):
+            return {"status": "patient_ids_unavailable"}
+        try:
+            from src.colab_pkg.evaluator import (
+                compute_patient_level_paired_test,
+                holm_bonferroni_correction,
+            )
+        except ImportError:
+            return {"status": "patient_level_helper_unavailable"}
+        res_ma = compute_patient_level_paired_test(scores_m * 100.0, scores_a * 100.0, pids)
+        res_mr = compute_patient_level_paired_test(scores_m * 100.0, scores_r * 100.0, pids)
+        holm = holm_bonferroni_correction(
+            {
+                "proposed_vs_author": float(res_ma.get("wilcoxon_pvalue", 1.0)),
+                "proposed_vs_retrained": float(res_mr.get("wilcoxon_pvalue", 1.0)),
+            },
+            alpha=0.05,
+        )
+        res_ma["holm_adjusted_pvalue"] = holm["proposed_vs_author"]["holm_adjusted_pvalue"]
+        res_ma["significant_holm_p05"] = holm["proposed_vs_author"]["significant_holm_p05"]
+        res_mr["holm_adjusted_pvalue"] = holm["proposed_vs_retrained"]["holm_adjusted_pvalue"]
+        res_mr["significant_holm_p05"] = holm["proposed_vs_retrained"]["significant_holm_p05"]
+        return {
+            "proposed_vs_author": res_ma,
+            "proposed_vs_retrained": res_mr,
+        }
+
     def compute_statistical_tests(self) -> Dict[str, Any]:
-        """Runs paired Student t-tests and Wilcoxon signed-rank tests across patches."""
+        """Runs paired t-tests and Wilcoxon tests across patches (EXPLORATORY, pseudo-replicated).
+
+        Patient-level inference (Wilcoxon on per-patient mean mIoU and patient-cluster
+        bootstrap 95% CI) is added under the 'patient_level' key.
+        """
         scores_a = np.array(self.eval_author.patch_miou_4cls)
         scores_r = np.array(self.eval_retrained.patch_miou_4cls)
         scores_m = np.array(self.eval_medsam.patch_miou_4cls)
@@ -537,6 +991,9 @@ class ExhaustiveBenchmarkEvaluator:
         n = len(scores_m)
         if n < 2:
             return {"status": "insufficient_samples_for_statistics"}
+
+        # Two-sided 95% critical value: Student t for small n (df=n-1), 1.96 for n >= 30
+        ci_mult = float(stats.t.ppf(0.975, df=n - 1)) if n < 30 else 1.96
 
         # Proposed vs Author
         diff_ma = scores_m - scores_a
@@ -550,8 +1007,8 @@ class ExhaustiveBenchmarkEvaluator:
         std_diff_ma = float(np.std(diff_ma, ddof=1)) if n > 1 else 0.0
         cohen_d_ma = float(mean_diff_ma / std_diff_ma) if std_diff_ma > 1e-6 else 0.0
         ci95_ma = [
-            float(mean_diff_ma - 1.96 * (std_diff_ma / math.sqrt(n))),
-            float(mean_diff_ma + 1.96 * (std_diff_ma / math.sqrt(n))),
+            float(mean_diff_ma - ci_mult * (std_diff_ma / math.sqrt(n))),
+            float(mean_diff_ma + ci_mult * (std_diff_ma / math.sqrt(n))),
         ]
 
         # Proposed vs Retrained
@@ -566,11 +1023,18 @@ class ExhaustiveBenchmarkEvaluator:
         std_diff_mr = float(np.std(diff_mr, ddof=1)) if n > 1 else 0.0
         cohen_d_mr = float(mean_diff_mr / std_diff_mr) if std_diff_mr > 1e-6 else 0.0
         ci95_mr = [
-            float(mean_diff_mr - 1.96 * (std_diff_mr / math.sqrt(n))),
-            float(mean_diff_mr + 1.96 * (std_diff_mr / math.sqrt(n))),
+            float(mean_diff_mr - ci_mult * (std_diff_mr / math.sqrt(n))),
+            float(mean_diff_mr + ci_mult * (std_diff_mr / math.sqrt(n))),
         ]
 
-        return {
+        patient_level = self._compute_patient_level_tests(scores_a, scores_r, scores_m)
+
+        tests_dict = {
+            "analysis_note": (
+                "Patch-level tests below are EXPLORATORY (patches from the same patient are "
+                "correlated: pseudo-replication). Use 'patient_level' for inference."
+            ),
+            "patient_level": patient_level,
             "total_patch_pairs": n,
             "proposed_vs_author": {
                 "mean_delta_miou": mean_diff_ma * 100.0,
@@ -594,8 +1058,59 @@ class ExhaustiveBenchmarkEvaluator:
             },
         }
 
+        # Baseline comparisons paired tests if enabled
+        if self.include_baseline_comparisons:
+            scores_unif = np.array(self.eval_uniform_multiscale.patch_miou_4cls)
+            if len(scores_unif) == n and n >= 2:
+                diff_mu = scores_m - scores_unif
+                t_stat_mu, p_t_mu = stats.ttest_rel(scores_m, scores_unif)
+                try:
+                    w_stat_mu, p_w_mu = stats.wilcoxon(scores_m, scores_unif)
+                except Exception:
+                    w_stat_mu, p_w_mu = 0.0, 1.0
+                mean_diff_mu = float(np.mean(diff_mu))
+                std_diff_mu = float(np.std(diff_mu, ddof=1)) if n > 1 else 0.0
+                cohen_d_mu = float(mean_diff_mu / std_diff_mu) if std_diff_mu > 1e-6 else 0.0
+                tests_dict["proposed_vs_uniform_multiscale"] = {
+                    "mean_delta_miou": mean_diff_mu * 100.0,
+                    "t_statistic": float(t_stat_mu),
+                    "t_test_p_value": float(p_t_mu),
+                    "wilcoxon_w_statistic": float(w_stat_mu),
+                    "wilcoxon_p_value": float(p_w_mu),
+                    "cohen_d": cohen_d_mu,
+                    "is_statistically_significant_05": bool(p_w_mu < 0.05),
+                }
+
+            scores_pda_full = np.array(self.eval_pda_full.patch_miou_4cls)
+            scores_pda_naive = np.array(self.eval_pda_naive.patch_miou_4cls)
+            scores_pda_raw = np.array(self.eval_pda_raw.patch_miou_4cls)
+            if len(scores_pda_full) == n and n >= 2:
+                diff_fn = scores_pda_full - scores_pda_naive
+                try:
+                    _, p_w_fn = stats.wilcoxon(scores_pda_full, scores_pda_naive)
+                except Exception:
+                    p_w_fn = 1.0
+                tests_dict["pda_full_vs_naive_erasing"] = {
+                    "mean_delta_miou": float(np.mean(diff_fn)) * 100.0,
+                    "wilcoxon_p_value": float(p_w_fn),
+                    "is_statistically_significant_05": bool(p_w_fn < 0.05),
+                }
+
+                diff_fr = scores_pda_full - scores_pda_raw
+                try:
+                    _, p_w_fr = stats.wilcoxon(scores_pda_full, scores_pda_raw)
+                except Exception:
+                    p_w_fr = 1.0
+                tests_dict["pda_full_vs_raw_cam"] = {
+                    "mean_delta_miou": float(np.mean(diff_fr)) * 100.0,
+                    "wilcoxon_p_value": float(p_w_fr),
+                    "is_statistically_significant_05": bool(p_w_fr < 0.05),
+                }
+
+        return tests_dict
+
     def run_clinical_survival_analysis(self) -> Dict[str, Any]:
-        """Computes patient-level biomarkers, CAP risk stratification, and Kaplan-Meier curves."""
+        """Computes patient-level biomarkers, TSR risk stratification (legacy 'cap' naming), and Kaplan-Meier curves."""
         print("[EVALUATOR] Running clinical risk stratification and Kaplan-Meier survival analysis...")
         clinical_manifest = get_all_test_survival_data()
 
@@ -687,8 +1202,17 @@ class ExhaustiveBenchmarkEvaluator:
                 "test_statistic": None,
                 "status": "Insufficient stratified cohorts for logrank test; no dummy patients injected.",
             }
-            fig_png = None
-            fig_svg = None
+            plot_path = self.output_dir / "kaplan_meier_survival_curve.png"
+            fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
+            ax.text(0.5, 0.5, f"Single Cohort Sample Evaluation\n(Rich: {len(durations_rich)}, Poor: {len(durations_poor)})",
+                    ha="center", va="center", fontsize=10, color="#4A5568")
+            ax.set_title("Kaplan-Meier Survival Analysis (Dry-Run / Sub-Cohort)", fontsize=11, fontweight="bold")
+            fig.tight_layout()
+            fig.savefig(plot_path, dpi=300, bbox_inches="tight")
+            fig.savefig(plot_path.with_suffix(".svg"), bbox_inches="tight")
+            plt.close(fig)
+            fig_png = str(plot_path)
+            fig_svg = str(plot_path.with_suffix(".svg"))
 
         # Bland-Altman agreement plot
         self._plot_bland_altman(patient_summary)
@@ -757,6 +1281,7 @@ class ExhaustiveBenchmarkEvaluator:
         metrics_medsam: Dict[str, Any],
         stat_tests: Dict[str, Any],
         survival_results: Dict[str, Any],
+        metrics_baselines: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Path]:
         """Exports master Markdown report, JSON results, and CSV summaries."""
         # 1. Master JSON results
@@ -772,6 +1297,9 @@ class ExhaustiveBenchmarkEvaluator:
             "statistical_significance": stat_tests,
             "clinical_survival_analysis": survival_results,
         }
+        if metrics_baselines:
+            master_dict["baseline_comparisons"] = metrics_baselines
+
         with open(master_json_path, "w", encoding="utf-8") as f:
             json.dump(master_dict, f, indent=2)
 
@@ -799,6 +1327,7 @@ class ExhaustiveBenchmarkEvaluator:
             metrics_medsam,
             stat_tests,
             survival_results,
+            baselines_dict=metrics_baselines,
         )
 
         print(f"[EVALUATOR] Exported all reports and figures to {self.output_dir}/")
@@ -817,15 +1346,18 @@ class ExhaustiveBenchmarkEvaluator:
         m_m: Dict[str, Any],
         stats_dict: Dict[str, Any],
         surv_dict: Dict[str, Any],
+        baselines_dict: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Writes comprehensive academic Markdown benchmark report."""
         pv_ma = stats_dict.get("proposed_vs_author", {})
         pv_mr = stats_dict.get("proposed_vs_retrained", {})
         lr = surv_dict.get("logrank_test", {})
+        lr_stat = float(lr.get("test_statistic") or 0.0)
+        lr_pval = float(lr.get("p_value") if lr.get("p_value") is not None else 1.0)
 
         md = f"""# Exhaustive 3-Way Benchmark & Clinical Survival Evaluation Report
 
-> **Course:** SE374.R11 - Medical Image Processing Software Development (UIT)  
+> **System:** BCSS-WSSS Histopathology Research & Clinical Evaluation Engine  
 > **Topic:** Weakly-Supervised Semantic Segmentation (WSSS) on BCSS-WSSS Histopathology  
 > **Evaluation Protocol:** 100% Zero-Mockup Streaming Inference across 23 Active Test Patients  
 > **Governance Standard:** Invariant 07 (Zero Mockup), Invariant 08 (Patient-Level Separation), Invariant 12 (ASCII Hyphens Only)  
@@ -882,21 +1414,53 @@ Paired hypothesis tests were conducted across all evaluated patches:
 
 ## 3. Clinical Survival Risk Stratification & Biomarker Quantification
 
-### CAP Risk Stratification Criteria
-Under College of American Pathologists (CAP) guidelines and International TSR Consensus:
+### TSR Risk Stratification Criteria
+Under Mesker et al. 2007 / van Pelt et al. 2018 (UNITED), 50% stroma cut-off:
 - **Stroma-Rich (High Risk):** TSR <= 50.0% (Stroma Proportion > 50.0%)
 - **Stroma-Poor (Low Risk):** TSR > 50.0% (Stroma Proportion <= 50.0%)
 
 ### Kaplan-Meier Survival Analysis Summary
 - **Cohort Size:** {surv_dict.get('patient_cohort_count', 0)} patients ({surv_dict.get('stroma_rich_count', 0)} Stroma-Rich, {surv_dict.get('stroma_poor_count', 0)} Stroma-Poor)
-- **Mantel-Haenszel Log-Rank Test:** Chi-sq = {lr.get('test_statistic', 0.0):.2f} (df=1), p-value = {lr.get('p_value', 1.0):.4f}
+- **Mantel-Haenszel Log-Rank Test:** Chi-sq = {lr_stat:.2f} (df=1), p-value = {lr_pval:.4f}
 - **Artifacts:**
   - Kaplan-Meier Curves: `kaplan_meier_survival_curve.png` & `.svg`
   - Bland-Altman Agreement: `bland_altman_tsr_vtp.png`
   - Patient Master Summary: `patient_clinical_risk_summary.csv`
+"""
 
+        if baselines_dict:
+            m_unif = baselines_dict.get("uniform_multiscale", {})
+            m_raw = baselines_dict.get("pda_raw_cam", {})
+            m_naive = baselines_dict.get("pda_naive_erasing", {})
+            m_full = baselines_dict.get("pda_full_otsu", {})
+            pv_mu = stats_dict.get("proposed_vs_uniform_multiscale", {})
+            pv_fn = stats_dict.get("pda_full_vs_naive_erasing", {})
+
+            md += f"""
 ---
-*Generated by SE374.R11 Exhaustive Benchmark Evaluator. Invariant 12 Verified (100% ASCII 0x2D hyphens).*
+
+## 4. Evaluator Baseline Comparisons & Ablation Analysis
+
+### 4.1. Uniform Multi-Scale vs Proposed Multi-Scale & MedSAM
+| Architecture Track | mIoU 4-Class (%) | Macro Dice (%) | Pixel Acc (%) | Delta vs MedSAM |
+| :--- | :---: | :---: | :---: | :---: |
+| **Uniform Multi-Scale Baseline (1/3, 1/3, 1/3)** | {m_unif.get('mIoU_4cls', 0.0):.2f}% | {m_unif.get('mDice_4cls', 0.0):.2f}% | {m_unif.get('Pixel_Accuracy_4cls', 0.0):.2f}% | {pv_mu.get('mean_delta_miou', 0.0):+.2f}% |
+| **Model A: Author SOTA Baseline** | {m_a.get('mIoU_4cls', 0.0):.2f}% | {m_a.get('mDice_4cls', 0.0):.2f}% | {m_a.get('Pixel_Accuracy_4cls', 0.0):.2f}% | {pv_ma.get('mean_delta_miou', 0.0):+.2f}% |
+| **Model C: Proposed MedSAM Adapter** | **{m_m.get('mIoU_4cls', 0.0):.2f}%** | **{m_m.get('mDice_4cls', 0.0):.2f}%** | **{m_m.get('Pixel_Accuracy_4cls', 0.0):.2f}%** | 0.00% |
+
+### 4.2. Progressive Dropout Attention (PDA) Architectural Ablations
+| PDA Ablation Configuration | mIoU 4-Class (%) | Macro Dice (%) | Pixel Acc (%) | Role in Pipeline |
+| :--- | :---: | :---: | :---: | :--- |
+| **1. Raw CAM (T=0 Hotspot)** | {m_raw.get('mIoU_4cls', 0.0):.2f}% | {m_raw.get('mDice_4cls', 0.0):.2f}% | {m_raw.get('Pixel_Accuracy_4cls', 0.0):.2f}% | Baseline focal under-activation |
+| **2. Naive Erasing (No Proto Gating)** | {m_naive.get('mIoU_4cls', 0.0):.2f}% | {m_naive.get('mDice_4cls', 0.0):.2f}% | {m_naive.get('Pixel_Accuracy_4cls', 0.0):.2f}% | Unconstrained boundary bleeding |
+| **3. Full PDA + Clinical Otsu Gating** | **{m_full.get('mIoU_4cls', 0.0):.2f}%** | **{m_full.get('mDice_4cls', 0.0):.2f}%** | **{m_full.get('Pixel_Accuracy_4cls', 0.0):.2f}%** | Proposed Stage-1 Pseudo-Mask Generator |
+
+- Full PDA vs Naive Erasing Delta: {pv_fn.get('mean_delta_miou', 0.0):+.2f}% mIoU (Wilcoxon p = {pv_fn.get('wilcoxon_p_value', 1.0):.4e})
+"""
+
+        md += """
+---
+*Generated by BCSS-WSSS Exhaustive Benchmark Evaluator. Invariant 12 Verified (100% ASCII 0x2D hyphens).*
 """
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(md)
@@ -908,7 +1472,7 @@ Under College of American Pathologists (CAP) guidelines and International TSR Co
         active_patients: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Runs the complete end-to-end evaluation, statistical testing, and report generation."""
-        print(f"\n{'='*70}\nSE374.R11 EXHAUSTIVE BENCHMARK EVALUATION RUNNER\n{'='*70}")
+        print(f"\n{'='*70}\nBCSS-WSSS EXHAUSTIVE BENCHMARK EVALUATION RUNNER\n{'='*70}")
         print(f"Mode: {'DRY-RUN (' + str(dry_run_count) + ' patches)' if dry_run else 'FULL SWEEP'}")
 
         # 1. Load models
@@ -929,6 +1493,15 @@ Under College of American Pathologists (CAP) guidelines and International TSR Co
         metrics_retrained = self.eval_retrained.compute_metrics()
         metrics_medsam = self.eval_medsam.compute_metrics()
 
+        baselines_dict = None
+        if self.include_baseline_comparisons:
+            baselines_dict = {
+                "uniform_multiscale": self.eval_uniform_multiscale.compute_metrics(),
+                "pda_raw_cam": self.eval_pda_raw.compute_metrics(),
+                "pda_naive_erasing": self.eval_pda_naive.compute_metrics(),
+                "pda_full_otsu": self.eval_pda_full.compute_metrics(),
+            }
+
         # 5. Statistical testing
         stat_tests = self.compute_statistical_tests()
 
@@ -942,9 +1515,10 @@ Under College of American Pathologists (CAP) guidelines and International TSR Co
             metrics_medsam,
             stat_tests,
             survival_results,
+            metrics_baselines=baselines_dict,
         )
 
-        return {
+        res = {
             "metrics_author": metrics_author,
             "metrics_retrained": metrics_retrained,
             "metrics_medsam": metrics_medsam,
@@ -952,6 +1526,9 @@ Under College of American Pathologists (CAP) guidelines and International TSR Co
             "survival_results": survival_results,
             "exported_files": {k: str(v) for k, v in exported_files.items()},
         }
+        if baselines_dict is not None:
+            res["metrics_baselines"] = baselines_dict
+        return res
 
 
 # ==============================================================================
@@ -961,7 +1538,7 @@ Under College of American Pathologists (CAP) guidelines and International TSR Co
 def build_cli_parser() -> argparse.ArgumentParser:
     """Builds CLI argument parser for exhaustive benchmark evaluation."""
     parser = argparse.ArgumentParser(
-        description="SE374.R11 Exhaustive 3-Way Benchmark & Clinical Survival Evaluator"
+        description="BCSS-WSSS Exhaustive 3-Way Benchmark & Clinical Survival Evaluator"
     )
     parser.add_argument(
         "--dataset-dir",
@@ -986,6 +1563,23 @@ def build_cli_parser() -> argparse.ArgumentParser:
         type=str,
         default="checkpoints/medsam_adapter_best.pth",
         help="Path to proposed MedSAM Adapter checkpoint",
+    )
+    parser.add_argument(
+        "--checkpoint-sam",
+        type=str,
+        default=None,
+        help="Path to base MedSAM ViT-B weights (auto-detects checkpoints/medsam_vit_b.pth if present)",
+    )
+    parser.add_argument(
+        "--checkpoint-stage1",
+        type=str,
+        default="checkpoints/stage1_checkpoint_trained_on_bcss.pth",
+        help="Path to stage 1 Net_CAM checkpoint for baseline comparisons",
+    )
+    parser.add_argument(
+        "--include-baseline-comparisons",
+        action="store_true",
+        help="Whether to include Uniform Multi-Scale and PDA ablation baseline evaluations",
     )
     parser.add_argument(
         "--output-dir",
@@ -1030,12 +1624,15 @@ def run_cli(args: Optional[Sequence[str]] = None) -> int:
         checkpoint_author=parsed_args.checkpoint_author,
         checkpoint_retrained=parsed_args.checkpoint_retrained,
         checkpoint_medsam=parsed_args.checkpoint_medsam,
+        checkpoint_stage1=parsed_args.checkpoint_stage1,
+        include_baseline_comparisons=parsed_args.include_baseline_comparisons,
         output_dir=parsed_args.output_dir,
         device=parsed_args.device,
         batch_size=parsed_args.batch_size,
+        checkpoint_sam=parsed_args.checkpoint_sam,
     )
 
-    results = evaluator.run(dry_run=dry_run_mode)
+    _ = evaluator.run(dry_run=dry_run_mode)
     print("\n[SUCCESS] Exhaustive Benchmark evaluation run completed.")
     return 0
 

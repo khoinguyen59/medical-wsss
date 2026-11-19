@@ -1,0 +1,14 @@
+line-length = 120
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E402",  # Module level import not at top of file (allowed due to dynamic project root sys.path setup)
+    "E501",  # Line too long (markdown templates and KaTeX equations)
+    "W291",  # Trailing whitespace (intentional in Markdown two-space linebreaks)
+    "W293",  # Blank line contains whitespace
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["F401", "F841"]

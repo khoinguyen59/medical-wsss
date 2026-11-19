@@ -12,14 +12,15 @@ Strict adherence to Invariant 12: Standard keyboard hyphen ASCII 0x2D ('-') only
 
 import math
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
+
 import cv2
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.losses_metrics.metrics import MedicalSegmentationMetrics, compute_boundary_f1
+from src.losses_metrics.metrics import compute_boundary_f1
 
 
 def simulate_magnification_patch(

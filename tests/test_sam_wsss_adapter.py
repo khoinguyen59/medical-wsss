@@ -17,8 +17,9 @@ Strict Invariant 12 compliance: 100% ASCII 0x2D hyphens only.
 import os
 import sys
 import tempfile
-import pytest
+
 import numpy as np
+import pytest
 import torch
 import torch.nn as nn
 
@@ -27,19 +28,18 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 from src.models.sam_wsss_adapter import (
     CAMPromptGenerator,
-    ResidualAdapterBottleneck,
     HistologicalMaskDecoder,
     MedSAM_WSSS_Adapter,
+    ResidualAdapterBottleneck,
 )
 from src.training.train_proposed_sam import (
     CompositeWSSSLoss,
     SyntheticHistologyDataset,
-    train_one_epoch,
     evaluate,
-    save_checkpoint,
     load_checkpoint,
+    save_checkpoint,
+    train_one_epoch,
 )
-
 
 # ==============================================================================
 # 1. Tests for CAMPromptGenerator

@@ -1,6 +1,6 @@
-# SE374.R11 - Gói Mã Nguồn Module Hóa Trên Google Drive (`src/colab_pkg`)
+# BCSS-WSSS - Gói Mã Nguồn Module Hóa Trên Google Drive (`src/colab_pkg`)
 
-Thư mục `src/colab_pkg/` chứa toàn bộ mã nguồn thực nghiệm phân vùng mô bệnh học giám sát yếu (BCSS-WSSS) đã được tách rời khỏi Notebook theo kiến trúc Clean Modular Architecture. Bạn chỉ cần tải thư mục `src/colab_pkg` lên Google Drive (ví dụ: `/content/drive/MyDrive/SE374_WSSS_Code/colab_pkg`), sau đó gọi thực thi trong Notebook chỉ với 1-3 dòng lệnh.
+Thư mục `src/colab_pkg/` chứa toàn bộ mã nguồn thực nghiệm phân vùng mô bệnh học giám sát yếu (BCSS-WSSS) đã được tách rời khỏi Notebook theo kiến trúc Clean Modular Architecture. Bạn chỉ cần tải thư mục `src/colab_pkg` lên Google Drive (ví dụ: `/content/drive/MyDrive/SE374_WSSS_Drive_Code/colab_pkg`), sau đó gọi thực thi trong Notebook chỉ với 1-3 dòng lệnh.
 
 ## 1. Cấu Trúc Các Module Trong `src/colab_pkg/`
 
@@ -20,7 +20,7 @@ from google.colab import drive
 import sys
 
 drive.mount('/content/drive')
-sys.path.insert(0, '/content/drive/MyDrive/SE374_WSSS_Code')
+sys.path.insert(0, '/content/drive/MyDrive/SE374_WSSS_Drive_Code')
 
 from colab_pkg import run_bcss_wsss_experiment
 

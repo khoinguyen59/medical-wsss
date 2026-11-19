@@ -1,5 +1,5 @@
 """
-Evaluator & Statistical Audit Module for SE374.R11 BCSS-WSSS Pipeline.
+Evaluator & Statistical Audit Module for BCSS-WSSS Pipeline.
 
 Provides:
 1. ColabSegmentationEvaluator: 4-class (WSSS-Tissue ROI) and 5-class (Global with BACK)
@@ -12,25 +12,30 @@ Provides:
 All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
-from collections import defaultdict
 import csv
 import datetime
 import json
-from pathlib import Path
+import os
 import shutil
+import time
+from collections import defaultdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-import cv2
+
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
 from scipy import stats
-import torch
 
 try:
     from src.losses_metrics.metrics import (
         compute_boundary_f1,
         compute_fwiou,
         compute_patient_biomarker_correlation,
-        compute_pixel_accuracy,
     )
     from src.models.coarse_to_fine_router import (
         CoarseToFineAdaptiveRouter,
@@ -42,7 +47,6 @@ except ImportError:
             compute_boundary_f1,
             compute_fwiou,
             compute_patient_biomarker_correlation,
-            compute_pixel_accuracy,
         )
         from models.coarse_to_fine_router import (
             CoarseToFineAdaptiveRouter,
@@ -83,6 +87,337 @@ LUAD_CLASS_LABELS: List[str] = [
 ]
 
 
+# ==============================================================================
+# Helper Imports for Evaluator Baselines (Otsu & Progressive Dropout Attention)
+# ==============================================================================
+
+try:
+    from src.datasets.otsu_filter import (
+        apply_otsu_gating_to_prediction,
+        compute_otsu_tissue_mask,
+    )
+except ImportError:
+    try:
+        from datasets.otsu_filter import (
+            apply_otsu_gating_to_prediction,
+            compute_otsu_tissue_mask,
+        )
+    except ImportError:
+        def compute_otsu_tissue_mask(image, saturation_threshold_multiplier=0.8):
+            try:
+                from .model_loader import OtsuClinicalGating
+                return OtsuClinicalGating.compute_tissue_mask(image, saturation_threshold_multiplier)
+            except Exception:
+                img_np = np.asarray(image)
+                return np.ones(img_np.shape[:2], dtype=np.uint8)
+
+        def apply_otsu_gating_to_prediction(pred_mask, raw_rgb, background_class_idx=4):
+            try:
+                from .model_loader import OtsuClinicalGating
+                return OtsuClinicalGating.apply_gating(pred_mask, raw_rgb, background_class_idx)
+            except Exception:
+                return pred_mask
+
+try:
+    from src.models.pda_generator import ProgressiveDropoutAttention
+except ImportError:
+    try:
+        from models.pda_generator import ProgressiveDropoutAttention
+    except ImportError:
+        from .pda_generator import ProgressiveDropoutAttention
+
+
+def predict_uniform_multiscale_baseline(
+    model: nn.Module,
+    img_tensor: torch.Tensor,
+    raw_rgb: Optional[np.ndarray] = None,
+    model_stage1: Optional[nn.Module] = None,
+    scales: Tuple[float, ...] = (0.75, 1.0, 1.25),
+    apply_cgm: bool = True,
+    cls_threshold: float = 0.10,
+    background_class_idx: int = 4,
+    device: Optional[torch.device] = None,
+) -> Tuple[np.ndarray, float]:
+    """Uniform Multi-Scale Baseline Prediction (1/3, 1/3, 1/3 equal weights without entropy weighting).
+
+    Averages predictions across scales [0.75, 1.0, 1.25] with uniform weighting,
+    providing the authoritative ablation baseline to prove that the performance gains of
+    M6 (Entropy-Weighted Multi-Scale) derive specifically from predictive confidence gating
+    rather than simply processing multiple resolutions.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Stage-2 DeepLabV3+ segmentation model.
+    img_tensor : torch.Tensor
+        Input image tensor (1, 3, H, W) or (3, H, W) normalized.
+    raw_rgb : Optional[np.ndarray]
+        Original unnormalized RGB image (H, W, 3) for Otsu gating.
+    model_stage1 : Optional[nn.Module]
+        Stage-1 Net_CAM model for Classification Gate Mechanism (CGM).
+    scales : Tuple[float, ...]
+        Tuple of pyramid scale factors (default: (0.75, 1.0, 1.25)).
+    apply_cgm : bool
+        Whether to apply Stage-1 CGM gating (suppressing absent classes).
+    cls_threshold : float
+        CGM threshold for tissue class presence (default: 0.10).
+    background_class_idx : int
+        Class index for glass/background (default: 4).
+    device : Optional[torch.device]
+        Execution device.
+
+    Returns
+    -------
+    pred_mask : np.ndarray
+        Discrete segmentation mask (H, W) in [0, 4].
+    latency_sec : float
+        Inference execution time in seconds.
+    """
+    t0 = time.perf_counter()
+    dev = device or next(model.parameters()).device
+    x_base = img_tensor.to(dev) if img_tensor.device != dev else img_tensor
+    if x_base.dim() == 3:
+        x_base = x_base.unsqueeze(0)
+
+    h_orig, w_orig = int(x_base.shape[-2]), int(x_base.shape[-1])
+    n_scales = len(scales)
+    uniform_weight = 1.0 / float(n_scales)
+
+    accumulated_probs = np.zeros((4, h_orig, w_orig), dtype=np.float32)
+
+    with torch.no_grad():
+        for s in scales:
+            if abs(float(s) - 1.0) < 1e-4:
+                x_scaled = x_base
+            else:
+                sh = max(8, int(round(h_orig * float(s))))
+                sw = max(8, int(round(w_orig * float(s))))
+                x_scaled = F.interpolate(
+                    x_base, size=(sh, sw), mode="bilinear", align_corners=True
+                )
+
+            output = model(x_scaled)
+            if isinstance(output, tuple):
+                logits = output[0]
+            elif isinstance(output, dict):
+                logits = output.get("out", output.get("logits", None))
+            else:
+                logits = output
+
+            probs = torch.softmax(logits.float(), dim=1)
+            if probs.shape[-2:] != (h_orig, w_orig):
+                probs = F.interpolate(
+                    probs, size=(h_orig, w_orig), mode="bilinear", align_corners=True
+                )
+
+            # Restrict to 4 foreground classes [TUM, STR, LYM, NEC]
+            probs_np = probs[0, :4].detach().cpu().numpy().astype(np.float32)
+            accumulated_probs += uniform_weight * probs_np
+
+        # Stage-1 Classification Gate Mechanism (CGM)
+        if model_stage1 is not None and apply_cgm:
+            dev_s1 = next(model_stage1.parameters()).device
+            x_s1 = x_base.to(dev_s1) if x_base.device != dev_s1 else x_base
+            if hasattr(model_stage1, "forward_cam"):
+                _, y_cls = model_stage1.forward_cam(x_s1)
+            else:
+                y_cls = model_stage1(x_s1)
+            y_cls_np = y_cls.squeeze(0).detach().cpu().numpy().astype(np.float32)
+            cgm_gate = (y_cls_np > cls_threshold).astype(np.float32)
+            if cgm_gate.sum() == 0:
+                cgm_gate = np.ones((4,), dtype=np.float32)
+            accumulated_probs *= cgm_gate.reshape(4, 1, 1)
+
+        denom = np.maximum(accumulated_probs.sum(axis=0, keepdims=True), 1e-8)
+        probs_normalized = (accumulated_probs / denom).astype(np.float32)
+        pred_mask = np.argmax(probs_normalized, axis=0).astype(np.uint8)
+
+        # Apply clinical Otsu saturation gating
+        if raw_rgb is not None:
+            pred_mask = apply_otsu_gating_to_prediction(
+                pred_mask, raw_rgb, background_class_idx=background_class_idx
+            )
+
+    t_elapsed = time.perf_counter() - t0
+    return pred_mask, t_elapsed
+
+
+def predict_pda_ablation(
+    model_stage1: nn.Module,
+    img_tensor: torch.Tensor,
+    raw_rgb: Optional[np.ndarray] = None,
+    mode: str = "full_pda_otsu",
+    num_steps: int = 3,
+    top_p: float = 0.25,
+    bg_threshold: float = 0.20,
+    cls_threshold: float = 0.10,
+    device: Optional[torch.device] = None,
+) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+    """Progressive Dropout Attention (PDA) Systematic Ablation Evaluator.
+
+    Generates segmentation predictions for the 3 key PDA ablation configurations:
+    1. 'raw_cam': Initial unexpanded Class Activation Map (T=0, baseline focal hotspot).
+    2. 'naive_erasing': Progressive spatial erasing without prototype cosine gating (boundary bleeding).
+    3. 'full_pda_otsu': Full PDA (spatial + channel dropout + prototype cosine gating) + Otsu clinical gating.
+
+    Parameters
+    ----------
+    model_stage1 : nn.Module
+        Stage-1 WSSSTissueStage1NetCAM model.
+    img_tensor : torch.Tensor
+        Input image tensor (1, 3, H, W) normalized.
+    raw_rgb : Optional[np.ndarray]
+        Original unnormalized RGB image (H, W, 3).
+    mode : str
+        Ablation configuration: 'raw_cam', 'naive_erasing', 'full_pda_otsu', or 'all'.
+    num_steps : int
+        Number of progressive erasing steps T (default: 3).
+    top_p : float
+        Top percentile fraction to extinguish (default: 0.25).
+    bg_threshold : float
+        Sensitivity threshold for tissue vs background (default: 0.20).
+    cls_threshold : float
+        Presence threshold for label gating (default: 0.10).
+    device : Optional[torch.device]
+        Device to execute inference on.
+
+    Returns
+    -------
+    Union[np.ndarray, Dict[str, np.ndarray]]
+        If mode is specific: (H, W) discrete mask in [0, 4].
+        If mode is 'all': Dict mapping mode_name -> (H, W) discrete mask.
+    """
+    valid_modes = {"raw_cam", "naive_erasing", "full_pda_otsu", "all"}
+    if mode not in valid_modes:
+        raise ValueError(f"Invalid mode '{mode}'. Expected one of {valid_modes}")
+
+    dev = device or next(model_stage1.parameters()).device
+    x_in = img_tensor.to(dev) if img_tensor.device != dev else img_tensor
+    if x_in.dim() == 3:
+        x_in = x_in.unsqueeze(0)
+
+    if raw_rgb is not None:
+        h_img, w_img = raw_rgb.shape[:2]
+    else:
+        h_img, w_img = int(x_in.shape[-2]), int(x_in.shape[-1])
+
+    with torch.no_grad():
+        if hasattr(model_stage1, "forward_backbone"):
+            conv6 = model_stage1.forward_backbone(x_in)
+        elif hasattr(model_stage1, "features"):
+            conv6 = model_stage1.features(x_in)
+        elif hasattr(model_stage1, "conv6"):
+            conv6 = model_stage1.conv6(x_in)
+        else:
+            conv6 = x_in
+
+        if hasattr(model_stage1, "fc8"):
+            fc_weight = model_stage1.fc8.weight
+        elif hasattr(model_stage1, "classifier"):
+            fc_weight = model_stage1.classifier.weight
+        elif hasattr(model_stage1, "fc"):
+            fc_weight = model_stage1.fc.weight
+        else:
+            fc_weight = None
+
+        if fc_weight is not None:
+            w = fc_weight.unsqueeze(-1).unsqueeze(-1) if fc_weight.dim() == 2 else fc_weight
+            d_feat = conv6.shape[1]
+            d_w = w.shape[1]
+            if d_feat != d_w:
+                w = w[:, :d_feat, :, :] if d_feat < d_w else F.pad(w, (0, 0, 0, 0, 0, d_feat - d_w))
+            fc_weight = w
+
+        if hasattr(model_stage1, "forward_cam"):
+            _, y_cls = model_stage1.forward_cam(x_in)
+        else:
+            y_cls = model_stage1(x_in)
+
+        y_cls_np = y_cls.squeeze(0).detach().cpu().numpy().astype(np.float32)
+        gate = (y_cls_np > cls_threshold).astype(np.float32)
+        if gate.sum() == 0:
+            gate = np.ones((4,), dtype=np.float32)
+
+        gate_t = torch.from_numpy(gate).to(dev).view(1, 4, 1, 1)
+        results: Dict[str, np.ndarray] = {}
+
+        # 1. Mode: raw_cam (Step 0 CAM, no erasing, no gating)
+        if mode in ("raw_cam", "all"):
+            if fc_weight is not None:
+                cam_0 = F.relu(F.conv2d(conv6, fc_weight))
+            else:
+                cam_0 = conv6[:, :4, :, :]
+            cam_0 = F.interpolate(cam_0, size=(h_img, w_img), mode="bilinear", align_corners=False)
+            cam_0 = cam_0 * gate_t
+
+            # Min-max normalization per class
+            b, c, h, w = cam_0.shape
+            flat = cam_0.view(b, c, -1)
+            min_v = flat.min(dim=-1, keepdim=True)[0].view(b, c, 1, 1)
+            max_v = flat.max(dim=-1, keepdim=True)[0].view(b, c, 1, 1)
+            norm_cam_0 = ((cam_0 - min_v) / (max_v - min_v + 1e-7)) * gate_t
+            cams_np = norm_cam_0[0].detach().cpu().numpy().astype(np.float32)
+
+            bg_channel = np.full((1, h_img, w_img), fill_value=bg_threshold, dtype=np.float32)
+            vol_raw = np.concatenate([cams_np, bg_channel], axis=0)
+            results["raw_cam"] = np.argmax(vol_raw, axis=0).astype(np.uint8)
+
+        # 2. Mode: naive_erasing (Progressive spatial erasing WITHOUT prototype cosine gating)
+        if mode in ("naive_erasing", "all"):
+            pda_naive = ProgressiveDropoutAttention(
+                num_steps=num_steps,
+                top_p=top_p,
+                base_dropout_rate=0.50,
+                step_weight_decay=0.80,
+                boundary_bleeding_control=False,
+                spatial_masking=True,
+                channel_masking=False,
+            )
+            w = fc_weight.unsqueeze(-1).unsqueeze(-1) if (fc_weight is not None and fc_weight.dim() == 2) else fc_weight
+            cam_naive = pda_naive(conv6, w) if w is not None else conv6[:, :4, :, :]
+            cam_naive = F.interpolate(cam_naive, size=(h_img, w_img), mode="bilinear", align_corners=False)
+            cam_naive = cam_naive * gate_t
+            cams_naive_np = cam_naive[0].detach().cpu().numpy().astype(np.float32)
+
+            bg_channel = np.full((1, h_img, w_img), fill_value=bg_threshold, dtype=np.float32)
+            vol_naive = np.concatenate([cams_naive_np, bg_channel], axis=0)
+            results["naive_erasing"] = np.argmax(vol_naive, axis=0).astype(np.uint8)
+
+        # 3. Mode: full_pda_otsu (Full PDA with Prototype Gating + Clinical Otsu Gating)
+        if mode in ("full_pda_otsu", "all"):
+            pda_full = ProgressiveDropoutAttention(
+                num_steps=num_steps,
+                top_p=top_p,
+                base_dropout_rate=0.50,
+                step_weight_decay=0.80,
+                boundary_bleeding_control=True,
+                spatial_masking=True,
+                channel_masking=True,
+            )
+            w = fc_weight.unsqueeze(-1).unsqueeze(-1) if (fc_weight is not None and fc_weight.dim() == 2) else fc_weight
+            cam_full = pda_full(conv6, w) if w is not None else conv6[:, :4, :, :]
+            cam_full = F.interpolate(cam_full, size=(h_img, w_img), mode="bilinear", align_corners=False)
+            cam_full = cam_full * gate_t
+            cams_full_np = cam_full[0].detach().cpu().numpy().astype(np.float32)
+
+            if raw_rgb is not None:
+                tissue_mask = compute_otsu_tissue_mask(raw_rgb)
+            else:
+                tissue_mask = np.ones((h_img, w_img), dtype=np.uint8)
+
+            bg_channel = np.full((1, h_img, w_img), fill_value=bg_threshold, dtype=np.float32)
+            bg_channel[0, tissue_mask == 0] = 1.0  # Force background on glass
+
+            vol_full = np.concatenate([cams_full_np, bg_channel], axis=0)
+            pred_full = np.argmax(vol_full, axis=0).astype(np.uint8)
+            pred_full[tissue_mask == 0] = 4
+            results["full_pda_otsu"] = pred_full
+
+    if mode == "all":
+        return results
+    return results[mode]
+
+
 class ColabSegmentationEvaluator:
     """Evaluates 4-class WSSS-Tissue ROI and 5-class global segmentation metrics."""
 
@@ -95,32 +430,53 @@ class ColabSegmentationEvaluator:
         self.class_names = class_names or list(CLASS_CODES)
         self.confusion_matrix = np.zeros((num_classes, num_classes), dtype=np.int64)
         self.confusion_matrix_4cls = np.zeros((4, 4), dtype=np.int64)
+        self.fn_to_bg_4cls = np.zeros(4, dtype=np.int64)
         self.patch_miou_4cls: List[float] = []
         self.patch_mdice_4cls: List[float] = []
         self.patch_fwiou: List[float] = []
         self.patch_bf1: List[float] = []
+        self.patch_patient_ids: List[str] = []
         self.patient_cm_4cls: Dict[str, np.ndarray] = defaultdict(
             lambda: np.zeros((4, 4), dtype=np.int64)
         )
+        self.patient_fn_bg_4cls: Dict[str, np.ndarray] = defaultdict(
+            lambda: np.zeros(4, dtype=np.int64)
+        )
+
+    @property
+    def patch_mious(self) -> List[float]:
+        """Backward-compatible alias for patch_miou_4cls."""
+        return self.patch_miou_4cls
 
     def reset(self) -> None:
         """Resets all accumulators."""
         self.confusion_matrix.fill(0)
         self.confusion_matrix_4cls.fill(0)
+        self.fn_to_bg_4cls.fill(0)
         self.patch_miou_4cls.clear()
         self.patch_mdice_4cls.clear()
         self.patch_fwiou.clear()
         self.patch_bf1.clear()
+        self.patch_patient_ids.clear()
         self.patient_cm_4cls.clear()
+        self.patient_fn_bg_4cls.clear()
 
     @staticmethod
-    def _compute_4cls_miou_mdice_from_cm(cm4: np.ndarray) -> Tuple[float, float]:
+    def _compute_4cls_miou_mdice_from_cm(
+        cm4: np.ndarray,
+        fn_to_bg: Optional[np.ndarray] = None,
+    ) -> Tuple[float, float]:
         """Helper to compute (mIoU_pct, mDice_pct) from a 4x4 confusion matrix."""
-        if cm4.sum() <= 0:
+        fn_extra = (
+            np.asarray(fn_to_bg, dtype=np.float64)
+            if fn_to_bg is not None
+            else np.zeros(4, dtype=np.float64)
+        )
+        if cm4.sum() <= 0 and fn_extra.sum() <= 0:
             return 0.0, 0.0
         tp4 = np.diag(cm4).astype(np.float64)
         fp4 = (cm4.sum(axis=0) - tp4).astype(np.float64)
-        fn4 = (cm4.sum(axis=1) - tp4).astype(np.float64)
+        fn4 = (cm4.sum(axis=1) - tp4 + fn_extra).astype(np.float64)
         denom_iou4 = tp4 + fp4 + fn4
         denom_dice4 = 2.0 * tp4 + fp4 + fn4
         v_iou4 = denom_iou4 > 0
@@ -158,6 +514,14 @@ class ColabSegmentationEvaluator:
         # Update 4x4 WSSS-Tissue ROI confusion matrix: mask = (gt >= 0) & (gt < 4)
         p4_flat = pred_raw_4cls.flatten() if pred_raw_4cls is not None else p_flat
         valid_4 = (t_flat >= 0) & (t_flat < 4) & (p4_flat >= 0) & (p4_flat < 4)
+        fn_bg_mask = (t_flat >= 0) & (t_flat < 4) & (p4_flat == 4)
+        fn_bg_patch = (
+            np.bincount(t_flat[fn_bg_mask], minlength=4)
+            if np.any(fn_bg_mask)
+            else np.zeros(4, dtype=np.int64)
+        )
+        if np.any(fn_bg_mask):
+            self.fn_to_bg_4cls += fn_bg_patch
         t4_v = t_flat[valid_4]
         p4_v = p4_flat[valid_4]
         encoded_4 = t4_v * 4 + p4_v
@@ -165,9 +529,10 @@ class ColabSegmentationEvaluator:
         self.confusion_matrix_4cls += counts_4
 
         # Record per-patch mIoU and mDice for paired statistical significance tests
-        p_miou, p_mdice = self._compute_4cls_miou_mdice_from_cm(counts_4)
+        p_miou, p_mdice = self._compute_4cls_miou_mdice_from_cm(counts_4, fn_to_bg=fn_bg_patch)
         self.patch_miou_4cls.append(p_miou)
         self.patch_mdice_4cls.append(p_mdice)
+        self.patch_patient_ids.append(patient_id if patient_id is not None else "")
 
         try:
             p_fwiou = compute_fwiou(pred, target, num_classes=self.num_classes)
@@ -182,10 +547,11 @@ class ColabSegmentationEvaluator:
 
         if patient_id is not None:
             self.patient_cm_4cls[patient_id] += counts_4
+            self.patient_fn_bg_4cls[patient_id] += fn_bg_patch
 
     def compute_patient_level_metrics(self, n_bootstrap: int = 500, seed: int = 42) -> Dict[str, Any]:
         """Computes mean, std, and patient-cluster bootstrap 95% CIs of 4-class mIoU/mDice across distinct patients."""
-        if not self.patient_cm_4cls:
+        if not self.patient_cm_4cls and not self.patient_fn_bg_4cls:
             return {
                 "patient_count": 0,
                 "patient_miou_mean": 0.0,
@@ -198,12 +564,19 @@ class ColabSegmentationEvaluator:
         p_mious: List[float] = []
         p_mdices: List[float] = []
         valid_cms: List[np.ndarray] = []
-        for pcm in self.patient_cm_4cls.values():
-            if pcm.sum() > 0:
-                miou_val, mdice_val = self._compute_4cls_miou_mdice_from_cm(pcm)
+        valid_fns: List[np.ndarray] = []
+        all_pids = list(
+            dict.fromkeys(list(self.patient_cm_4cls.keys()) + list(self.patient_fn_bg_4cls.keys()))
+        )
+        for pid in all_pids:
+            pcm = self.patient_cm_4cls.get(pid, np.zeros((4, 4), dtype=np.int64))
+            pfn = self.patient_fn_bg_4cls.get(pid, np.zeros(4, dtype=np.int64))
+            if pcm.sum() > 0 or pfn.sum() > 0:
+                miou_val, mdice_val = self._compute_4cls_miou_mdice_from_cm(pcm, fn_to_bg=pfn)
                 p_mious.append(miou_val)
                 p_mdices.append(mdice_val)
                 valid_cms.append(pcm)
+                valid_fns.append(pfn)
         if not p_mious:
             return {
                 "patient_count": 0,
@@ -219,12 +592,14 @@ class ColabSegmentationEvaluator:
         if k_patients >= 2 and n_bootstrap > 0:
             rng = np.random.RandomState(seed)
             cm_stack = np.stack(valid_cms, axis=0)  # (K, 4, 4)
+            fn_stack = np.stack(valid_fns, axis=0)  # (K, 4)
             boot_mious: List[float] = []
             boot_mdices: List[float] = []
             for _ in range(n_bootstrap):
                 idx = rng.randint(0, k_patients, size=k_patients)
                 agg_cm = np.sum(cm_stack[idx], axis=0)
-                bm, bd = self._compute_4cls_miou_mdice_from_cm(agg_cm)
+                agg_fn = np.sum(fn_stack[idx], axis=0)
+                bm, bd = self._compute_4cls_miou_mdice_from_cm(agg_cm, fn_to_bg=agg_fn)
                 boot_mious.append(bm)
                 boot_mdices.append(bd)
             ci_miou = [float(np.percentile(boot_mious, 2.5)), float(np.percentile(boot_mious, 97.5))]
@@ -274,10 +649,10 @@ class ColabSegmentationEvaluator:
         mdice_5cls = float(np.mean(dice[valid_dice])) if np.any(valid_dice) else 0.0
 
         cm4 = self.confusion_matrix_4cls
-        if cm4.sum() > 0:
+        if cm4.sum() > 0 or self.fn_to_bg_4cls.sum() > 0:
             tp4 = np.diag(cm4).astype(np.float64)
             fp4 = (cm4.sum(axis=0) - tp4).astype(np.float64)
-            fn4 = (cm4.sum(axis=1) - tp4).astype(np.float64)
+            fn4 = (cm4.sum(axis=1) - tp4 + self.fn_to_bg_4cls).astype(np.float64)
             denom_iou4 = tp4 + fp4 + fn4
             denom_dice4 = 2.0 * tp4 + fp4 + fn4
             denom_prec4 = tp4 + fp4
@@ -296,7 +671,7 @@ class ColabSegmentationEvaluator:
             rec4[v_rec4] = tp4[v_rec4] / denom_rec4[v_rec4]
             miou_4cls = float(np.mean(iou4[v_iou4])) if np.any(v_iou4) else 0.0
             mdice_4cls = float(np.mean(dice4[v_dice4])) if np.any(v_dice4) else 0.0
-            accuracy_4cls = float(np.sum(tp4) / max(float(cm4.sum()), 1.0))
+            accuracy_4cls = float(np.sum(tp4) / max(float(cm4.sum() + self.fn_to_bg_4cls.sum()), 1.0))
             iou[:4] = iou4
             dice[:4] = dice4
             prec[:4] = prec4
@@ -386,8 +761,8 @@ def _paired_test_arrays(
     mean_diff = float(np.mean(diffs))
     std_diff = float(np.std(diffs, ddof=1)) if n > 1 else 0.0
     sem_diff = std_diff / np.sqrt(n) if n > 1 else 0.0
-    ci95_low = float(mean_diff - 1.96 * sem_diff)
-    ci95_high = float(mean_diff + 1.96 * sem_diff)
+    ci95_low = float(mean_diff - _ci_multiplier(n) * sem_diff)
+    ci95_high = float(mean_diff + _ci_multiplier(n) * sem_diff)
     cohens_d = float(mean_diff / std_diff) if std_diff > 1e-12 else 0.0
 
     # If all differences are near zero, p-value is 1.0
@@ -431,8 +806,122 @@ def _paired_test_arrays(
         "wilcoxon_stat": w_stat,
         "wilcoxon_pvalue": w_pval,
         "cohens_d": cohens_d,
-        "significant_p05": bool(w_pval < 0.05 or t_pval < 0.05),
+        "significant_p05": bool(w_pval < 0.05),
+        "t_significant_p05": bool(t_pval < 0.05),
+        "analysis_level": "patch_level_exploratory",
     }
+
+
+def holm_bonferroni_correction(
+    p_values: Dict[str, float],
+    alpha: float = 0.05,
+) -> Dict[str, Dict[str, Any]]:
+    """Applies step-down Holm-Bonferroni family-wise error rate (FWER) correction.
+
+    Args:
+        p_values: Mapping of comparison_key -> raw p-value in [0, 1].
+        alpha: Family-wise significance level (default 0.05).
+
+    Returns:
+        Mapping of comparison_key -> {
+            'raw_pvalue': float,
+            'holm_adjusted_pvalue': float,
+            'significant_holm_p05': bool,
+            'rank': int,
+        }
+    """
+    m = len(p_values)
+    if m == 0:
+        return {}
+    sorted_items = sorted(p_values.items(), key=lambda kv: float(kv[1]))
+    adjusted: Dict[str, Dict[str, Any]] = {}
+    running_max = 0.0
+    reject_so_far = True
+    for idx, (key, raw_p) in enumerate(sorted_items):
+        mult = m - idx
+        adj_p = min(1.0, max(running_max, float(raw_p) * mult))
+        running_max = adj_p
+        threshold = alpha / float(mult)
+        if float(raw_p) > threshold:
+            reject_so_far = False
+        adjusted[key] = {
+            "raw_pvalue": float(raw_p),
+            "holm_adjusted_pvalue": float(adj_p),
+            "significant_holm_p05": bool(reject_so_far),
+            "rank": idx + 1,
+        }
+    return adjusted
+
+
+def _ci_multiplier(n: int) -> float:
+    """Two-sided 95% critical value: Student t (df=n-1) for small n, 1.96 for n >= 30."""
+    if n < 2:
+        return 1.96
+    return float(stats.t.ppf(0.975, df=n - 1)) if n < 30 else 1.96
+
+
+def compute_patient_level_paired_test(
+    scores_method: np.ndarray,
+    scores_base: np.ndarray,
+    patient_ids: List[str],
+    n_bootstrap: int = 2000,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Patient-level paired test (unit of analysis = patient, avoids patch pseudo-replication).
+
+    Averages per-patch mIoU within each patient, then runs a paired Wilcoxon signed-rank
+    test on patient means and a patient-cluster bootstrap 95% CI of the mean difference.
+    Significance is defined by the Wilcoxon p-value ONLY (no OR with the t-test).
+    The parametric CI uses the Student t quantile (df = n_patients - 1).
+    """
+    pids = [str(p) for p in patient_ids]
+    n = min(len(scores_method), len(scores_base), len(pids))
+    uniq = sorted(set(pids[:n]))
+    k = len(uniq)
+    out: Dict[str, Any] = {"analysis_level": "patient_level", "n_patients": int(k), "n_patches": int(n)}
+    if k < 2:
+        out.update({"mean_diff": 0.0, "wilcoxon_stat": 0.0, "wilcoxon_pvalue": 1.0,
+                    "bootstrap_ci95": [0.0, 0.0], "t_quantile_ci95": [0.0, 0.0],
+                    "significant_p05": False})
+        return out
+    arr_m = np.asarray(scores_method[:n], dtype=np.float64)
+    arr_b = np.asarray(scores_base[:n], dtype=np.float64)
+    pid_arr = np.asarray(pids[:n])
+    mean_m = np.array([arr_m[pid_arr == u].mean() for u in uniq])
+    mean_b = np.array([arr_b[pid_arr == u].mean() for u in uniq])
+    diffs = mean_m - mean_b
+    mean_diff = float(np.mean(diffs))
+    std_diff = float(np.std(diffs, ddof=1))
+    sem = std_diff / np.sqrt(k)
+    mult = _ci_multiplier(k)
+
+    try:
+        if np.all(np.abs(diffs) < 1e-12):
+            w_stat, w_pval = 0.0, 1.0
+        else:
+            w_res = stats.wilcoxon(diffs, zero_method="zsplit", alternative="two-sided")
+            w_stat = float(0.0 if np.isnan(w_res.statistic) else w_res.statistic)
+            w_pval = float(1.0 if np.isnan(w_res.pvalue) else w_res.pvalue)
+    except Exception:
+        w_stat, w_pval = 0.0, 1.0
+
+    rng = np.random.RandomState(seed)
+    boot = np.empty(n_bootstrap, dtype=np.float64)
+    for b_i in range(n_bootstrap):
+        idx = rng.randint(0, k, size=k)
+        boot[b_i] = diffs[idx].mean()
+    out.update({
+        "patient_mean_method": float(np.mean(mean_m)),
+        "patient_mean_base": float(np.mean(mean_b)),
+        "mean_diff": mean_diff,
+        "std_diff": std_diff,
+        "wilcoxon_stat": w_stat,
+        "wilcoxon_pvalue": w_pval,
+        "bootstrap_ci95": [float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))],
+        "t_quantile_ci95": [float(mean_diff - mult * sem), float(mean_diff + mult * sem)],
+        "significant_p05": bool(w_pval < 0.05),
+    })
+    return out
 
 
 def compute_paired_statistical_tests(
@@ -455,6 +944,36 @@ def compute_paired_statistical_tests(
             "miou_paired_test": _paired_test_arrays(m_miou, base_miou),
             "mdice_paired_test": _paired_test_arrays(m_mdice, base_mdice),
         }
+        # Additive patient-level (non pseudo-replicated) result; patch-level keys above
+        # are exploratory only.
+        m_pids = list(getattr(m_eval, "patch_patient_ids", []))
+        b_pids = list(getattr(base_eval, "patch_patient_ids", []))
+        if m_pids and len(m_pids) == len(m_miou) and m_pids == b_pids:
+            results[m_key]["miou_patient_level_test"] = compute_patient_level_paired_test(
+                m_miou, base_miou, m_pids
+            )
+
+    # Apply Holm-Bonferroni correction across all non-baseline comparisons
+    non_base_keys = [k for k in results if k != baseline_key]
+    patch_pvals = {
+        k: float(results[k]["miou_paired_test"]["wilcoxon_pvalue"])
+        for k in non_base_keys
+    }
+    holm_patch = holm_bonferroni_correction(patch_pvals, alpha=0.05)
+    for k, h_info in holm_patch.items():
+        results[k]["miou_paired_test"]["holm_adjusted_pvalue"] = h_info["holm_adjusted_pvalue"]
+        results[k]["miou_paired_test"]["significant_holm_p05"] = h_info["significant_holm_p05"]
+
+    patient_pvals = {
+        k: float(results[k]["miou_patient_level_test"]["wilcoxon_pvalue"])
+        for k in non_base_keys
+        if "miou_patient_level_test" in results[k]
+    }
+    holm_patient = holm_bonferroni_correction(patient_pvals, alpha=0.05)
+    for k, h_info in holm_patient.items():
+        results[k]["miou_patient_level_test"]["holm_adjusted_pvalue"] = h_info["holm_adjusted_pvalue"]
+        results[k]["miou_patient_level_test"]["significant_holm_p05"] = h_info["significant_holm_p05"]
+
     return results
 
 
@@ -790,7 +1309,7 @@ def export_evaluation_artifacts(
         if sanity_mode
         else "Full Mode (Toàn bộ tập test 4.986 mảng ảnh)"
     )
-    report_md = f"""# SE374.R11: Báo Cáo Đánh Giá Phân Vùng Mô Bệnh Học WSSS
+    report_md = f"""# Báo Cáo Đánh Giá Phân Vùng Mô Bệnh Học WSSS
 ## Google Colab SOTA DeepLabV3+ Multi-Method Ablation Benchmark trên Tập Dữ Liệu TCGA-BRCA (BCSS-WSSS)
 
 - **Mã phiên thực nghiệm:** `{run_folder_name}`
@@ -917,7 +1436,6 @@ def _evaluate_patch_cohort(
     if model_stage1 is not None:
         model_stage1.eval()
 
-    total = len(file_list)
     with torch.no_grad():
         for idx, p in enumerate(file_list):
             m_path = m_dir / p.name
@@ -1094,8 +1612,8 @@ def run_val_to_test_scientific_protocol(
 
     val_cm = best_val_metrics.get("confusion_matrix", np.zeros((5, 5)))
     test_cm = test_metrics.get("confusion_matrix", np.zeros((5, 5)))
-    val_pixels = float(val_cm.sum()) if hasattr(val_cm, "sum") else 0.0
-    test_pixels = float(test_cm.sum()) if hasattr(test_cm, "sum") else 0.0
+    val_pixels = float(np.asarray(val_cm, dtype=np.float64).sum()) if val_cm is not None else 0.0
+    test_pixels = float(np.asarray(test_cm, dtype=np.float64).sum()) if test_cm is not None else 0.0
 
     if val_pixels <= 0.0 or test_pixels <= 0.0:
         gen_gap = float("nan")
@@ -1415,5 +1933,202 @@ def run_cross_dataset_luad_benchmark(
         with open(metrics_file, "w", encoding="utf-8") as mf:
             json.dump(sanitize_for_json(res), mf, indent=2)
         print(f"[OK] Đã lưu báo cáo LUAD-HistoSeg JSON vào: {report_file.resolve()}")
+
+    return res
+
+
+# ==============================================================================
+# Evaluator Study Runners: Multi-Scale Baseline & PDA Ablations
+# ==============================================================================
+
+def run_multiscale_baseline_comparison(
+    engine: Any,
+    model_stage2: torch.nn.Module,
+    test_files: List[Path],
+    test_mask_dir: Union[str, Path],
+    model_stage1: Optional[torch.nn.Module] = None,
+    scales: Tuple[float, ...] = (0.75, 1.0, 1.25),
+    device: Optional[Union[str, torch.device]] = None,
+    output_dir: Optional[Union[str, Path]] = None,
+    max_samples: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Runs direct comparative benchmark: M6 (Entropy-Weighted) vs Uniform Multi-Scale Baseline.
+
+    Ablation Study: Proves that M6 predictive confidence entropy weighting outperforms
+    uniform multi-scale averaging (1/3, 1/3, 1/3) across the identical pyramid scales [0.75, 1.0, 1.25].
+    """
+    dev = device if device is not None else next(model_stage2.parameters()).device
+    if isinstance(dev, str):
+        dev = torch.device(dev)
+
+    eval_m6 = ColabSegmentationEvaluator(num_classes=5)
+    eval_unif = ColabSegmentationEvaluator(num_classes=5)
+
+    mask_dir_p = Path(test_mask_dir)
+    files = test_files[:max_samples] if max_samples else test_files
+
+    print("=" * 80)
+    print("PHÂN TÍCH ĐỐI CHỨNG CƠ SỞ: M6 (ENTROPY-WEIGHTED) VS UNIFORM MULTI-SCALE (1/3, 1/3, 1/3)")
+    print(f"Số lượng mẫu kiểm tra: {len(files)} patch | Thiết bị: {dev}")
+    print("=" * 80)
+
+    with torch.no_grad():
+        for p in files:
+            mp = mask_dir_p / p.name
+            if not mp.is_file():
+                candidates = list(mask_dir_p.rglob(p.name))
+                if candidates:
+                    mp = candidates[0]
+                else:
+                    continue
+
+            rgb_arr = np.array(Image.open(p).convert("RGB"))
+            gt_arr = np.array(Image.open(mp), dtype=np.int64)
+            t_in = torch.from_numpy(rgb_arr.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
+            pid = extract_patient_id(p.name)
+
+            # 1. M6: Entropy-Weighted Multi-Scale
+            if hasattr(engine, "predict_m6"):
+                p_m6 = engine.predict_m6(model_stage2, t_in, raw_rgb=rgb_arr, model_stage1=model_stage1)
+            else:
+                p_m6 = engine.predict_m1(model_stage2, t_in)
+
+            # 2. Uniform Multi-Scale Baseline (1/3, 1/3, 1/3)
+            p_unif, _ = predict_uniform_multiscale_baseline(
+                model=model_stage2,
+                img_tensor=t_in,
+                raw_rgb=rgb_arr,
+                model_stage1=model_stage1,
+                scales=scales,
+                device=dev,
+            )
+
+            eval_m6.update(p_m6, gt_arr, patient_id=pid)
+            eval_unif.update(p_unif, gt_arr, patient_id=pid)
+
+    metrics_m6 = eval_m6.compute_metrics()
+    metrics_unif = eval_unif.compute_metrics()
+
+    # Paired test
+    scores_m6 = np.array(eval_m6.patch_miou_4cls)
+    scores_unif = np.array(eval_unif.patch_miou_4cls)
+    diff = scores_m6 - scores_unif
+    try:
+        w_stat, p_val = stats.wilcoxon(scores_m6, scores_unif)
+    except Exception:
+        w_stat, p_val = 0.0, 1.0
+
+    print("-" * 80)
+    print(f"M6 (Entropy-Weighted MS):     mIoU={metrics_m6['mIoU']:.2f}% | mDice={metrics_m6['mDice']:.2f}%")
+    print(f"Uniform Multi-Scale Baseline: mIoU={metrics_unif['mIoU']:.2f}% | mDice={metrics_unif['mDice']:.2f}%")
+    print(f"Delta (M6 - Uniform Baseline): {np.mean(diff):+.2f}% mIoU (Wilcoxon p={p_val:.4e})")
+    print("=" * 80)
+
+    res = {
+        "m6_entropy_weighted": metrics_m6,
+        "uniform_multiscale_baseline": metrics_unif,
+        "delta_miou": float(np.mean(diff)),
+        "wilcoxon_p_value": float(p_val),
+        "wilcoxon_w_stat": float(w_stat),
+        "is_significant_05": bool(p_val < 0.05),
+    }
+
+    if output_dir:
+        out_p = Path(output_dir)
+        out_p.mkdir(parents=True, exist_ok=True)
+        report_p = out_p / "multiscale_baseline_comparison.json"
+        with open(report_p, "w", encoding="utf-8") as f:
+            json.dump(sanitize_for_json(res), f, indent=2)
+        print(f"[OK] Đã lưu báo cáo so sánh Multi-Scale vào: {report_p.resolve()}")
+
+    return res
+
+
+def run_pda_ablation_study(
+    model_stage1: torch.nn.Module,
+    test_files: List[Path],
+    test_mask_dir: Union[str, Path],
+    device: Optional[Union[str, torch.device]] = None,
+    output_dir: Optional[Union[str, Path]] = None,
+    max_samples: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Runs 3-way PDA ablation study: Raw CAM vs Naive Erasing vs Full PDA + Otsu."""
+    dev = device if device is not None else next(model_stage1.parameters()).device
+    if isinstance(dev, str):
+        dev = torch.device(dev)
+
+    eval_raw = ColabSegmentationEvaluator(num_classes=5)
+    eval_naive = ColabSegmentationEvaluator(num_classes=5)
+    eval_full = ColabSegmentationEvaluator(num_classes=5)
+
+    mask_dir_p = Path(test_mask_dir)
+    files = test_files[:max_samples] if max_samples else test_files
+
+    print("=" * 80)
+    print("NGHIÊN CỨU BÓC TÁCH KIẾN TRÚC PDA (PROGRESSIVE DROPOUT ATTENTION ABLATIONS)")
+    print(f"Số lượng mẫu kiểm tra: {len(files)} patch | Thiết bị: {dev}")
+    print("=" * 80)
+
+    with torch.no_grad():
+        for p in files:
+            mp = mask_dir_p / p.name
+            if not mp.is_file():
+                candidates = list(mask_dir_p.rglob(p.name))
+                if candidates:
+                    mp = candidates[0]
+                else:
+                    continue
+
+            rgb_arr = np.array(Image.open(p).convert("RGB"))
+            gt_arr = np.array(Image.open(mp), dtype=np.int64)
+            t_in = torch.from_numpy(rgb_arr.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0).to(dev)
+            pid = extract_patient_id(p.name)
+
+            preds = predict_pda_ablation(model_stage1, t_in, raw_rgb=rgb_arr, mode="all", device=dev)
+            eval_raw.update(preds["raw_cam"], gt_arr, patient_id=pid)
+            eval_naive.update(preds["naive_erasing"], gt_arr, patient_id=pid)
+            eval_full.update(preds["full_pda_otsu"], gt_arr, patient_id=pid)
+
+    m_raw = eval_raw.compute_metrics()
+    m_naive = eval_naive.compute_metrics()
+    m_full = eval_full.compute_metrics()
+
+    scores_raw = np.array(eval_raw.patch_miou_4cls)
+    scores_naive = np.array(eval_naive.patch_miou_4cls)
+    scores_full = np.array(eval_full.patch_miou_4cls)
+
+    try:
+        _, p_fn = stats.wilcoxon(scores_full, scores_naive)
+    except Exception:
+        p_fn = 1.0
+
+    try:
+        _, p_fr = stats.wilcoxon(scores_full, scores_raw)
+    except Exception:
+        p_fr = 1.0
+
+    print("-" * 80)
+    print(f"1. Raw CAM (T=0 Hotspot):              mIoU={m_raw['mIoU']:.2f}% | mDice={m_raw['mDice']:.2f}%")
+    print(f"2. Naive Erasing (No Proto Gating):    mIoU={m_naive['mIoU']:.2f}% | mDice={m_naive['mDice']:.2f}%")
+    print(f"3. Full PDA + Otsu Gating:             mIoU={m_full['mIoU']:.2f}% | mDice={m_full['mDice']:.2f}%")
+    print(f"Delta (Full PDA vs Naive): {np.mean(scores_full - scores_naive):+.2f}% mIoU (p={p_fn:.4e})")
+    print(f"Delta (Full PDA vs Raw):   {np.mean(scores_full - scores_raw):+.2f}% mIoU (p={p_fr:.4e})")
+    print("=" * 80)
+
+    res = {
+        "raw_cam": m_raw,
+        "naive_erasing": m_naive,
+        "full_pda_otsu": m_full,
+        "full_vs_naive_wilcoxon_p": float(p_fn),
+        "full_vs_raw_wilcoxon_p": float(p_fr),
+    }
+
+    if output_dir:
+        out_p = Path(output_dir)
+        out_p.mkdir(parents=True, exist_ok=True)
+        report_p = out_p / "pda_ablation_study.json"
+        with open(report_p, "w", encoding="utf-8") as f:
+            json.dump(sanitize_for_json(res), f, indent=2)
+        print(f"[OK] Đã lưu báo cáo PDA Ablation vào: {report_p.resolve()}")
 
     return res

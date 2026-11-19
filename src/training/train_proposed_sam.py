@@ -1,7 +1,7 @@
 """
 Training Script for Proposed MedSAM WSSS Adapter with Parameter-Efficient Fine-Tuning.
 
-Course: SE374.R11 - Medical Image Processing Software Development
+BCSS-WSSS Histopathology Semantic Segmentation Training Pipeline
 Grounding:
 - S2C (CVPR 2024), SAM2PATH / MedSAM (Nature Communications 2024)
 - Multi-Class Composite Loss: Focal Loss (15:1 imbalance) + Soft Dice + Mask IoU + IoU Head MSE
@@ -15,6 +15,7 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 # Safeguard against OpenMP library collision on Windows
@@ -36,7 +37,10 @@ from src.models.sam_wsss_adapter import (
     CAMPromptGenerator,
     MedSAM_WSSS_Adapter,
 )
-
+from src.training.train_stage2 import (
+    infer_stage1_norm_mode,
+    prepare_stage1_input,
+)
 
 # ==============================================================================
 # 1. Composite WSSS Loss Function
@@ -230,8 +234,11 @@ def train_one_epoch(
     optimizer: torch.optim.Optimizer,
     scaler: Optional[torch.amp.GradScaler],
     device: torch.device,
+    stage1_model: Optional[nn.Module] = None,
     accum_steps: int = 2,
     max_steps: Optional[int] = None,
+    stage1_norm_mode: str = "zero_one",
+    images_are_imagenet_norm: bool = True,
 ) -> Dict[str, float]:
     """Runs a single training epoch with gradient accumulation and AMP."""
     model.train()
@@ -247,28 +254,47 @@ def train_one_epoch(
         if max_steps is not None and step >= max_steps:
             break
 
-        images, masks, weak_labels = batch
-        images = images.to(device)
-        masks = masks.to(device)
-        weak_labels = weak_labels.to(device)
+        if isinstance(batch, dict):
+            images = batch["image"].to(device)
+            masks = batch["label"].to(device)
+            weak_labels = batch.get("cls_label", None)
+            if weak_labels is None:
+                weak_labels = torch.zeros((images.shape[0], 4), device=device)
+                for c_idx in range(4):
+                    weak_labels[:, c_idx] = (masks == c_idx).any(dim=-1).any(dim=-1).float()
+            else:
+                weak_labels = weak_labels.to(device)
+        else:
+            images = batch[0].to(device)
+            masks = batch[1].to(device)
+            weak_labels = batch[2].to(device)
 
-        # Generate prompts from pseudo CAMs or synthetic CAM activations
-        # When CAMs are not precomputed, construct surrogate CAMs from weak labels
+        # Extract prompt points from CAMs or pseudo-mask contours
         b, _, h, w = images.shape
-        surrogate_cams = torch.zeros(b, 4, h, w, device=device)
-        for c in range(4):
-            active_b = weak_labels[:, c].view(b, 1, 1)
-            surrogate_cams[:, c] = (images.mean(dim=1) * active_b).clamp(0.0, 1.0)
+        if stage1_model is not None:
+            with torch.no_grad():
+                s1_images = prepare_stage1_input(
+                    images,
+                    stage1_norm_mode=stage1_norm_mode,
+                    images_are_imagenet_norm=images_are_imagenet_norm,
+                )
+                cams, probs = stage1_model.forward_cam(s1_images)
+        else:
+            # Construct one-hot foreground CAMs from pseudo-mask labels
+            cams = torch.zeros(b, 4, h, w, device=device)
+            for c_idx in range(4):
+                cams[:, c_idx] = (masks == c_idx).float()
+            probs = weak_labels
 
         prompt_dict = prompt_generator(
-            cams=surrogate_cams,
-            cls_scores=weak_labels,
+            cams=cams,
+            cls_scores=probs,
         )
 
-        # Concatenate positive/negative prompts from primary active class
-        primary_class = 0
-        coords = prompt_dict[primary_class]["point_coords"]
-        labels = prompt_dict[primary_class]["point_labels"]
+        # Concatenate prompt coordinates and labels across all 4 foreground classes
+        # Inactive classes contribute padding points with label -1
+        coords = torch.cat([prompt_dict[c]["point_coords"] for c in range(4)], dim=1)  # (B, 24, 2)
+        labels = torch.cat([prompt_dict[c]["point_labels"] for c in range(4)], dim=1)  # (B, 24)
 
         use_cuda_amp = (device.type == "cuda") and (scaler is not None)
 
@@ -332,9 +358,12 @@ def evaluate(
         if max_steps is not None and step >= max_steps:
             break
 
-        images, masks, _ = batch
-        images = images.to(device)
-        masks = masks.to(device)
+        if isinstance(batch, dict):
+            images = batch["image"].to(device)
+            masks = batch["label"].to(device)
+        else:
+            images = batch[0].to(device)
+            masks = batch[1].to(device)
 
         outputs = model(images=images)
         preds = outputs["logits"].argmax(dim=1).cpu().numpy()
@@ -399,7 +428,10 @@ def load_checkpoint(
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found at: {checkpoint_path}")
 
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    except Exception:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)  # nosec B614
     model.load_state_dict(checkpoint["model_state_dict"], strict=False)
 
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
@@ -419,7 +451,37 @@ def build_parser() -> argparse.ArgumentParser:
         description="Train proposed MedSAM WSSS Adapter with Parameter-Efficient Fine-Tuning."
     )
     parser.add_argument("--data-dir", type=str, default="data/BCSS-WSSS", help="Path to BCSS-WSSS dataset.")
-    parser.add_argument("--checkpoint-sam", type=str, default=None, help="Path to official SAM / MedSAM weights.")
+    parser.add_argument(
+        "--checkpoint-sam",
+        type=str,
+        default="checkpoints/medsam_vit_b.pth",
+        help="Path to official medsam_vit_b.pth weights.",
+    )
+    parser.add_argument(
+        "--use-surrogate-if-missing",
+        action="store_true",
+        default=False,
+        help="Allow surrogate image encoder if medsam_vit_b.pth is missing (default: False).",
+    )
+    parser.add_argument(
+        "--stage1-checkpoint",
+        type=str,
+        default="checkpoints/stage1_retrained_best.pth",
+        help="Path to Stage 1 classifier checkpoint for CAM prompt mining.",
+    )
+    parser.add_argument(
+        "--stage1-norm-mode",
+        type=str,
+        default="auto",
+        choices=["auto", "zero_one", "imagenet"],
+        help="Stage-1 input normalization mode (auto, zero_one, or imagenet).",
+    )
+    parser.add_argument(
+        "--pm-dir",
+        type=str,
+        default="data/BCSS-WSSS/train_PM",
+        help="Path to train_PM directory for pseudo-mask supervision.",
+    )
     parser.add_argument("--output-dir", type=str, default="checkpoints", help="Directory to save checkpoints.")
     parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs.")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size per worker.")
@@ -445,6 +507,7 @@ def main() -> int:
         freeze_prompt_encoder=True,
         adapter_mid_dim=64,
         num_classes=5,
+        use_surrogate_if_missing=args.use_surrogate_if_missing or args.dry_run,
     ).to(device)
 
     param_summary = model.count_parameters()
@@ -454,6 +517,24 @@ def main() -> int:
 
     # Prompt Generator
     prompt_generator = CAMPromptGenerator(num_classes=4, max_pos_points=3, max_neg_points=3)
+
+    # Load Stage 1 model for prompt generation if checkpoint exists
+    stage1_model = None
+    resolved_stage1_norm = infer_stage1_norm_mode(
+        None, checkpoint_path=args.stage1_checkpoint, requested_mode=args.stage1_norm_mode
+    )
+    if os.path.exists(args.stage1_checkpoint):
+        try:
+            from src.models.wsss_inference_methods import build_and_load_stage1_netcam, safe_torch_load
+            ckpt_meta = safe_torch_load(args.stage1_checkpoint, device=torch.device("cpu"))
+            resolved_stage1_norm = infer_stage1_norm_mode(
+                ckpt_meta, checkpoint_path=args.stage1_checkpoint, requested_mode=args.stage1_norm_mode
+            )
+            stage1_model = build_and_load_stage1_netcam(args.stage1_checkpoint, device=device)
+            stage1_model.eval()
+            print(f"[INFO] Loaded Stage 1 model from {args.stage1_checkpoint} (norm={resolved_stage1_norm})")
+        except Exception as e:
+            print(f"[WARNING] Could not load Stage 1 checkpoint: {e}")
 
     # Loss, Optimizer, Scheduler
     criterion = CompositeWSSSLoss(
@@ -480,20 +561,64 @@ def main() -> int:
         best_miou = ckpt.get("best_mIoU", 0.0)
         print(f"[INFO] Resumed at epoch {start_epoch} with best mIoU = {best_miou:.4f}")
 
-    # Dataloaders: use real data if exists, else synthetic fallback
+    # Dataloaders: use real data with pseudo-masks if exists and not dry-run, else synthetic fallback
     if os.path.exists(args.data_dir) and not args.dry_run:
-        from src.datasets.bcss_dataset import BCSSDataset
-        train_ds = BCSSDataset(root_dir=args.data_dir, split="train")
-        val_ds = BCSSDataset(root_dir=args.data_dir, split="valid")
+        from src.training.dataset_loader import (
+            create_eval_dataloader,
+            create_stage2_dataloader,
+            load_bcss_patient_splits,
+        )
+        splits = load_bcss_patient_splits()
+        data_path = Path(args.data_dir)
+        if (data_path / "training").exists():
+            train_img_dir = data_path / "training"
+        elif (data_path / "train").exists():
+            train_img_dir = data_path / "train"
+        else:
+            train_img_dir = data_path
+
+        val_img_dir = None
+        val_mask_dir = None
+        for cand_v, cand_m in [
+            (data_path / "val" / "img", data_path / "val" / "mask"),
+            (data_path / "valid" / "img", data_path / "valid" / "mask"),
+            (data_path / "BCSS-WSSS" / "val" / "img", data_path / "BCSS-WSSS" / "val" / "mask"),
+            (data_path / "BCSS-WSSS" / "valid" / "img", data_path / "BCSS-WSSS" / "valid" / "mask"),
+        ]:
+            if cand_v.exists():
+                val_img_dir = cand_v
+                val_mask_dir = cand_m if cand_m.exists() else None
+                break
+
+        train_loader = create_stage2_dataloader(
+            img_dir=train_img_dir,
+            pm_root_dir=args.pm_dir,
+            batch_size=args.batch_size,
+            num_workers=2,
+            pin_memory=True,
+            patient_ids=splits.get("train", []),
+        )
+        if val_img_dir is not None:
+            val_loader = create_eval_dataloader(
+                img_dir=val_img_dir,
+                mask_dir=val_mask_dir,
+                batch_size=args.batch_size,
+                num_workers=2,
+                pin_memory=True,
+                patient_ids=splits.get("val", []),
+            )
+        else:
+            val_ds = SyntheticHistologyDataset(num_samples=16, image_size=224)
+            val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
     else:
         num_samples = 4 if args.dry_run else 32
         print(f"[INFO] Using SyntheticHistologyDataset with {num_samples} samples.")
         train_ds = SyntheticHistologyDataset(num_samples=num_samples, image_size=224)
         val_ds = SyntheticHistologyDataset(num_samples=num_samples // 2, image_size=224)
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
-
+    images_are_imagenet_norm = bool(os.path.exists(args.data_dir) and not args.dry_run)
     total_epochs = 1 if args.dry_run else args.epochs
     max_steps = 2 if args.dry_run else None
 
@@ -509,8 +634,11 @@ def main() -> int:
             optimizer=optimizer,
             scaler=scaler,
             device=device,
+            stage1_model=stage1_model,
             accum_steps=args.accum_steps,
             max_steps=max_steps,
+            stage1_norm_mode=resolved_stage1_norm,
+            images_are_imagenet_norm=images_are_imagenet_norm,
         )
 
         val_stats = evaluate(

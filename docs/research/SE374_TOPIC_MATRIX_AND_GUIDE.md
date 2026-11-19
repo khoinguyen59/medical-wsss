@@ -1,9 +1,10 @@
 # CẨM NANG PHÂN TÍCH CHUYÊN SÂU 8 CHỦ ĐỀ ĐỒ ÁN MÔN HỌC SE374.R11
 ## Phát Triển Phần Mềm Xử Lý Ảnh Y Khoa (Medical Image Processing Software Development)
 
+> **Ghi chú Lưu trữ & Định hướng Đề tài:** Đây là tài liệu cẩm nang khảo sát ban đầu về 8 chủ đề môn học. Đồ án chính thức lựa chọn và dồn toàn bộ nguồn lực nghiên cứu vào **Topic 6: Phân vùng ngữ nghĩa giám sát yếu trên tiêu bản WSI (BCSS-WSSS & LUAD-HistoSeg)**. Các chủ đề khác (CT AAPM, MRI BraTS, fMRI ABIDE I, ISLES) được lưu trữ làm tư liệu tham khảo.  
 > **Môn học:** SE374.R11 - Phát triển phần mềm xử lý ảnh y khoa  
 > **Trường:** Đại học Công nghệ Thông tin (UIT), ĐHQG-HCM  
-> **Nguồn tài liệu:** [Bài giảng 01: Nhập môn Xử lý ảnh Y khoa](<local-path>), `topic.md` (Giảng viên) & `SE374.R11 - Đồ án cuối kỳ.xlsx` (Danh sách đăng ký của lớp)
+> **Nguồn tài liệu:** [Bài giảng 01: Nhập môn Xử lý ảnh Y khoa](docs/lectures/Lecture_01_Introduction_to_Medical_Image.md), `topic.md` (Giảng viên) & `SE374.R11 - Đồ án cuối kỳ.xlsx` (Danh sách đăng ký của lớp)
 
 ---
 
@@ -14,14 +15,14 @@ File Excel `SE374.R11 - Đồ án cuối kỳ.xlsx` ghi nhận hiện trạng đ
 | STT Nhóm | Thành Viên Đã Đăng Ký (MSSV & Họ tên) | Tên Đề Tài Đăng Ký | Thuộc Topic Số | Ghi Chú & Định Hướng |
 | :---: | :--- | :--- | :---: | :--- |
 | **Nhóm 1** | *(Chưa điền tên thành viên)* | **Sparse-view CT reconstruction** | **Topic 1** | Chủ đề được Giảng viên nhấn mạnh ở Buổi 2; có bài báo SOTA tháng 8/2026 (CG-GLORE). |
-| **Nhóm 2** | 24520554 - Nguyễn Huy Hoàng | **Tumor segmentation using CT/MRI** | **Topic 5** | Phân vùng khối u thể tích 3D (BraTS dataset). |
-| **Nhóm 3** | 24520336 - Huỳnh Đức Dũng | *Tên đề tài gì cho hay nhỉ* | *(Chưa chốt)* | Đang tìm kiếm định hướng đề tài. |
+| **Nhóm 2** | [Tác giả / Nhóm nghiên cứu] | **Tumor segmentation using CT/MRI** | **Topic 5** | Phân vùng khối u thể tích 3D (BraTS dataset). |
+| **Nhóm 3** | [Tác giả / Nhóm nghiên cứu] | *Tên đề tài gì cho hay nhỉ* | *(Chưa chốt)* | Đang tìm kiếm định hướng đề tài. |
 | **Nhóm 4** | *(Trống)* | *(Trống)* | - | Vị trí nhóm còn trống. |
-| **Nhóm 5** | 23520922 - Hà Nhật Minh<br>23521267 - Nguyễn Việt Kỳ Quân | **Whole-Slide Image-Based Survival Risk Analysis Using Attention Multiple Instance Learning** | **Topic 4** | Phân tích thời gian sống sót bằng WSI giải phẫu bệnh số (TCGA cohorts). |
-| **Nhóm 6** | 23521262 - Nguyễn Hồng Quân<br>23521214 - Phạm Hoàng Phúc | **Weakly-supervised segmentation for whole slide images** | **Topic 6** | Phân vùng bán giám sát trên WSI (LowMagWSS). |
-| **Nhóm 7** | 23520707 - Phạm Tuấn Khang<br>Phạm Hùng<br>Nguyễn Đình Tri | **Ứng dụng hỏi đáp dành cho bác sĩ chẩn đoán hình ảnh** | **Topic 8 (Tự do)** | Hướng đề tài Medical Visual Question Answering (VQA) / Multimodal LLM. |
-| **Nhóm 8** | 23520826 - Võ Tuấn Kiệt | **Ứng dụng phát hiện người mắc rối loạn phổ tự kỉ dựa trên ảnh fMRI** | **Topic 8 (Tự do)** | Sử dụng ảnh fMRI tận dụng functional connectivity của não; dataset ABIDE I; xây dựng web demo. |
-| **Nhóm 9** | 24520601 - Nguyễn Đại Hưng<br>24521489 - Dương Nguyễn Phú Quý<br>25520115 - Vũ Xuân Bách<br>25521929 - Bảo Trình | **Limited-angle CT reconstruction** | **Topic 2** | Nhóm đủ 4 bạn; bài toán tái tạo CT góc hạn chế. |
+| **Nhóm 5** | [Tác giả / Nhóm nghiên cứu] | **Whole-Slide Image-Based Survival Risk Analysis Using Attention Multiple Instance Learning** | **Topic 4** | Phân tích thời gian sống sót bằng WSI giải phẫu bệnh số (TCGA cohorts). |
+| **Nhóm 6** | [Tác giả / Nhóm nghiên cứu] | **Weakly-supervised segmentation for whole slide images** | **Topic 6** | Phân vùng bán giám sát trên WSI (LowMagWSS). |
+| **Nhóm 7** | [Tác giả / Nhóm nghiên cứu] | **Ứng dụng hỏi đáp dành cho bác sĩ chẩn đoán hình ảnh** | **Topic 8 (Tự do)** | Hướng đề tài Medical Visual Question Answering (VQA) / Multimodal LLM. |
+| **Nhóm 8** | [Tác giả / Nhóm nghiên cứu] | **Ứng dụng phát hiện người mắc rối loạn phổ tự kỉ dựa trên ảnh fMRI** | **Topic 8 (Tự do)** | Sử dụng ảnh fMRI tận dụng functional connectivity của não; dataset ABIDE I; xây dựng web demo. |
+| **Nhóm 9** | [Tác giả / Nhóm nghiên cứu] | **Limited-angle CT reconstruction** | **Topic 2** | Nhóm đủ thành viên; bài toán tái tạo CT góc hạn chế. |
 
 ---
 

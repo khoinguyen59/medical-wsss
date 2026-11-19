@@ -6,7 +6,8 @@ using classical Otsu thresholding in HSV / Grayscale space.
 Prevents CAM argmax errors on empty background slides.
 """
 
-from typing import Tuple, Union
+from typing import Union
+
 import cv2
 import numpy as np
 import torch

@@ -48,7 +48,7 @@
 Hệ thống đã thu thập và clone các kho mã nguồn SOTA phục vụ đồ án:
 
 ```
-<local-path> Trong Khoi\Downloads\Y_KHOA\repos/
+repos/
 ├── LowMagWSS/      # [UIT / TS. Bùi Cao Doanh] Framework đối chuẩn độ phóng đại thấp & WSSS-Tissue
 ├── PBIP/           # [CVPR 2025] Prototype-Based Image Prompting WSS SOTA với SegFormer
 ├── CLAM/           # [Harvard / Nature BME] Khung Weakly Supervised & Trình tạo Heatmap lâm sàng

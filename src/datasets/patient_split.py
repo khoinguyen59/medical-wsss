@@ -11,13 +11,13 @@ def extract_patient_id(filepath_or_name: str) -> str:
         TCGA-A2-A0T2_1024_2048_[1 0 0 1].png -> 'TCGA-A2-A0T2'
     LUAD-HistoSeg format:
         TCGA-XX-XXXX+001+[1 0 0 0].png -> 'TCGA-XX-XXXX'
-        GDPH_1234_patch_01.png -> 'GDPH_1234'
+        GDPH_1234_patch_01.png -> 'GDPH' (prefix token before first '_')
     """
     basename = os.path.basename(filepath_or_name)
     fname = os.path.splitext(basename)[0]
-    
-    # Check standard TCGA pattern (e.g. TCGA-A2-A0T2)
-    tcga_match = re.match(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", fname, re.IGNORECASE)
+
+    # Check standard TCGA pattern anywhere in basename (e.g. TCGA-A2-A0T2)
+    tcga_match = re.search(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", basename, re.IGNORECASE)
     if tcga_match:
         return tcga_match.group(1).upper()
 

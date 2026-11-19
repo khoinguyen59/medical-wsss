@@ -12,35 +12,27 @@ Covers:
 All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
-from pathlib import Path
-import tempfile
-from typing import Any, Dict, List, Optional, Tuple, Union
 import matplotlib
+
 matplotlib.use("Agg")
+
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
+
 import numpy as np
-from PIL import Image
 import pytest
 import torch
 import torch.nn as nn
+from PIL import Image
 
 from src.colab_pkg.downloader import (
-    ensure_luad_checkpoints,
-    ensure_luad_dataset,
     extract_patient_id,
     resolve_split_dirs,
 )
 from src.colab_pkg.evaluator import (
     ColabSegmentationEvaluator,
-    LUAD_CLASS_CODES,
     run_biomarker_correlation_study,
-    run_cross_dataset_luad_benchmark,
-    run_multimag_and_pareto_benchmark,
     run_val_to_test_scientific_protocol,
-)
-from src.colab_pkg.model_loader import (
-    DeepLabV3Plus,
-    WSSSTissueStage1NetCAM,
-    load_luad_models,
 )
 from src.colab_pkg.visualizer import (
     plot_biomarker_bland_altman_and_regression,
@@ -58,7 +50,6 @@ from src.models.coarse_to_fine_router import (
     simulate_magnification_patch,
 )
 from src.pipeline.wsi_lowmag_highmag_pipeline import (
-    WSICandidatePatch,
     WSILowMagHighMagPipeline,
 )
 
@@ -360,6 +351,7 @@ def test_val_to_test_scientific_protocol(tmp_path: Path) -> None:
 def test_scientific_runner_notebook_end_to_end_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Executes all code cells of SE374_Colab_Scientific_Research_Runner.ipynb end-to-end against mocked local datasets and models."""
     import json
+
     import src.colab_pkg.downloader as dl_mod
     import src.colab_pkg.model_loader as ml_mod
 
@@ -441,7 +433,12 @@ def test_scientific_runner_notebook_end_to_end_execution(tmp_path: Path, monkeyp
         src = "".join(cell["source"])
         if idx == 1:
             # Redirect WORK_ROOT to tmp_path and use tiny DRY_RUN_SAMPLES=4 for fast test execution
+            src = src.replace(
+                'Path("/content") if IN_COLAB else (_repo_for_commit / "se374_scientific_work")',
+                f"Path(r'{tmp_path}')",
+            )
             src = src.replace('Path("/content" if IN_COLAB else "./se374_scientific_work")', f"Path(r'{tmp_path}')")
+            assert "se374_scientific_work" not in src, "WORK_ROOT redirect failed in test"
             src = src.replace("DRY_RUN_SAMPLES = 50", "DRY_RUN_SAMPLES = 4")
         exec(compile(src, f"<notebook_cell_{idx}>", "exec"), ns)
 
@@ -628,6 +625,454 @@ def test_biomarker_icc_ccc_and_tumor_positive_subgroup() -> None:
     assert "tumor_positive_subgroup" in report
     assert report["tumor_positive_subgroup"]["patient_count"] == 3
     assert report["tumor_positive_subgroup"]["tsr_icc"] > 0.95
+
+
+# -------------------------------------------------------------------------
+# Scientific Upgrades: Beer-Lambert, SG-DAP, LMP-PPC, IntraPatch, Ablation
+# -------------------------------------------------------------------------
+
+def test_stain_deconv_layer_mathematical_consistency() -> None:
+    """Verifies exact Beer-Lambert transpose inversion, ImageNet unnormalization, Fano factor, and Sobel gradient."""
+    import torch.nn.functional as F
+
+    from src.models.stain_deconv import StainDeconvLayer
+
+    deconv = StainDeconvLayer()
+    dummy_rgb = torch.rand(2, 3, 64, 64, dtype=torch.float32).clamp(0.01, 1.0)
+    he_channels, fano_factor, stain_features = deconv(dummy_rgb)
+
+    assert he_channels.shape == (2, 2, 64, 64)
+    assert fano_factor.shape == (2, 1, 64, 64)
+    assert stain_features.shape == (2, 6, 64, 64)
+    assert torch.all(fano_factor >= 0.0)
+
+    # Pure Hematoxylin and pure Eosin optical vectors must unmix cleanly with minimal cross-talk
+    h_unit = F.normalize(torch.tensor([0.650, 0.704, 0.286], dtype=torch.float32), dim=0).view(1, 3, 1, 1)
+    e_unit = F.normalize(torch.tensor([0.072, 0.990, 0.105], dtype=torch.float32), dim=0).view(1, 3, 1, 1)
+    rgb_h = torch.pow(10.0, -0.80 * h_unit).expand(1, 3, 16, 16)
+    rgb_e = torch.pow(10.0, -0.70 * e_unit).expand(1, 3, 16, 16)
+
+    stains_h, _, _ = deconv(rgb_h)
+    stains_e, _, _ = deconv(rgb_e)
+    assert torch.allclose(stains_h[:, 0], torch.full((1, 16, 16), 0.80), atol=1e-3)
+    assert torch.allclose(stains_h[:, 1], torch.zeros((1, 16, 16)), atol=1e-3)
+    assert torch.allclose(stains_e[:, 1], torch.full((1, 16, 16), 0.70), atol=1e-3)
+    assert torch.allclose(stains_e[:, 0], torch.zeros((1, 16, 16)), atol=1e-3)
+
+    # Boundary Sobel gradient response must exceed zero on H&E transition
+    mixed = torch.cat([rgb_h[:, :, :, :8], rgb_e[:, :, :, 8:]], dim=-1)
+    he_mix, _, _ = deconv(mixed)
+    grad = deconv.compute_stain_gradient(he_mix)
+    assert float(grad[:, :, :, 7:9].mean()) > float(grad[:, :, :, :4].mean())
+
+    # ImageNet-normalized inputs (with negative values) must unnormalize instead of saturating at min=1e-3
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    stains_h_norm, _, _ = deconv((rgb_h - mean) / std)
+    assert torch.allclose(stains_h_norm, stains_h, atol=1e-3)
+
+
+def test_sg_dap_affinity_refiner_and_ignore_index() -> None:
+    """Verifies SG-DAP normalization, mismatched feature alignment, zero-feat probability conservation, and BACK=4 preservation."""
+    from src.models.sg_dap import StainGuidedAffinityRefiner
+
+    refiner = StainGuidedAffinityRefiner(
+        kernel_size=5,
+        alpha_rw=0.85,
+        num_iters=3,
+        conf_ignore_thresh=0.60,
+        margin_ignore_thresh=0.20,
+    )
+
+    b, c, h, w = 2, 4, 32, 32
+    dummy_rgb = torch.rand(b, 3, h, w, dtype=torch.float32).clamp(0.01, 1.0)
+    # Deliberately test spatially mismatched low-res backbone features (8x8 vs 32x32 CAM)
+    mismatched_feats = torch.randn(b, 64, 8, 8, dtype=torch.float32)
+
+    # Unnormalized CAM with ambiguous boundary region
+    init_cam = torch.zeros(b, c, h, w, dtype=torch.float32)
+    init_cam[:, 0, :, :16] = 4.5
+    init_cam[:, 1, :, 16:] = 4.5
+    init_cam[:, 0, :, 15:17] = 1.0
+    init_cam[:, 1, :, 15:17] = 1.0
+
+    # 1. Evaluation mode (return_ignore_mask=False): strictly classes in {0, 1, 2, 3} and sum == 1
+    refined_cam, discrete_eval = refiner(dummy_rgb, mismatched_feats, init_cam, return_ignore_mask=False)
+    assert refined_cam.shape == (b, c, h, w)
+    assert torch.allclose(refined_cam.sum(dim=1), torch.ones(b, h, w), atol=1e-4)
+    assert discrete_eval.shape == (b, h, w)
+    assert 255 not in discrete_eval
+    assert torch.all((discrete_eval >= 0) & (discrete_eval < c))
+
+    # 2. All-zero deep features must conserve probability mass via center self-loop fallback
+    zero_feats = torch.zeros(1, 32, h, w, dtype=torch.float32)
+    zero_cam, _ = refiner(dummy_rgb[:1], zero_feats, init_cam[:1], return_ignore_mask=False)
+    assert torch.allclose(zero_cam.sum(dim=1), torch.ones(1, h, w), atol=1e-4)
+
+    # 3. Training pseudo-mask mode (return_ignore_mask=True): uncertain pixels receive 255
+    _, discrete_train = refiner(dummy_rgb, mismatched_feats, init_cam, return_ignore_mask=True)
+    assert 255 in discrete_train
+
+
+def test_multi_prototype_ppc_loss_and_ema_update() -> None:
+    """Verifies MultiPrototypePPCLoss EMA update in train() vs strict buffer immutability in eval()."""
+    from src.losses_metrics.losses import MultiPrototypePPCLoss
+
+    loss_fn = MultiPrototypePPCLoss(
+        num_classes=4,
+        num_prototypes=3,
+        feat_dim=32,
+        max_samples=256,
+    )
+
+    b, d, h, w = 2, 32, 16, 16
+    proj_feats = torch.randn(b, d, h, w, dtype=torch.float32, requires_grad=True)
+    cam_probs = torch.softmax(torch.randn(b, 4, h, w) * 3.0, dim=1)
+    img_labels = torch.tensor([[1.0, 1.0, 0.0, 0.0], [0.0, 1.0, 1.0, 0.0]])
+
+    # In eval() mode, prototypes MUST remain frozen
+    loss_fn.eval()
+    protos_before_eval = loss_fn.prototypes.clone()
+    _ = loss_fn(proj_feats, cam_probs, img_labels)
+    assert torch.equal(protos_before_eval, loss_fn.prototypes)
+
+    # In train() mode, backward works and EMA updates prototypes
+    loss_fn.train()
+    initial_protos = loss_fn.prototypes.clone()
+    loss = loss_fn(proj_feats, cam_probs, img_labels)
+
+    assert loss.dim() == 0
+    assert not torch.isnan(loss)
+    assert loss.item() >= 0.0
+
+    loss.backward()
+    assert proj_feats.grad is not None
+    assert not torch.equal(initial_protos, loss_fn.prototypes)
+
+
+def test_intra_patch_dual_branch_attention_identity_init() -> None:
+    """Verifies M9 identity initialization, zero norm-buffer drift, step-1 gamma grad, and step-2 full grad flow."""
+    from src.models.intra_patch_attention import IntraPatchDualBranchAttention
+
+    attn_module = IntraPatchDualBranchAttention(
+        in_channels=32,
+        macro_size=(8, 8),
+        num_heads=2,
+    )
+    attn_module.train()
+
+    dummy_feats = torch.randn(2, 32, 16, 16, dtype=torch.float32, requires_grad=True)
+    enhanced, spatial_gate = attn_module(dummy_feats)
+
+    # Exact identity at gamma == 0
+    assert torch.allclose(enhanced, dummy_feats, atol=1e-6)
+    assert spatial_gate.shape == (2, 1, 16, 16)
+    assert torch.all((spatial_gate >= 0.0) & (spatial_gate <= 1.0))
+
+    # Verify zero BatchNorm running_mean buffers inside gate_conv
+    assert not any("running_mean" in k for k in attn_module.state_dict().keys())
+
+    # Step 1 backward gives non-zero gradient to gamma; step 2 (gamma != 0) flows into query/key/value/gate
+    opt = torch.optim.SGD(attn_module.parameters(), lr=0.1)
+    opt.zero_grad()
+    loss = (enhanced * 2.0).sum()
+    loss.backward()
+    assert dummy_feats.grad is not None
+    assert attn_module.gamma.grad is not None and float(attn_module.gamma.grad.abs().sum()) > 0.0
+    opt.step()
+
+    opt.zero_grad()
+    feats2 = torch.randn(2, 32, 16, 16, dtype=torch.float32)
+    enh2, _ = attn_module(feats2)
+    (enh2 ** 2).mean().backward()
+    assert attn_module.query_conv.weight.grad is not None
+    assert float(attn_module.query_conv.weight.grad.abs().sum()) > 0.0
+
+
+def test_comparative_ablation_evaluator_dry_run(tmp_path: Path) -> None:
+    """Verifies ComparativeAblationEvaluator across all modes, M9 exact identity, composable pipeline, and Wilcoxon stats."""
+    from src.clinical.comparative_ablation_evaluator import ComparativeAblationEvaluator
+
+    report_file = tmp_path / "test_ablation_report.json"
+    evaluator = ComparativeAblationEvaluator(output_report_path=str(report_file))
+
+    # 1. Verify exact M9 residual identity when gamma == 0
+    rgb = torch.rand(1, 3, 32, 32).clamp(0.01, 1.0)
+    feats = torch.randn(1, 64, 32, 32)
+    init_cam = torch.softmax(torch.randn(1, 4, 32, 32), dim=1)
+    p1, _ = evaluator.run_inference_patch(rgb, init_cam, feats, method="m1")
+    p9_only, _ = evaluator.run_inference_patch(rgb, init_cam, feats, method="m9_only")
+    p8, _ = evaluator.run_inference_patch(rgb, init_cam, feats, method="m8")
+    p9, _ = evaluator.run_inference_patch(rgb, init_cam, feats, method="m9")
+    assert float(torch.max(torch.abs(p9_only - p1))) < 1e-6
+    assert float(torch.max(torch.abs(p9 - p8))) < 1e-6
+
+    # 2. Verify arbitrary composable operator ordering
+    p_comp, m_comp = evaluator.compose_pipeline(rgb, init_cam, feats, steps=["od_prior", "sg_dap", "mpppc"])
+    assert torch.allclose(p_comp.sum(dim=1), torch.ones(1, 32, 32), atol=1e-4)
+    assert set(torch.unique(m_comp).tolist()).issubset({0, 1, 2, 3})
+
+    # 3. Verify all standalone & cumulative modes in dry-run suite
+    report = evaluator.evaluate_synthetic_or_dataset_suite(num_patches=10, patch_size=32)
+    assert report_file.is_file()
+    assert "comparative_benchmarks" in report
+    benchmarks = report["comparative_benchmarks"]
+
+    expected_modes = ["m1", "m6", "m7_only", "m8_only", "m9_only", "od_only", "m7", "m8", "m9", "m_combined"]
+    for method_key in expected_modes:
+        assert method_key in benchmarks
+        res = benchmarks[method_key]
+        assert "four_class_miou" in res
+        assert "five_class_miou" in res
+        assert "pixel_accuracy" in res
+        assert "boundary_f1" in res
+        assert "latency_ms_per_patch" in res
+        assert "wilcoxon_p_vs_m1" in res
+        assert "wilcoxon_p_vs_m6" in res
+        assert "patient_wilcoxon_p_vs_m1" in res
+        per_class = res["per_class_iou"]
+        assert "tumor" in per_class
+        assert "stroma" in per_class
+        assert "inflammatory" in per_class
+        assert "necrosis" in per_class
+
+
+def test_evaluator_scale_alpha_sweep_and_ablation_edge_cases(tmp_path: Path) -> None:
+    """Regression tests for 100x delta_miou fix, m6_cam_fusion_alpha sweep, cgm no-op, and fn_to_bg consistency."""
+    from src.clinical.comparative_ablation_evaluator import ComparativeAblationEvaluator
+    from src.clinical.exhaustive_evaluator import ExhaustiveBenchmarkEvaluator, SegmentationMetricAccumulator
+    from src.colab_pkg.evaluator import run_multiscale_baseline_comparison
+    from src.colab_pkg.model_loader import (
+        MultiMethodWSSSEngineV2 as ColabEngineV2,
+    )
+    from src.models.wsss_inference_methods import (
+        MultiMethodWSSSEngineV2 as SrcEngineV2,
+    )
+
+    # 1. delta_miou in run_multiscale_baseline_comparison must be in percentage points [0, 100], never 100x inflated
+    img_dir = tmp_path / "ms_img"
+    mask_dir = tmp_path / "ms_mask"
+    img_dir.mkdir()
+    mask_dir.mkdir()
+    img_p = img_dir / "TCGA-A1-A0SD_p0.png"
+    mask_p = mask_dir / "TCGA-A1-A0SD_p0.png"
+    Image.fromarray(np.full((32, 32, 3), 160, dtype=np.uint8)).save(img_p)
+    gt_arr = np.zeros((32, 32), dtype=np.uint8)
+    gt_arr[16:, :] = 1
+    Image.fromarray(gt_arr).save(mask_p)
+
+    class _PerfectM6Engine:
+        def predict_m6(self, model, tensor, raw_rgb=None, model_stage1=None):
+            return gt_arr.copy()
+
+    ms_res = run_multiscale_baseline_comparison(
+        engine=_PerfectM6Engine(),
+        model_stage2=DummySegmentationModel(),
+        test_files=[img_p],
+        test_mask_dir=mask_dir,
+        device="cpu",
+    )
+    assert ms_res["delta_miou"] == pytest.approx(75.0, abs=1e-4)
+
+    # 2. m6_cam_fusion_alpha must affect predict_all_methods M6 output in both src/models and src/colab_pkg
+    class _Stage2Class0(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            b, _, h, w = x.shape
+            out = torch.zeros((b, 4, h, w), device=x.device)
+            out[:, 0] = 2.0
+            out[:, 1] = 1.0
+            return out
+
+    class _Stage1Class1(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.p = nn.Parameter(torch.zeros(1))
+
+        def forward_cam(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            b, _, h, w = x.shape
+            cam = torch.zeros((b, 4, max(1, h // 4), max(1, w // 4)), device=x.device)
+            cam[:, 0, 0, 0] = 5.0
+            cam[:, 1, :, :] = 6.0
+            cam[:, 1, 0, 0] = 0.0
+            y_cls = torch.tensor([[0.9, 0.9, 0.01, 0.01]], device=x.device).expand(b, 4)
+            return cam, y_cls
+
+    x_in = torch.full((1, 3, 32, 32), 0.5, dtype=torch.float32)
+    raw_rgb = np.full((32, 32, 3), 128, dtype=np.uint8)
+    s2_mock = _Stage2Class0().eval()
+    s1_mock = _Stage1Class1().eval()
+    for EngineCls in (SrcEngineV2, ColabEngineV2):
+        eng = EngineCls(model_stage1=s1_mock, include_v2=True)
+        assert hasattr(eng, "m6_cam_fusion_alpha")
+        eng.m6_cam_fusion_alpha = 0.0
+        p_a = eng.predict_all_methods(s2_mock, x_in, raw_rgb=raw_rgb, model_stage1=s1_mock, include_v2=True)[
+            "M6_MultiScale_Pyramid_D4_Ensemble"
+        ]
+        eng.m6_cam_fusion_alpha = 0.99
+        p_b = eng.predict_all_methods(s2_mock, x_in, raw_rgb=raw_rgb, model_stage1=s1_mock, include_v2=True)[
+            "M6_MultiScale_Pyramid_D4_Ensemble"
+        ]
+        assert np.all(p_a[16:, :] == 0) and np.all(p_b[16:, :] == 1), (
+            f"{EngineCls.__module__} ignored m6_cam_fusion_alpha in predict_all_methods"
+        )
+
+    # 3. compose_pipeline("cgm") with cgm_gate=None must be a clean no-op, not ValueError
+    ev = ComparativeAblationEvaluator(device=torch.device("cpu"))
+    cam = torch.softmax(torch.randn(1, 4, 32, 32), dim=1)
+    feat = torch.randn(1, 64, 16, 16)
+    pr_noop, _ = ev.compose_pipeline(x_in[:, :, :32, :32], cam, feat, steps=("cgm",), precomputed_d4=cam, cgm_gate=None)
+    assert torch.allclose(pr_noop, cam, atol=1e-5)
+
+    # 4. _accumulate_confusion must NOT fall back to p4 when allow_p4_fallback=False and p5 predicts 100% background
+    cm4 = np.zeros((4, 4), dtype=np.int64)
+    cm5 = np.zeros((5, 5), dtype=np.int64)
+    fn_bg = np.zeros(4, dtype=np.int64)
+    p4_only = np.zeros((8, 8), dtype=np.uint8)
+    p5_all_bg = np.full((8, 8), 4, dtype=np.uint8)
+    gt_fg = np.zeros((8, 8), dtype=np.int64)
+    miou_bg = ComparativeAblationEvaluator._accumulate_confusion(
+        cm4, cm5, fn_bg, p4_only, p5_all_bg, gt_fg, allow_p4_fallback=False
+    )
+    assert miou_bg == 0.0
+    assert int(cm4.sum()) == 0
+    assert int(fn_bg[0]) == 64
+
+    # 5. SegmentationMetricAccumulator & ColabSegmentationEvaluator include fn_to_bg_4cls in PA_4cls denominator
+    acc = SegmentationMetricAccumulator(num_classes=5)
+    pred_half_bg = np.array([[0, 0], [4, 4]], dtype=np.int64)
+    gt_all_tum = np.zeros((2, 2), dtype=np.int64)
+    acc.update(pred_half_bg, gt_all_tum)
+    m_acc = acc.compute_metrics()
+    assert m_acc["Pixel_Accuracy_4cls"] == pytest.approx(50.0, abs=1e-4)
+    assert acc.patch_miou_4cls[0] == pytest.approx(0.5, abs=1e-4)
+
+    ceval = ColabSegmentationEvaluator(num_classes=5)
+    ceval.update(pred_half_bg, gt_all_tum, patient_id="TCGA-A1-A0SD")
+    m_ceval = ceval.compute_metrics()
+    assert m_ceval["Accuracy"] == pytest.approx(50.0, abs=1e-4)
+    assert ceval.patch_miou_4cls[0] == pytest.approx(50.0, abs=1e-4)
+
+    # 6. ExhaustiveBenchmarkEvaluator._compute_patient_level_tests scales scores to [0, 100]
+    ex_ev = ExhaustiveBenchmarkEvaluator(dataset_dir=Path("data/sample_dataset"), output_dir=tmp_path, device="cpu")
+    ex_ev.eval_medsam.patch_patient_ids = ["P1", "P1", "P2", "P2", "P3", "P3"]
+    scores_a = np.array([0.50, 0.50, 0.60, 0.60, 0.70, 0.70])
+    scores_m = np.array([0.60, 0.60, 0.70, 0.70, 0.80, 0.80])
+    pt_res = ex_ev._compute_patient_level_tests(scores_a, scores_a, scores_m)
+    assert pt_res["proposed_vs_author"]["mean_diff"] == pytest.approx(10.0, abs=1e-4)
+
+
+def test_colab_evaluator_patient_level_fn_to_bg_and_zero_cm4_guard() -> None:
+    """Regression test: patient-level mIoU/bootstrap and compute_metrics must honor fn_to_bg_4cls."""
+    gt = np.array([[0, 0, 1, 1], [2, 2, 3, 3]], dtype=np.int64)
+    pred_half_bg = np.array([[0, 4, 1, 4], [2, 4, 3, 4]], dtype=np.int64)
+
+    # 1. Exact reproduction: 50% of each ROI class predicted as background -> 50.0 across all 3 metrics
+    ev1 = ColabSegmentationEvaluator(num_classes=5)
+    ev1.update(pred_half_bg, gt, patient_id="P1")
+    m1 = ev1.compute_metrics()
+    assert m1["mIoU"] == pytest.approx(50.0, abs=1e-4)
+    assert m1["patch_miou_mean"] == pytest.approx(50.0, abs=1e-4)
+    assert m1["patient_miou_mean"] == pytest.approx(50.0, abs=1e-4)
+    assert m1["patient_count"] == 1
+
+    # 2. 100%-background-predicted patient must NOT be dropped and bootstrap CI must include fn_to_bg
+    ev2 = ColabSegmentationEvaluator(num_classes=5)
+    ev2.update(pred_half_bg, gt, patient_id="P1")
+    ev2.update(np.full((2, 4), 4, dtype=np.int64), gt, patient_id="P_BG")
+    m2 = ev2.compute_metrics()
+    assert m2["patient_count"] == 2
+    assert m2["patient_miou_mean"] == pytest.approx(25.0, abs=1e-4)
+    assert m2["patient_bootstrap_miou_ci95"][1] <= 50.0 + 1e-4
+
+    # 3. Single 100%-background-predicted patient alone -> patient_count == 1, patient_miou_mean == 0.0
+    ev_bg = ColabSegmentationEvaluator(num_classes=5)
+    ev_bg.update(np.full((2, 4), 4, dtype=np.int64), gt, patient_id="P_ONLY_BG")
+    m_bg = ev_bg.compute_metrics()
+    assert m_bg["patient_count"] == 1
+    assert m_bg["patient_miou_mean"] == pytest.approx(0.0, abs=1e-4)
+
+    # 4. cm4.sum() == 0 with fn_to_bg_4cls.sum() > 0 must NOT fall back to 5-class cm[:4, :]
+    ev3 = ColabSegmentationEvaluator(num_classes=5)
+    ev3.update(
+        np.zeros((2, 4), dtype=np.int64),
+        gt,
+        pred_raw_4cls=np.full((2, 4), 4, dtype=np.int64),
+        patient_id="P_RAW_BG",
+    )
+    m3 = ev3.compute_metrics()
+    assert m3["mIoU"] == pytest.approx(0.0, abs=1e-4)
+    assert m3["Accuracy"] == pytest.approx(0.0, abs=1e-4)
+    assert m3["patient_count"] == 1
+    assert m3["patient_miou_mean"] == pytest.approx(0.0, abs=1e-4)
+    ev3.reset()
+    assert len(ev3.patient_fn_bg_4cls) == 0
+
+
+def test_surrogate_prompt_encoder_empty_and_label_4_mapping() -> None:
+    """Regression test: SurrogatePromptEncoder handles N==0/B==0 without stack crash and maps label 4 distinctly."""
+    from src.models.sam_wsss_adapter import SurrogatePromptEncoder
+
+    torch.manual_seed(0)
+    enc = SurrogatePromptEncoder(embed_dim=256)
+
+    # 1. points=None -> (1, 0, 256)
+    out_none, dense_none = enc(points=None)
+    assert out_none.shape == (1, 0, 256)
+    assert dense_none is None
+
+    # 2. N == 0 -> (B, 0, 256) without RuntimeError from torch.stack
+    coords_n0 = torch.zeros((2, 0, 2), dtype=torch.float32)
+    labels_n0 = torch.zeros((2, 0), dtype=torch.int64)
+    out_n0, dense_n0 = enc(points=(coords_n0, labels_n0))
+    assert out_n0.shape == (2, 0, 256)
+    assert dense_n0 is None
+
+    # 3. B == 0 -> (0, N, 256) without RuntimeError from torch.stack
+    coords_b0 = torch.zeros((0, 3, 2), dtype=torch.float32)
+    labels_b0 = torch.zeros((0, 3), dtype=torch.int64)
+    out_b0, dense_b0 = enc(points=(coords_b0, labels_b0))
+    assert out_b0.shape == (0, 3, 256)
+    assert dense_b0 is None
+
+    # 4. Label 4 must map onto point_embeddings distinctly from pad label -1, neg 0, and pos 1
+    coords_1 = torch.tensor([[[12.0, 24.0]]], dtype=torch.float32)
+    out_neg1, _ = enc(points=(coords_1, torch.tensor([[-1]], dtype=torch.int64)))
+    out_0, _ = enc(points=(coords_1, torch.tensor([[0]], dtype=torch.int64)))
+    out_1, _ = enc(points=(coords_1, torch.tensor([[1]], dtype=torch.int64)))
+    out_4, _ = enc(points=(coords_1, torch.tensor([[4]], dtype=torch.int64)))
+
+    assert not torch.allclose(out_4, out_neg1, atol=1e-6)
+    assert not torch.allclose(out_4, out_0, atol=1e-6)
+    assert not torch.allclose(out_4, out_1, atol=1e-6)
+
+
+def test_downloader_extract_patient_id_parity_with_patient_split() -> None:
+    """Regression test: colab_pkg.downloader.extract_patient_id matches datasets.patient_split.extract_patient_id."""
+    from src.datasets.patient_split import extract_patient_id as canonical_extract_patient_id
+
+    cases = [
+        ("TCGA-A2-A0T2_1024_2048_[1 0 0 1].png", "TCGA-A2-A0T2"),
+        ("tcga-d8-a27f_patch_01.png", "TCGA-D8-A27F"),
+        ("C:/data/test/TCGA-XX-XXXX+001+[1 0 0 0].png", "TCGA-XX-XXXX"),
+        ("C:/dir_with_underscore/GDPH_1234_patch_01.png", "GDPH"),
+        ("LUAD+001+[1 0 0 0].png", "LUAD"),
+        ("simple.png", "simple"),
+        ("nested/sub_dir/caseA+tile_2.png", "caseA"),
+    ]
+    for raw_path, expected in cases:
+        got_dl = extract_patient_id(raw_path)
+        got_canon = canonical_extract_patient_id(raw_path)
+        assert got_dl == expected, f"downloader extract_patient_id({raw_path!r})={got_dl!r} != {expected!r}"
+        assert got_dl == got_canon, (
+            f"Parity mismatch on {raw_path!r}: downloader={got_dl!r} vs patient_split={got_canon!r}"
+        )
+
+
+
 
 
 

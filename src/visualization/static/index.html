@@ -3,19 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SE374.R11 WSSS Clinical Pathology Workstation</title>
-  <!-- OpenSeadragon Viewer CDN with fallback -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js"></script>
+  <title>BCSS-WSSS Clinical Digital Pathology Workstation</title>
   <style>
     :root {
-      --bg-dark: #121824;
-      --panel-bg: #1c2438;
-      --card-bg: #25304c;
-      --border-color: #334155;
-      --text-main: #f1f5f9;
+      --bg-canvas: #0b111d;
+      --panel-bg: #11192b;
+      --surface-bg: #18233a;
+      --surface-elev: #1f2d49;
+      --border-subtle: #283755;
+      --border-strong: #3b4f75;
+      --text-primary: #f1f5f9;
+      --text-secondary: #cbd5e1;
       --text-muted: #94a3b8;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
+      --accent-blue: #2563eb;
+      --accent-blue-hover: #1d4ed8;
+      --accent-cyan: #06b6d4;
+      --match-green: #10b981;
+      --margin-amber: #f59e0b;
+      --error-red: #ef4444;
       --color-tum: #E41A1C;
       --color-str: #4DAF4A;
       --color-lym: #377EB8;
@@ -27,220 +32,797 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
 
     body {
-      background-color: var(--bg-dark);
-      color: var(--text-main);
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
       display: flex;
       flex-direction: column;
       height: 100vh;
       overflow: hidden;
     }
 
+    button:focus-visible,
+    select:focus-visible,
+    input:focus-visible {
+      outline: 2px solid var(--accent-cyan);
+      outline-offset: 2px;
+    }
+
+    /* Header Bar */
     header {
       background-color: var(--panel-bg);
-      border-bottom: 1px solid var(--border-color);
-      padding: 12px 24px;
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 8px 18px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      min-height: 54px;
+      gap: 12px;
+      flex-shrink: 0;
     }
 
-    header .brand {
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #1d4ed8, #0369a1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 0.78rem;
+      letter-spacing: 0.5px;
+      color: #ffffff;
+      flex-shrink: 0;
+    }
+
+    .brand h1 {
+      font-size: 0.98rem;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .badge {
+      background: rgba(37, 99, 235, 0.22);
+      border: 1px solid rgba(59, 130, 246, 0.45);
+      color: #bfdbfe;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      white-space: nowrap;
+    }
+
+    .header-right {
       display: flex;
       align-items: center;
       gap: 12px;
+      flex-shrink: 0;
     }
 
-    header .brand h1 {
-      font-size: 1.15rem;
-      font-weight: 700;
-      letter-spacing: 0.5px;
+    .tab-bar {
+      display: inline-flex;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      padding: 2px;
+      gap: 2px;
     }
 
-    header .brand .badge {
-      background: #1e3a8a;
-      color: #bfdbfe;
-      padding: 2px 8px;
-      border-radius: 4px;
+    .tab-btn {
+      padding: 5px 11px;
+      border: none;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--text-secondary);
       font-size: 0.75rem;
       font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
     }
 
-    .health-pill {
+    .tab-btn[aria-selected="true"] {
+      background: var(--accent-blue);
+      color: #ffffff;
+    }
+
+    .ckpt-pill {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 0.85rem;
-      color: #4ade80;
+      gap: 7px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #6ee7b7;
+      white-space: nowrap;
+    }
+
+    .ckpt-pill.warn {
+      background: rgba(245, 158, 11, 0.14);
+      border-color: rgba(245, 158, 11, 0.4);
+      color: #fcd34d;
     }
 
     .status-dot {
-      width: 10px;
-      height: 10px;
-      background-color: #22c55e;
+      width: 8px;
+      height: 8px;
+      background-color: #10b981;
       border-radius: 50%;
-      box-shadow: 0 0 8px #22c55e;
+      box-shadow: 0 0 8px #10b981;
     }
 
+    .ckpt-pill.warn .status-dot {
+      background-color: #f59e0b;
+      box-shadow: 0 0 8px #f59e0b;
+    }
+
+    /* Main 3-Column Clinical Grid */
     .main-workspace {
       display: grid;
-      grid-template-columns: 320px 1fr 340px;
+      grid-template-columns: 320px 1fr 355px;
       flex: 1;
-      height: calc(100vh - 60px);
+      height: calc(100vh - 54px);
       overflow: hidden;
     }
 
-    /* Left Sidebar: Control & Ingestion */
-    .sidebar-left {
+    .sidebar-left,
+    .sidebar-right {
       background-color: var(--panel-bg);
-      border-right: 1px solid var(--border-color);
-      padding: 16px;
+      padding: 12px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 10px;
       overflow-y: auto;
     }
 
-    .panel-section {
-      background-color: var(--card-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 14px;
+    .sidebar-left {
+      border-right: 1px solid var(--border-subtle);
     }
 
-    .panel-section h3 {
-      font-size: 0.85rem;
+    .sidebar-right {
+      border-left: 1px solid var(--border-subtle);
+    }
+
+    .panel-card {
+      background-color: var(--surface-bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 11px;
+    }
+
+    .panel-card h3 {
+      font-size: 0.72rem;
       text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--text-muted);
-      margin-bottom: 12px;
+      letter-spacing: 0.7px;
+      color: var(--text-secondary);
+      margin-bottom: 9px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
     }
 
     .form-group {
-      margin-bottom: 12px;
+      margin-bottom: 9px;
     }
 
     .form-group label {
       display: block;
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-bottom: 6px;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+      font-weight: 500;
     }
 
-    .form-group select, .form-group input[type="file"] {
+    .form-group select,
+    .form-group input[type="file"],
+    .form-group input[type="text"],
+    .form-group input[type="number"] {
       width: 100%;
-      padding: 8px;
-      background: #182032;
-      border: 1px solid var(--border-color);
-      color: var(--text-main);
+      padding: 6px 9px;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
       border-radius: 6px;
-      font-size: 0.85rem;
+      font-size: 0.79rem;
+    }
+
+    .filter-row {
+      display: grid;
+      grid-template-columns: 1.25fr 0.95fr;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .source-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-bottom: 8px;
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+    }
+
+    .source-pill {
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(59, 130, 246, 0.16);
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      color: #bfdbfe;
+      font-weight: 600;
+    }
+
+    .source-pill.custom {
+      background: rgba(245, 158, 11, 0.16);
+      border-color: rgba(245, 158, 11, 0.45);
+      color: #fde68a;
+    }
+
+    .btn-inline {
+      padding: 3px 8px;
+      font-size: 0.71rem;
+      border-radius: 4px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface-elev);
+      color: var(--text-primary);
+      cursor: pointer;
+    }
+
+    .btn-inline:hover {
+      border-color: var(--accent-cyan);
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: var(--text-primary);
+      margin-top: 6px;
+      cursor: pointer;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.81rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-primary {
+      background-color: var(--accent-blue);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background-color: var(--accent-blue-hover);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+
+    .btn-secondary {
+      background-color: var(--surface-elev);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+      margin-top: 7px;
+    }
+
+    .btn-secondary:hover {
+      background-color: #293a5e;
+    }
+
+    .btn-secondary.active-toggle {
+      background-color: #0369a1;
+      border-color: #38bdf8;
+      color: #ffffff;
+    }
+
+    .btn-compare {
+      background: linear-gradient(135deg, #1d4ed8, #0369a1);
+      color: #ffffff;
+      margin-top: 8px;
+    }
+
+    .btn-compare:hover {
+      background: linear-gradient(135deg, #1e40af, #075985);
     }
 
     .slider-container {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 5px;
+      margin-bottom: 6px;
     }
 
     .slider-header {
       display: flex;
       justify-content: space-between;
-      font-size: 0.82rem;
-      color: var(--text-muted);
+      font-size: 0.75rem;
+      color: var(--text-secondary);
     }
 
     input[type="range"] {
       width: 100%;
-      accent-color: var(--primary);
+      accent-color: var(--accent-blue);
     }
 
-    .btn {
-      width: 100%;
-      padding: 10px;
-      border: none;
-      border-radius: 6px;
-      font-weight: 600;
-      font-size: 0.85rem;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-
-    .btn-primary {
-      background-color: var(--primary);
-      color: white;
-    }
-
-    .btn-primary:hover {
-      background-color: var(--primary-hover);
-    }
-
-    .btn-secondary {
-      background-color: #334155;
-      color: white;
+    .blurred-controls-box {
       margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border-strong);
     }
 
-    .btn-secondary:hover {
-      background-color: #475569;
+    .blurred-controls-box.highlight {
+      border-color: var(--accent-cyan);
     }
 
-    /* Center Viewport: OpenSeadragon */
+    .wsi-dropzone {
+      border: 1px dashed var(--border-strong);
+      border-radius: 6px;
+      padding: 8px;
+      background: var(--bg-canvas);
+      margin-bottom: 8px;
+      font-size: 0.74rem;
+      color: var(--text-muted);
+    }
+
+    /* Center Viewport */
     .viewport-center {
       position: relative;
-      background-color: #0b0f17;
+      background-color: #070b14;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
+    }
+
+    .view-mode-ribbon {
+      background-color: var(--panel-bg);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 7px 12px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      z-index: 20;
+    }
+
+    .mode-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .mode-pill {
+      padding: 5px 9px;
+      border-radius: 5px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      border: 1px solid var(--border-strong);
+      background-color: var(--surface-bg);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .mode-pill:hover {
+      color: var(--text-primary);
+      border-color: var(--accent-blue);
+    }
+
+    .mode-pill.active {
+      background-color: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: #ffffff;
+    }
+
+    .mode-pill.qa-pill.active {
+      background-color: #047857;
+      border-color: #10b981;
+      color: #ffffff;
+    }
+
+    .viewport-stage {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, #0e1729 0%, #070b14 100%);
     }
 
     #openseadragon-viewer {
       width: 100%;
       height: 100%;
       position: absolute;
-      top: 0;
-      left: 0;
+      inset: 0;
+      cursor: grab;
+      touch-action: none;
     }
 
-    .viewport-toolbar {
+    #openseadragon-viewer.panning {
+      cursor: grabbing;
+    }
+
+    #stageCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .zoom-toolbar {
       position: absolute;
-      top: 16px;
-      left: 16px;
-      z-index: 10;
-      background: rgba(28, 36, 56, 0.85);
-      backdrop-filter: blur(8px);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      padding: 6px 12px;
+      top: 12px;
+      right: 12px;
+      z-index: 12;
       display: flex;
-      gap: 12px;
-      font-size: 0.8rem;
+      align-items: center;
+      gap: 4px;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      padding: 4px 6px;
+      backdrop-filter: blur(6px);
     }
 
-    /* Right Sidebar: Biomarkers & Legend */
-    .sidebar-right {
-      background-color: var(--panel-bg);
-      border-left: 1px solid var(--border-color);
-      padding: 16px;
+    .zoom-btn {
+      background: var(--surface-elev);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .zoom-btn:hover {
+      border-color: var(--accent-cyan);
+    }
+
+    .zoom-btn.active {
+      background: #0369a1;
+      border-color: #38bdf8;
+      color: #ffffff;
+    }
+
+    .zoom-readout {
+      font-size: 0.72rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text-secondary);
+      padding: 0 6px;
+      min-width: 48px;
+      text-align: center;
+    }
+
+    .pixel-inspector-hud {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      z-index: 12;
+      background: rgba(15, 23, 42, 0.90);
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 0.73rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text-primary);
+      pointer-events: none;
+      max-width: calc(100% - 170px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .scale-bar-hud {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      z-index: 12;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      padding: 5px 9px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
-      overflow-y: auto;
+      align-items: center;
+      gap: 3px;
+      pointer-events: none;
     }
+
+    .scale-bar-line {
+      height: 4px;
+      width: 60px;
+      border-left: 2px solid #f8fafc;
+      border-right: 2px solid #f8fafc;
+      border-bottom: 2px solid #f8fafc;
+    }
+
+    .scale-bar-label {
+      font-size: 0.69rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text-primary);
+    }
+
+    #magnifierLoupe {
+      position: absolute;
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: 2px solid #38bdf8;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.7);
+      pointer-events: none;
+      display: none;
+      z-index: 14;
+      background: #070b14;
+    }
+
+    .stage-loading-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(7, 11, 20, 0.72);
+      z-index: 25;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      backdrop-filter: blur(2px);
+    }
+
+    .stage-loading-overlay.active {
+      display: flex;
+    }
+
+    .spinner {
+      width: 34px;
+      height: 34px;
+      border: 3px solid rgba(59, 130, 246, 0.25);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Synchronized Split Curtain Layer */
+    .split-curtain-container {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      background: #070b14;
+      z-index: 15;
+    }
+
+    .split-curtain-container.active {
+      display: flex;
+    }
+
+    .split-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 12px;
+      background: rgba(17, 25, 43, 0.95);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 0.75rem;
+      z-index: 6;
+    }
+
+    .split-select-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-secondary);
+    }
+
+    .split-select-group select {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-size: 0.75rem;
+    }
+
+    .split-frame {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      user-select: none;
+      touch-action: none;
+      background: #070b14;
+      cursor: grab;
+    }
+
+    .split-frame canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    #splitLeftCanvas {
+      z-index: 2;
+    }
+
+    .split-divider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #38bdf8;
+      z-index: 4;
+      cursor: ew-resize;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
+    }
+
+    .split-handle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #0369a1;
+      border: 2px solid #ffffff;
+      color: #ffffff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: ew-resize;
+    }
+
+    .split-label {
+      position: absolute;
+      top: 10px;
+      padding: 3px 8px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      z-index: 5;
+      color: #e2e8f0;
+      pointer-events: none;
+    }
+
+    .split-label.left { left: 10px; }
+    .split-label.right { right: 10px; }
+
+    .viewport-footer {
+      background-color: var(--panel-bg);
+      border-top: 1px solid var(--border-subtle);
+      padding: 7px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+
+    .qa-legend-strip {
+      display: flex;
+      gap: 11px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .qa-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 4px;
+    }
+
+    /* Right Panel KPI & Legend */
+    .qa-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+
+    .qa-stat {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 7px 9px;
+    }
+
+    .qa-stat-label {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.4px;
+    }
+
+    .qa-stat-val {
+      font-size: 1.08rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    .qa-stat-sub {
+      font-size: 0.67rem;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    .val-green { color: var(--match-green); }
+    .val-red { color: var(--error-red); }
+    .val-amber { color: var(--margin-amber); }
+    .val-blue { color: #60a5fa; }
 
     .legend-list {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 5px;
     }
 
     .legend-item {
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: inherit;
+      font: inherit;
+      text-align: left;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      font-size: 0.85rem;
+      font-size: 0.79rem;
+      padding: 4px 5px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .legend-item:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .legend-item.selected-spotlight {
+      background: rgba(59, 130, 246, 0.18);
+      outline: 1px solid rgba(59, 130, 246, 0.55);
     }
 
     .legend-badge {
@@ -250,448 +832,2461 @@
     }
 
     .color-swatch {
-      width: 14px;
-      height: 14px;
+      width: 12px;
+      height: 12px;
       border-radius: 3px;
-    }
-
-    .biomarker-card {
-      background: #182032;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      padding: 12px;
-      margin-bottom: 10px;
-    }
-
-    .biomarker-title {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      letter-spacing: 0.5px;
-    }
-
-    .biomarker-value {
-      font-size: 1.6rem;
-      font-weight: 700;
-      margin: 4px 0;
-      color: #60a5fa;
-    }
-
-    .biomarker-subtext {
-      font-size: 0.72rem;
-      color: var(--text-muted);
     }
 
     .progress-bar-bg {
-      background: #334155;
-      height: 6px;
+      background: #1e293b;
+      height: 5px;
       border-radius: 3px;
       overflow: hidden;
-      margin-top: 6px;
+      margin-bottom: 3px;
     }
 
     .progress-bar-fill {
       height: 100%;
       border-radius: 3px;
-      transition: width 0.3s;
+      transition: width 0.25s ease;
+    }
+
+    .biomarker-card {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 9px;
+      margin-bottom: 7px;
+    }
+
+    .biomarker-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      letter-spacing: 0.4px;
+    }
+
+    .biomarker-value {
+      font-size: 1.32rem;
+      font-weight: 700;
+      margin: 2px 0;
+      color: #60a5fa;
+    }
+
+    .biomarker-subtext {
+      font-size: 0.7rem;
+      color: var(--text-muted);
     }
 
     .status-alert {
-      padding: 8px 12px;
+      padding: 8px 9px;
       border-radius: 6px;
-      font-size: 0.78rem;
+      font-size: 0.74rem;
       line-height: 1.4;
       background: rgba(59, 130, 246, 0.1);
       border: 1px solid rgba(59, 130, 246, 0.3);
-      color: #93c5fd;
+      color: #bfdbfe;
+    }
+
+    .confusions-list {
+      margin-top: 7px;
+      font-size: 0.73rem;
+      color: var(--text-secondary);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      line-height: 1.35;
+    }
+
+    .export-btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+    }
+
+    /* Multi-Method Compare Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 7, 18, 0.82);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-box {
+      background: var(--panel-bg);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      width: min(1220px, 96vw);
+      max-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .modal-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .compare-toolbar {
+      padding: 10px 16px;
+      background: var(--surface-bg);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.75rem;
+    }
+
+    .compare-method-checks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .compare-method-checks label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .modal-body {
+      padding: 16px;
+      overflow-y: auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .compare-card {
+      background: var(--surface-bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .compare-card img {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: contain;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+      background: #070b14;
+      image-rendering: pixelated;
+    }
+
+    .compare-title {
+      font-size: 0.81rem;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+
+    .compare-metrics {
+      font-size: 0.74rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    /* Non-blocking Toast Notifications */
+    .toast-container {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 360px;
+    }
+
+    .toast {
+      background: var(--panel-bg);
+      border: 1px solid var(--border-strong);
+      border-left: 4px solid var(--accent-blue);
+      color: var(--text-primary);
+      padding: 9px 12px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .toast.error { border-left-color: var(--error-red); }
+    .toast.success { border-left-color: var(--match-green); }
+
+    @media (max-width: 1180px) {
+      body {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+      }
+      header {
+        flex-wrap: wrap;
+        height: auto;
+      }
+      .main-workspace {
+        grid-template-columns: 1fr;
+        height: auto;
+        overflow: visible;
+      }
+      .viewport-center {
+        order: 1;
+        min-height: 540px;
+      }
+      .sidebar-left {
+        order: 2;
+        border-right: none;
+        border-top: 1px solid var(--border-subtle);
+      }
+      .sidebar-right {
+        order: 3;
+        border-left: none;
+        border-top: 1px solid var(--border-subtle);
+      }
     }
   </style>
 </head>
 <body>
 
-  <!-- Top Header Navigation -->
   <header>
     <div class="brand">
-      <h1>SE374.R11 Clinical Pathology Workstation</h1>
-      <span class="badge">WSSS DeepZoom v1.0</span>
+      <div class="brand-mark">DX</div>
+      <h1>BCSS-WSSS Clinical Digital Pathology Workstation</h1>
+      <span class="badge">Visual QA & Biomarkers v2.0</span>
     </div>
-    <div class="health-pill" id="systemHealth">
-      <span class="status-dot"></span>
-      <span id="healthText">System Healthy (Inference Ready)</span>
+    <div class="header-right">
+      <div class="tab-bar" role="tablist" aria-label="Workstation Mode">
+        <button type="button" role="tab" class="tab-btn" id="tabPatchQA" aria-selected="true">Single Patch QA</button>
+        <button type="button" role="tab" class="tab-btn" id="tabWSI" aria-selected="false">WSI Multi-Tile Stitch</button>
+      </div>
+      <div class="ckpt-pill" id="systemHealth">
+        <span class="status-dot"></span>
+        <span id="healthText">Initializing Models...</span>
+      </div>
     </div>
   </header>
 
-  <!-- Main Workstation Layout -->
   <main class="main-workspace">
-
-    <!-- Left Controls Panel -->
+    <!-- Left Sidebar -->
     <aside class="sidebar-left">
-      <div class="panel-section">
-        <h3>Patch & Slide Ingestion</h3>
-        <div class="form-group">
-          <label for="sampleSelect">Preset Clinical Samples</label>
-          <select id="sampleSelect">
-            <option value="breast_tumor">BCSS Sample 1: Invasive Breast Carcinoma (TUM+STR)</option>
-            <option value="lymph_stroma">BCSS Sample 2: Immune Stroma Interface (STR+LYM)</option>
-            <option value="glass_control">Negative Control: Glass Slide Background</option>
+      <div class="panel-card" id="patchIngestionCard">
+        <h3>Cohort & Patch Ingestion</h3>
+        <div class="filter-row">
+          <input type="text" id="sampleSearchInput" placeholder="Filter patient ID..." aria-label="Filter cohort by patient ID">
+          <select id="morphologyFilter" aria-label="Filter by tissue morphology">
+            <option value="">All Classes</option>
+            <option value="TUM">TUM</option>
+            <option value="STR">STR</option>
+            <option value="LYM">LYM</option>
+            <option value="NEC">NEC</option>
+            <option value="Glass">Glass Margin</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="patchUpload">Or Upload H&E Patch (PNG/JPG)</label>
+          <label for="sampleSelect">Held-Out TCGA-BRCA Test Cases (Real GT)</label>
+          <select id="sampleSelect">
+            <option value="">Loading test cohort...</option>
+          </select>
+        </div>
+        <div class="source-bar">
+          <span class="source-pill" id="activeSourceBadge">Source: Cohort Sample</span>
+          <button type="button" class="btn-inline" id="btnClearUpload">Clear Upload</button>
+        </div>
+        <div class="form-group">
+          <label for="patchUpload">Or Upload Custom H&E Patch (PNG/JPG)</label>
           <input type="file" id="patchUpload" accept="image/png, image/jpeg">
         </div>
-        <button class="btn btn-primary" id="btnRunInference">Run WSSS Analysis</button>
-      </div>
-
-      <div class="panel-section">
-        <h3>Overlay Opacity Control</h3>
-        <div class="slider-container">
-          <div class="slider-header">
-            <span>Segmentation Mask Opacity</span>
-            <span id="opacityLabel">50%</span>
-          </div>
-          <input type="range" id="opacitySlider" min="0" max="100" value="50">
-        </div>
-        <button class="btn btn-secondary" id="btnToggleOverlay">Toggle Mask On/Off</button>
-      </div>
-
-      <div class="panel-section">
-        <h3>Model Configuration</h3>
         <div class="form-group">
-          <label>Algorithm Pipeline</label>
-          <select id="configSelect">
-            <option value="proposed" selected>Config 4: Proposed Adaptive + Otsu Gating</option>
-            <option value="relocalization">Config 3: Spatial Affinity (ARML)</option>
-            <option value="classmix">Config 2: Data-Centric ClassMix</option>
-            <option value="baseline">Config 1: Vanilla CAM Baseline</option>
+          <label for="gtUpload">Optional Reference GT Mask (Index PNG)</label>
+          <input type="file" id="gtUpload" accept="image/png">
+        </div>
+        <button type="button" class="btn btn-primary" id="btnRunInference">Run WSSS Analysis</button>
+      </div>
+
+      <div class="panel-card" id="wsiControlPanel" style="display:none;">
+        <h3>WSI Multi-Tile Stitcher</h3>
+        <div class="wsi-dropzone">
+          Select up to 64 tiles (PNG/JPG). Coordinates auto-parse from <code>_xmin..._ymin...</code> filenames or pack in a regular grid.
+        </div>
+        <div class="form-group">
+          <label for="wsiTilesInput">Upload WSI Tile Patches</label>
+          <input type="file" id="wsiTilesInput" multiple accept="image/png, image/jpeg">
+        </div>
+        <div class="filter-row">
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="wsiColsInput">Grid Columns</label>
+            <input type="number" id="wsiColsInput" min="1" max="16" value="2">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="wsiOverlapInput">Tile Overlap (px)</label>
+            <input type="number" id="wsiOverlapInput" min="0" max="128" value="0">
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:8px;">
+          <label for="wsiMethodSelect">WSI Inference Mode</label>
+          <select id="wsiMethodSelect">
+            <option value="m6" selected>M6: Multi-Scale D4 + Adaptive CAM</option>
+            <option value="m7">M7: Optical Curriculum + Bilateral V2</option>
+            <option value="m1">M1: Single-Scale DeepLabV3+</option>
+            <option value="combined">Combined: M6 + OD + SG-DAP + MP-PPC</option>
           </select>
         </div>
-        <div class="status-alert">
-          Otsu Gating Active: Background glass and adipose artifacts are filtered in HSV space prior to CAM argmax.
+        <button type="button" class="btn btn-primary" id="btnRunWSI">Stitch & Analyze WSI</button>
+        <div id="wsiRegionInfo" class="confusions-list" style="margin-top:8px;">No WSI composite stitched yet.</div>
+      </div>
+
+      <div class="panel-card">
+        <h3>Multi-Direction Inference Engine</h3>
+        <div class="form-group">
+          <label for="configSelect">Experimental Pipeline Mode</label>
+          <select id="configSelect">
+            <option value="m6" selected>M6: Multi-Scale D4 + Adaptive CAM (Verified SOTA)</option>
+            <option value="m1">M1: Single-Scale DeepLabV3+ Baseline</option>
+            <option value="m2">M2: D4-TTA + Stage-1 CGM Gate</option>
+            <option value="m3">M3: D4-TTA + CGM + CAM Prior Fusion</option>
+            <option value="m4">M4: D4-TTA + CGM + Bilateral Refinement</option>
+            <option value="m5">M5: V1 Ensemble + Bilateral Refinement</option>
+            <option value="m7">M7: V2 Optical Density + Entropy CAM + Bilateral</option>
+            <option value="od_prior">Ablation: M6 + Beer-Lambert OD Prior</option>
+            <option value="sg_dap">Ablation: M6 + SG-DAP Markov Affinity</option>
+            <option value="mpppc">Ablation: M6 + SG-DAP + MP-PPC Prototypes</option>
+            <option value="combined">Combined: M6 + OD Prior + SG-DAP + MP-PPC</option>
+          </select>
+        </div>
+        <label class="checkbox-row">
+          <input type="checkbox" id="otsuToggle" checked>
+          <span>Enforce Pure-Glass Otsu Guard (HSV)</span>
+        </label>
+        <button type="button" class="btn btn-compare" id="btnCompareMethods">Compare Methods Side-by-Side</button>
+      </div>
+
+      <div class="panel-card">
+        <h3>Viewport Display Controls</h3>
+        <div class="slider-container">
+          <div class="slider-header">
+            <span>Diagnostic Overlay Opacity</span>
+            <span id="opacityLabel">65%</span>
+          </div>
+          <input type="range" id="opacitySlider" min="0" max="100" value="65">
+        </div>
+        <div class="blurred-controls-box" id="blurredDualControls">
+          <div class="slider-container">
+            <div class="slider-header">
+              <span>Blur Sigma (Dual QA)</span>
+              <span id="blurSigmaLabel">4.0 px</span>
+            </div>
+            <input type="range" id="blurSigmaSlider" min="0" max="12" step="0.5" value="4.0">
+          </div>
+          <div class="slider-container">
+            <div class="slider-header">
+              <span>H&E Dimming</span>
+              <span id="heDimLabel">55%</span>
+            </div>
+            <input type="range" id="heDimSlider" min="0" max="100" value="55">
+          </div>
+          <div class="slider-container">
+            <div class="slider-header">
+              <span>GT Layer Opacity</span>
+              <span id="gtAlphaLabel">45%</span>
+            </div>
+            <input type="range" id="gtAlphaSlider" min="0" max="100" value="45">
+          </div>
+          <div class="slider-container">
+            <div class="slider-header">
+              <span>Pred Layer Opacity</span>
+              <span id="predAlphaLabel">55%</span>
+            </div>
+            <input type="range" id="predAlphaSlider" min="0" max="100" value="55">
+          </div>
+          <div class="slider-container" style="margin-bottom:0;">
+            <div class="slider-header">
+              <span>Error Highlight (G/R/A)</span>
+              <span id="errAlphaLabel">70%</span>
+            </div>
+            <input type="range" id="errAlphaSlider" min="0" max="100" value="70">
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary" id="btnToggleOverlay">Toggle Mask On/Off (Space)</button>
+        <button type="button" class="btn btn-secondary" id="btnToggleSplit">Toggle Split-Curtain Compare (S)</button>
+        <div id="splitControlBox" style="display:none; margin-top:8px;">
+          <div class="slider-header">
+            <span>Curtain Position</span>
+            <span id="splitPctLabel">50%</span>
+          </div>
+          <input type="range" id="splitSlider" min="5" max="95" value="50">
         </div>
       </div>
     </aside>
 
-    <!-- Center Viewport: DeepZoom OpenSeadragon -->
+    <!-- Center Multi-Mode Diagnostic Viewport -->
     <section class="viewport-center">
-      <div class="viewport-toolbar">
-        <span>Slide: <strong id="slideNameLabel">BCSS-TCGA-Sample</strong></span>
-        <span>|</span>
-        <span>Resolution: <strong id="resLabel">224 x 224</strong></span>
-        <span>|</span>
-        <span>Viewer: <strong>OpenSeadragon Interactive</strong></span>
+      <div class="view-mode-ribbon">
+        <div class="mode-pills" id="viewModePills" role="tablist" aria-label="Diagnostic Visualization Modes">
+          <button type="button" role="tab" class="mode-pill qa-pill active" data-mode="blurred_dual" aria-pressed="true">1. Blurred Dual QA</button>
+          <button type="button" role="tab" class="mode-pill qa-pill" data-mode="agreement" aria-pressed="false">2. Match vs Error</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="overlay" aria-pressed="false">3. Seg Mask</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="dual_blend" aria-pressed="false">4. GT + AI Blend</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="contour" aria-pressed="false">5. Contours</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="entropy" aria-pressed="false">6. Entropy</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="cam" aria-pressed="false">7. Stage-1 CAM</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="spotlight" aria-pressed="false">8. Spotlight</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="gt" aria-pressed="false">9. Doctor GT</button>
+        </div>
+        <div style="font-size:0.73rem; color:var(--text-secondary);">
+          Slide: <strong id="slideNameLabel" style="color:#f8fafc;">-</strong> |
+          Res: <strong id="resLabel">224 x 224</strong> |
+          Latency: <strong id="latencyLabel">-</strong>
+        </div>
       </div>
-      <div id="openseadragon-viewer"></div>
+
+      <div class="viewport-stage">
+        <div id="openseadragon-viewer" data-viewer-engine="openseadragon-compatible-canvas">
+          <canvas id="stageCanvas"></canvas>
+          <div class="zoom-toolbar">
+            <button type="button" class="zoom-btn" id="btnZoomIn" title="Zoom In (+)">+</button>
+            <button type="button" class="zoom-btn" id="btnZoomOut" title="Zoom Out (-)">-</button>
+            <button type="button" class="zoom-btn" id="btnZoomOne" title="Native 1:1 Pixels">1:1</button>
+            <button type="button" class="zoom-btn" id="btnZoomFit" title="Fit to Stage (0)">Fit</button>
+            <span class="zoom-readout" id="zoomReadout">100%</span>
+            <button type="button" class="zoom-btn" id="btnToggleLoupe" title="Toggle Magnifier Loupe (L)" aria-pressed="false">Loupe</button>
+          </div>
+          <div class="pixel-inspector-hud" id="pixelInspectorHUD">Hover tissue to inspect (x, y, GT, Pred, Conf%)</div>
+          <div class="scale-bar-hud" id="scaleBarHud">
+            <div class="scale-bar-line" id="scaleBarLine"></div>
+            <div class="scale-bar-label" id="scaleBarLabel">50 um (0.25 MPP)</div>
+          </div>
+          <canvas id="magnifierLoupe" width="120" height="120"></canvas>
+        </div>
+
+        <!-- Synchronized Split Curtain Mode -->
+        <div class="split-curtain-container" id="splitContainer">
+          <div class="split-toolbar">
+            <div class="split-select-group">
+              <label for="splitLeftSelect">Left Layer:</label>
+              <select id="splitLeftSelect">
+                <option value="gt" selected>Doctor GT</option>
+                <option value="raw">Raw H&E</option>
+                <option value="pred">AI Pred Mask</option>
+                <option value="blurred_dual">Blurred Dual QA</option>
+                <option value="agreement">Match vs Error</option>
+                <option value="contour">Contours</option>
+                <option value="entropy">Entropy</option>
+                <option value="cam">Stage-1 CAM</option>
+              </select>
+            </div>
+            <span style="color:var(--text-muted); font-size:0.71rem;">Wheel to zoom | Drag canvas to pan | Drag divider to wipe</span>
+            <div class="split-select-group">
+              <label for="splitRightSelect">Right Layer:</label>
+              <select id="splitRightSelect">
+                <option value="blurred_dual" selected>Blurred Dual QA</option>
+                <option value="agreement">Match vs Error</option>
+                <option value="pred">AI Pred Mask</option>
+                <option value="overlay">H&E + AI Overlay</option>
+                <option value="contour">Contours</option>
+                <option value="entropy">Entropy</option>
+                <option value="cam">Stage-1 CAM</option>
+                <option value="gt">Doctor GT</option>
+                <option value="raw">Raw H&E</option>
+              </select>
+            </div>
+          </div>
+          <div class="split-frame" id="splitFrame">
+            <canvas id="splitRightCanvas"></canvas>
+            <canvas id="splitLeftCanvas"></canvas>
+            <div class="split-divider" id="splitDivider" style="left:50%;">
+              <div class="split-handle">&lt;&gt;</div>
+            </div>
+            <span class="split-label left" id="splitLeftLabel">Doctor GT</span>
+            <span class="split-label right" id="splitRightLabel">Blurred Dual QA</span>
+          </div>
+        </div>
+
+        <div class="stage-loading-overlay" id="stageLoadingOverlay">
+          <div class="spinner"></div>
+          <div style="font-size:0.82rem; color:#e2e8f0;" id="loadingStageText">Running WSSS Inference...</div>
+        </div>
+      </div>
+
+      <div class="viewport-footer">
+        <div class="qa-legend-strip" id="activeModeLegend">
+          <span><span class="qa-dot" style="background:#10b981;"></span>Green = TP Match</span>
+          <span><span class="qa-dot" style="background:#f59e0b;"></span>Amber = Margin / FN</span>
+          <span><span class="qa-dot" style="background:#ef4444;"></span>Red = Core Error</span>
+        </div>
+        <div id="methodBadgeFooter">Method: -</div>
+      </div>
     </section>
 
-    <!-- Right Clinical Biomarkers & Legend Panel -->
+    <!-- Right Verification & Clinical Biomarker Rail -->
     <aside class="sidebar-right">
-      <div class="panel-section">
-        <h3>5 Tissue Classes</h3>
+      <div class="panel-card" id="qaAuditCard">
+        <h3>
+          <span>Visual Correctness Audit (vs GT)</span>
+          <span id="gtStatusTag" style="color:var(--match-green);">GT Active</span>
+        </h3>
+        <div class="qa-grid">
+          <div class="qa-stat">
+            <div class="qa-stat-label">Exact Match</div>
+            <div class="qa-stat-val val-green" id="qaExactMatch">-</div>
+            <div class="qa-stat-sub" id="qaPxSummary">All valid px</div>
+          </div>
+          <div class="qa-stat">
+            <div class="qa-stat-label">Core Error</div>
+            <div class="qa-stat-val val-red" id="qaCoreErr">-</div>
+            <div class="qa-stat-sub" id="qaErrBreakdown">FP / FN / Mis</div>
+          </div>
+          <div class="qa-stat">
+            <div class="qa-stat-label">mIoU (GT-Present)</div>
+            <div class="qa-stat-val val-blue" id="qaMIoU">-</div>
+            <div class="qa-stat-sub" id="qaMIoUPenSub">Penalized: -</div>
+          </div>
+          <div class="qa-stat">
+            <div class="qa-stat-label">Boundary F1</div>
+            <div class="qa-stat-val val-amber" id="qaBF1">-</div>
+            <div class="qa-stat-sub" id="qaDiceSub">mDice: -</div>
+          </div>
+        </div>
+        <div class="confusions-list" id="topConfusionsList">
+          Select a held-out sample with Ground Truth to audit errors.
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <h3>
+          <span>5 Tissue Classes (Click to Spotlight)</span>
+          <span style="font-size:0.68rem; color:var(--text-muted);">BCSS-WSSS</span>
+        </h3>
         <div class="legend-list">
-          <div class="legend-item">
+          <button type="button" class="legend-item selected-spotlight" data-cls="0" aria-pressed="true">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-tum);"></div>
               <span>Tumor (TUM)</span>
             </div>
             <strong id="pct-TUM">0.0%</strong>
-          </div>
+          </button>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill" id="bar-TUM" style="width: 0%; background-color: var(--color-tum);"></div>
           </div>
 
-          <div class="legend-item" style="margin-top: 8px;">
+          <button type="button" class="legend-item" data-cls="1" aria-pressed="false">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-str);"></div>
               <span>Stroma (STR)</span>
             </div>
             <strong id="pct-STR">0.0%</strong>
-          </div>
+          </button>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill" id="bar-STR" style="width: 0%; background-color: var(--color-str);"></div>
           </div>
 
-          <div class="legend-item" style="margin-top: 8px;">
+          <button type="button" class="legend-item" data-cls="2" aria-pressed="false">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-lym);"></div>
               <span>Lymphocyte (LYM)</span>
             </div>
             <strong id="pct-LYM">0.0%</strong>
-          </div>
+          </button>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill" id="bar-LYM" style="width: 0%; background-color: var(--color-lym);"></div>
           </div>
 
-          <div class="legend-item" style="margin-top: 8px;">
+          <button type="button" class="legend-item" data-cls="3" aria-pressed="false">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-nec);"></div>
               <span>Necrosis (NEC)</span>
             </div>
             <strong id="pct-NEC">0.0%</strong>
-          </div>
+          </button>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill" id="bar-NEC" style="width: 0%; background-color: var(--color-nec);"></div>
           </div>
 
-          <div class="legend-item" style="margin-top: 8px;">
+          <button type="button" class="legend-item" data-cls="4" aria-pressed="false">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-back);"></div>
               <span>Background (BACK)</span>
             </div>
             <strong id="pct-BACK">100.0%</strong>
-          </div>
+          </button>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill" id="bar-BACK" style="width: 100%; background-color: var(--color-back);"></div>
           </div>
         </div>
+        <div id="spotlightStatText" style="margin-top:6px; font-size:0.73rem; color:var(--text-secondary);"></div>
       </div>
 
-      <div class="panel-section">
+      <div class="panel-card">
         <h3>Clinical Biomarkers</h3>
-        
         <div class="biomarker-card">
           <div class="biomarker-title">Viable Tumor Percentage (VTP)</div>
           <div class="biomarker-value" id="valVTP">0.0%</div>
-          <div class="biomarker-subtext">N_tumor / (N_tissue) * 100%</div>
+          <div class="biomarker-subtext" id="gtRefVTP">N_tumor / N_tissue * 100%</div>
         </div>
-
         <div class="biomarker-card">
           <div class="biomarker-title">Tumor-Stroma Ratio (TSR)</div>
           <div class="biomarker-value" id="valTSR">0.0%</div>
-          <div class="biomarker-subtext">N_tumor / (N_tumor + N_stroma) * 100%</div>
+          <div class="biomarker-subtext" id="gtRefTSR">N_tumor / (N_tumor + N_stroma) * 100%</div>
         </div>
-
         <div class="status-alert" id="biomarkerAssessment">
           Awaiting patch segmentation inference.
         </div>
       </div>
-    </aside>
 
+      <div class="panel-card">
+        <h3>Export QA Report</h3>
+        <div class="export-btn-row">
+          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportPng">PNG Sheet</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportJson">JSON Audit</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportCsv">CSV Metrics</button>
+        </div>
+      </div>
+    </aside>
   </main>
 
+  <!-- Multi-Method Comparison Modal -->
+  <div class="modal-backdrop" id="compareModal" role="dialog" aria-modal="true" aria-labelledby="compareModalTitle">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div>
+          <strong style="font-size:0.95rem;" id="compareModalTitle">Multi-Method Side-by-Side Empirical Comparison</strong>
+          <div style="font-size:0.76rem; color:var(--text-secondary);" id="compareSubtitle">Evaluating active patch...</div>
+        </div>
+        <button type="button" class="btn btn-secondary" style="width:auto; margin:0; padding:6px 14px;" id="btnCloseCompare">Close (Esc)</button>
+      </div>
+      <div class="compare-toolbar" id="compareToolbar">
+        <div class="compare-method-checks" id="compareMethodChecks">
+          <label><input type="checkbox" value="m1" checked> M1</label>
+          <label><input type="checkbox" value="m2"> M2</label>
+          <label><input type="checkbox" value="m3"> M3</label>
+          <label><input type="checkbox" value="m4"> M4</label>
+          <label><input type="checkbox" value="m5"> M5</label>
+          <label><input type="checkbox" value="m6" checked> M6</label>
+          <label><input type="checkbox" value="m7"> M7</label>
+          <label><input type="checkbox" value="od_prior"> OD Prior</label>
+          <label><input type="checkbox" value="sg_dap" checked> SG-DAP</label>
+          <label><input type="checkbox" value="mpppc"> MP-PPC</label>
+          <label><input type="checkbox" value="combined" checked> Combined</label>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label for="compareViewSelect" style="color:var(--text-secondary);">View:</label>
+          <select id="compareViewSelect" style="background:var(--bg-canvas); border:1px solid var(--border-strong); color:var(--text-primary); border-radius:5px; padding:4px 8px;">
+            <option value="blurred_dual" selected>Blurred Dual QA</option>
+            <option value="agreement">Match vs Error</option>
+            <option value="mask">Class Mask</option>
+            <option value="contour">Boundary Contours</option>
+            <option value="entropy">Shannon Entropy</option>
+            <option value="cam">Stage-1 CAM</option>
+          </select>
+          <button type="button" class="btn btn-primary" style="width:auto; padding:5px 12px;" id="btnRunCompareNow">Run Selected</button>
+        </div>
+      </div>
+      <div class="modal-body" id="compareGrid"></div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
   <script>
-    // State management
-    let viewer = null;
-    let overlayCanvas = null;
-    let currentMaskBase64 = null;
-    let currentRawBase64 = null;
+    const CLASS_NAMES = ["TUM", "STR", "LYM", "NEC", "BACK"];
+    const CLASS_PALETTE_RGB = [
+      [228, 26, 28],
+      [77, 175, 74],
+      [55, 126, 184],
+      [255, 127, 0],
+      [153, 153, 153],
+    ];
+    const MPP_UM = 0.25;
+
     let overlayVisible = true;
+    let splitCurtainMode = false;
+    let loupeEnabled = false;
+    let activeViewMode = "blurred_dual";
+    let targetSpotlightClass = 0;
+    let lastResult = null;
+    let lastRawImageUrl = null;
+    let lastSampleMeta = null;
+    let lastLoadedImageKey = null;
+    let lastCustomPatchB64 = null;
+    let lastCustomGtB64 = null;
+    let activeInferenceCtrl = null;
+    let activeWsiCtrl = null;
+    let activeCompareData = null;
+    let splitPct = 50;
+    let blurredRafPending = false;
+    let allCohortSamples = [];
+    let activeWorkstationTab = "patch";
 
-    // Initialize OpenSeadragon Viewer
-    function initViewer() {
-      if (typeof OpenSeadragon === "undefined") {
-        console.warn("OpenSeadragon not loaded from CDN, initializing canvas fallback.");
-        return;
-      }
+    const viewState = { scale: 1.0, panX: 0, panY: 0, imgW: 224, imgH: 224 };
 
-      viewer = OpenSeadragon({
-        id: "openseadragon-viewer",
-        prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/images/",
-        showNavigationControl: true,
-        showNavigator: true,
-        navigatorPosition: "BOTTOM_RIGHT",
-        minZoomLevel: 0.5,
-        maxZoomLevel: 20,
-        defaultZoomLevel: 1.0,
+    // Offscreen decoded buffers for <5 ms client-side compositing & Pixel Inspector
+    let rawImgCanvas = null;
+    let rawPixels = null;
+    let predIndexBuf = null;
+    let gtIndexBuf = null;
+    let confBuf = null;
+    let boundaryZoneBuf = null;
+    let gtColorCanvas = null;
+    let predColorCanvas = null;
+    let compositeCanvas = document.createElement("canvas");
+    const serverImageCache = new Map();
+
+    const QA_MODE_LEGENDS = {
+      blurred_dual: [
+        { color: "#10b981", label: "Green = TP Match" },
+        { color: "#f59e0b", label: "Amber = Margin Shift / Missed FN" },
+        { color: "#ef4444", label: "Red = Core Error / Tissue Misclass" },
+        { color: "#d946ef", label: "Magenta = Glass FP" },
+      ],
+      agreement: [
+        { color: "#10b981", label: "Green = Exact Tissue Match" },
+        { color: "#f59e0b", label: "Amber = 2px Boundary Shift" },
+        { color: "#ef4444", label: "Red = Tissue Misclass" },
+        { color: "#d946ef", label: "Magenta = Glass FP" },
+        { color: "#3b82f6", label: "Blue = Missed FN" },
+        { color: "#e2e8f0", label: "Neutral = Clean Glass Match" },
+      ],
+      overlay: [
+        { color: "#E41A1C", label: "TUM (Tumor)" },
+        { color: "#4DAF4A", label: "STR (Stroma)" },
+        { color: "#377EB8", label: "LYM (Lymphocyte)" },
+        { color: "#FF7F00", label: "NEC (Necrosis)" },
+        { color: "#999999", label: "BACK (Transparent Glass)" },
+      ],
+      dual_blend: [
+        { color: "#E41A1C", label: "TUM" },
+        { color: "#4DAF4A", label: "STR" },
+        { color: "#377EB8", label: "LYM" },
+        { color: "#FF7F00", label: "NEC (50% GT + 50% AI)" },
+        { color: "#ff3838", label: "Red Outline = GT/AI Mismatch" },
+      ],
+      contour: [
+        { color: "#06b6d4", label: "Cyan Solid = Doctor GT Contour" },
+        { color: "#facc15", label: "Gold Dashed = AI Prediction Contour" },
+      ],
+      entropy: [
+        { color: "#1f0c48", label: "Indigo = Confident (Low H)" },
+        { color: "#b63679", label: "Magenta = Moderate Entropy" },
+        { color: "#fb8861", label: "Orange = Boundary Uncertainty" },
+        { color: "#fcfdbf", label: "Bright = Peak Shannon Entropy" },
+      ],
+      cam: [
+        { color: "#1f0c48", label: "Low Stage-1 Activation" },
+        { color: "#b63679", label: "Moderate CAM Response" },
+        { color: "#fcffa4", label: "Peak Stage-1 CAM Loci" },
+      ],
+      spotlight: [
+        { color: "#10b981", label: "Green = True Positive (TP)" },
+        { color: "#ef4444", label: "Red = False Positive (FP)" },
+        { color: "#f59e0b", label: "Amber = False Negative (FN)" },
+      ],
+      gt: [
+        { color: "#E41A1C", label: "TUM" },
+        { color: "#4DAF4A", label: "STR" },
+        { color: "#377EB8", label: "LYM" },
+        { color: "#FF7F00", label: "NEC" },
+        { color: "#999999", label: "BACK (Pathologist Ground Truth)" },
+      ],
+    };
+
+    function showToast(msg, kind = "info") {
+      const box = document.getElementById("toastContainer");
+      if (!box) return;
+      const el = document.createElement("div");
+      el.className = "toast " + kind;
+      const txt = document.createElement("span");
+      txt.textContent = msg;
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "btn-inline";
+      closeBtn.textContent = "x";
+      closeBtn.addEventListener("click", () => el.remove());
+      el.appendChild(txt);
+      el.appendChild(closeBtn);
+      box.appendChild(el);
+      setTimeout(() => {
+        if (el.parentNode) el.remove();
+      }, 4500);
+    }
+
+    function updateActiveModeLegend(mode) {
+      const strip = document.getElementById("activeModeLegend");
+      if (!strip) return;
+      const items = QA_MODE_LEGENDS[mode] || QA_MODE_LEGENDS.agreement;
+      strip.innerHTML = items
+        .map(it => `<span><span class="qa-dot" style="background:${it.color};"></span>${it.label}</span>`)
+        .join("");
+    }
+
+    function computeCurrentImageKey(sourceTag, rawUrl, w, h) {
+      const len = rawUrl ? rawUrl.length : 0;
+      const head = rawUrl ? rawUrl.slice(0, 48) : "";
+      return `${sourceTag}:${w}x${h}:${len}:${head}`;
+    }
+
+    function loadImageElement(src) {
+      return new Promise((resolve, reject) => {
+        if (!src) return reject(new Error("Empty image source"));
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = (e) => reject(e);
+        img.src = src;
       });
     }
 
-    // Generate synthetic sample H&E pattern for instant clinical testing
-    function createSyntheticHnEDataURL(type) {
+    async function decodeGrayPngToUint8(dataUrl, w, h) {
+      if (!dataUrl) return null;
+      const img = await loadImageElement(dataUrl);
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, w, h);
+      const rgba = ctx.getImageData(0, 0, w, h).data;
+      const out = new Uint8Array(w * h);
+      for (let i = 0; i < out.length; i++) {
+        out[i] = rgba[i * 4];
+      }
+      return out;
+    }
+
+    function buildMaskColorCanvas(indexBuf, w, h) {
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      if (!indexBuf) return c;
+      const ctx = c.getContext("2d");
+      const imgData = ctx.createImageData(w, h);
+      const d = imgData.data;
+      for (let i = 0; i < indexBuf.length; i++) {
+        const cls = indexBuf[i];
+        const off = i * 4;
+        if (cls < 4) {
+          const rgb = CLASS_PALETTE_RGB[cls];
+          d[off] = rgb[0];
+          d[off + 1] = rgb[1];
+          d[off + 2] = rgb[2];
+          d[off + 3] = 255;
+        } else {
+          d[off + 3] = 0;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+      return c;
+    }
+
+    function computeBoundaryZone(gtBuf, w, h, radius = 2) {
+      if (!gtBuf) return null;
+      const out = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) {
+        const y0 = Math.max(0, y - radius);
+        const y1 = Math.min(h - 1, y + radius);
+        for (let x = 0; x < w; x++) {
+          const center = gtBuf[y * w + x];
+          if (center > 4) continue;
+          const x0 = Math.max(0, x - radius);
+          const x1 = Math.min(w - 1, x + radius);
+          let diff = false;
+          for (let yy = y0; yy <= y1 && !diff; yy++) {
+            const rowOff = yy * w;
+            for (let xx = x0; xx <= x1; xx++) {
+              const nv = gtBuf[rowOff + xx];
+              if (nv <= 4 && nv !== center) {
+                diff = true;
+                break;
+              }
+            }
+          }
+          out[y * w + x] = diff ? 1 : 0;
+        }
+      }
+      return out;
+    }
+
+    async function hydrateClientBuffers(rawUrl, res, isAbortedFn = null) {
+      const h = (res.mask_shape && res.mask_shape[0]) || 224;
+      const w = (res.mask_shape && res.mask_shape[1]) || 224;
+
+      const rawImg = await loadImageElement(rawUrl);
+      if (isAbortedFn && isAbortedFn()) return;
+      const rc = document.createElement("canvas");
+      rc.width = w;
+      rc.height = h;
+      const rctx = rc.getContext("2d", { willReadFrequently: true });
+      rctx.drawImage(rawImg, 0, 0, w, h);
+      const rPixels = rctx.getImageData(0, 0, w, h).data;
+
+      const [predBuf, gtBuf, cBuf] = await Promise.all([
+        decodeGrayPngToUint8(res.pred_mask_index_base64, w, h).catch(() => null),
+        decodeGrayPngToUint8(res.gt_mask_index_base64, w, h).catch(() => null),
+        decodeGrayPngToUint8(res.confidence_map_base64, w, h).catch(() => null),
+      ]);
+      if (isAbortedFn && isAbortedFn()) return;
+
+      const cacheUrls = {
+        overlay: res.overlay_base64,
+        agreement: res.agreement_overlay_base64,
+        dual_blend: res.dual_blend_base64,
+        blurred_dual: res.blurred_dual_overlay_base64,
+        contour: res.contour_overlay_base64,
+        entropy: res.entropy_overlay_base64,
+        cam: res.cam_overlay_base64,
+        spotlight: res.spotlight_overlay_base64,
+        gt: res.gt_color_base64 || null,
+        mask: res.mask_base64,
+      };
+      const decodedImages = await Promise.all(
+        Object.entries(cacheUrls).map(async ([k, u]) => {
+          if (!u) return [k, null];
+          try {
+            return [k, await loadImageElement(u)];
+          } catch (_e) {
+            return [k, null];
+          }
+        })
+      );
+      if (isAbortedFn && isAbortedFn()) return;
+
+      viewState.imgW = w;
+      viewState.imgH = h;
+      rawImgCanvas = rc;
+      rawPixels = rPixels;
+      predIndexBuf = predBuf;
+      gtIndexBuf = gtBuf;
+      confBuf = cBuf;
+      boundaryZoneBuf = gtBuf ? computeBoundaryZone(gtBuf, w, h, 2) : null;
+      predColorCanvas = predBuf ? buildMaskColorCanvas(predBuf, w, h) : null;
+      gtColorCanvas = gtBuf ? buildMaskColorCanvas(gtBuf, w, h) : null;
+
+      serverImageCache.clear();
+      serverImageCache.set("gt", null);
+      for (const [k, img] of decodedImages) {
+        if (img) serverImageCache.set(k, img);
+      }
+    }
+
+    function fitToViewport() {
+      const stage = document.getElementById("openseadragon-viewer");
+      if (!stage) return;
+      const sw = stage.clientWidth || 600;
+      const sh = stage.clientHeight || 500;
+      const scale = Math.min(sw / viewState.imgW, sh / viewState.imgH) * 0.92;
+      viewState.scale = Math.max(0.25, scale);
+      viewState.panX = (sw - viewState.imgW * viewState.scale) / 2.0;
+      viewState.panY = (sh - viewState.imgH * viewState.scale) / 2.0;
+    }
+
+    function updateScaleBarAndZoomReadout() {
+      const readout = document.getElementById("zoomReadout");
+      if (readout) {
+        readout.innerText = Math.round(viewState.scale * 100) + "%";
+      }
+      const lineEl = document.getElementById("scaleBarLine");
+      const labelEl = document.getElementById("scaleBarLabel");
+      if (!lineEl || !labelEl) return;
+
+      const candidatesUm = [10, 25, 50, 100, 200];
+      let chosenUm = 50;
+      let chosenPx = (50 / MPP_UM) * viewState.scale;
+      for (const um of candidatesUm) {
+        const px = (um / MPP_UM) * viewState.scale;
+        if (px >= 42 && px <= 150) {
+          chosenUm = um;
+          chosenPx = px;
+          break;
+        }
+      }
+      chosenPx = Math.max(24, Math.min(180, chosenPx));
+      lineEl.style.width = Math.round(chosenPx) + "px";
+      labelEl.innerText = `${chosenUm} um (${MPP_UM} MPP)`;
+    }
+
+    function applySeparableBoxBlurRGBA(imgData, w, h, radius) {
+      const r = Math.max(1, Math.min(24, Math.round(radius)));
+      const src = imgData.data;
+      const tmp = new Float32Array(src.length);
+      const dst = new Uint8ClampedArray(src.length);
+      const win = 2 * r + 1;
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let sr = 0, sg = 0, sb = 0, sa = 0;
+          for (let dx = -r; dx <= r; dx++) {
+            const xx = Math.max(0, Math.min(w - 1, x + dx));
+            const idx = (y * w + xx) * 4;
+            sr += src[idx];
+            sg += src[idx + 1];
+            sb += src[idx + 2];
+            sa += src[idx + 3];
+          }
+          const o = (y * w + x) * 4;
+          tmp[o] = sr / win;
+          tmp[o + 1] = sg / win;
+          tmp[o + 2] = sb / win;
+          tmp[o + 3] = sa / win;
+        }
+      }
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let sr = 0, sg = 0, sb = 0, sa = 0;
+          for (let dy = -r; dy <= r; dy++) {
+            const yy = Math.max(0, Math.min(h - 1, y + dy));
+            const idx = (yy * w + x) * 4;
+            sr += tmp[idx];
+            sg += tmp[idx + 1];
+            sb += tmp[idx + 2];
+            sa += tmp[idx + 3];
+          }
+          const o = (y * w + x) * 4;
+          dst[o] = sr / win;
+          dst[o + 1] = sg / win;
+          dst[o + 2] = sb / win;
+          dst[o + 3] = sa / win;
+        }
+      }
+      return new ImageData(dst, w, h);
+    }
+
+    function drawDimmedBackdropToCtx(ctx, w, h, dim) {
+      if (!rawPixels) return;
+      const imgData = ctx.createImageData(w, h);
+      const out = imgData.data;
+      const lumScale = 1.0 - 0.30 * dim;
+      for (let i = 0; i < out.length; i += 4) {
+        const r = rawPixels[i];
+        const g = rawPixels[i + 1];
+        const b = rawPixels[i + 2];
+        const gray = (0.299 * r + 0.587 * g + 0.114 * b) * lumScale;
+        out[i] = (1.0 - dim) * r + dim * gray;
+        out[i + 1] = (1.0 - dim) * g + dim * gray;
+        out[i + 2] = (1.0 - dim) * b + dim * gray;
+        out[i + 3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    function renderBlurredDualIntoCanvas(targetCanvas) {
+      const w = viewState.imgW;
+      const h = viewState.imgH;
+      targetCanvas.width = w;
+      targetCanvas.height = h;
+      const ctx = targetCanvas.getContext("2d");
+
+      if (!rawPixels || !predIndexBuf) {
+        const srv = serverImageCache.get("blurred_dual") || serverImageCache.get("overlay");
+        if (srv) ctx.drawImage(srv, 0, 0, w, h);
+        else if (rawImgCanvas) ctx.drawImage(rawImgCanvas, 0, 0, w, h);
+        return;
+      }
+
+      const sigma = parseFloat(document.getElementById("blurSigmaSlider").value);
+      const dim = parseFloat(document.getElementById("heDimSlider").value) / 100.0;
+      const gtAlpha = parseFloat(document.getElementById("gtAlphaSlider").value) / 100.0;
+      const predAlpha = parseFloat(document.getElementById("predAlphaSlider").value) / 100.0;
+      const errAlpha = parseFloat(document.getElementById("errAlphaSlider").value) / 100.0;
+
+      drawDimmedBackdropToCtx(ctx, w, h, dim);
+
+      const drawBlurredLayer = (layerCanvas, alphaVal) => {
+        if (!layerCanvas || alphaVal <= 0.005) return;
+        ctx.save();
+        ctx.globalAlpha = alphaVal;
+        if (sigma > 0.0 && typeof ctx.filter === "string") {
+          ctx.filter = `blur(${sigma.toFixed(1)}px)`;
+          ctx.drawImage(layerCanvas, 0, 0, w, h);
+        } else if (sigma > 0.0) {
+          const tmp = document.createElement("canvas");
+          tmp.width = w;
+          tmp.height = h;
+          const tctx = tmp.getContext("2d");
+          tctx.drawImage(layerCanvas, 0, 0, w, h);
+          const blurred = applySeparableBoxBlurRGBA(tctx.getImageData(0, 0, w, h), w, h, sigma);
+          tctx.putImageData(blurred, 0, 0);
+          ctx.drawImage(tmp, 0, 0, w, h);
+        } else {
+          ctx.drawImage(layerCanvas, 0, 0, w, h);
+        }
+        ctx.restore();
+      };
+
+      if (gtColorCanvas) drawBlurredLayer(gtColorCanvas, gtAlpha);
+      if (predColorCanvas) drawBlurredLayer(predColorCanvas, predAlpha);
+
+      if (gtIndexBuf && errAlpha > 0.005) {
+        const cueCanvas = document.createElement("canvas");
+        cueCanvas.width = w;
+        cueCanvas.height = h;
+        const cctx = cueCanvas.getContext("2d");
+        const cData = cctx.createImageData(w, h);
+        const cd = cData.data;
+        const nPx = w * h;
+        for (let i = 0; i < nPx; i++) {
+          const g = gtIndexBuf[i];
+          const p = predIndexBuf[i];
+          if (g > 4) continue;
+          const off = i * 4;
+          if (p === g && g < 4) {
+            cd[off] = 16;
+            cd[off + 1] = 185;
+            cd[off + 2] = 129;
+            cd[off + 3] = Math.round(145 * errAlpha);
+          } else if (p !== g) {
+            const isMargin = boundaryZoneBuf && boundaryZoneBuf[i] === 1;
+            if (isMargin || (g < 4 && p === 4)) {
+              cd[off] = 245;
+              cd[off + 1] = 158;
+              cd[off + 2] = 11;
+              cd[off + 3] = Math.round(195 * errAlpha);
+            } else if (g === 4 && p < 4) {
+              cd[off] = 217;
+              cd[off + 1] = 70;
+              cd[off + 2] = 239;
+              cd[off + 3] = Math.round(210 * errAlpha);
+            } else {
+              cd[off] = 239;
+              cd[off + 1] = 68;
+              cd[off + 2] = 68;
+              cd[off + 3] = Math.round(215 * errAlpha);
+            }
+          }
+        }
+        cctx.putImageData(cData, 0, 0);
+        ctx.drawImage(cueCanvas, 0, 0, w, h);
+      }
+    }
+
+    function renderSpotlightIntoCanvas(targetCanvas) {
+      const w = viewState.imgW;
+      const h = viewState.imgH;
+      targetCanvas.width = w;
+      targetCanvas.height = h;
+      const ctx = targetCanvas.getContext("2d");
+
+      if (!rawPixels || !predIndexBuf) {
+        const srv = serverImageCache.get("spotlight");
+        if (srv) ctx.drawImage(srv, 0, 0, w, h);
+        return;
+      }
+
+      const alpha = parseFloat(document.getElementById("opacitySlider").value) / 100.0;
+      const cls = targetSpotlightClass;
+      const imgData = ctx.createImageData(w, h);
+      const out = imgData.data;
+
+      let nTp = 0, nFp = 0, nFn = 0, nValid = 0, nPred = 0;
+      const nPx = w * h;
+      for (let i = 0; i < nPx; i++) {
+        const off = i * 4;
+        const gray = (0.299 * rawPixels[off] + 0.587 * rawPixels[off + 1] + 0.114 * rawPixels[off + 2]) * 0.85;
+        let rr = gray, gg = gray, bb = gray;
+        const pC = predIndexBuf[i] === cls;
+        if (pC) nPred++;
+
+        if (gtIndexBuf) {
+          const gVal = gtIndexBuf[i];
+          if (gVal <= 4) {
+            nValid++;
+            const gC = gVal === cls;
+            if (pC && gC) {
+              nTp++;
+              rr = (1 - alpha) * gray + alpha * 16;
+              gg = (1 - alpha) * gray + alpha * 185;
+              bb = (1 - alpha) * gray + alpha * 129;
+            } else if (pC && !gC) {
+              nFp++;
+              rr = (1 - alpha) * gray + alpha * 239;
+              gg = (1 - alpha) * gray + alpha * 68;
+              bb = (1 - alpha) * gray + alpha * 68;
+            } else if (!pC && gC) {
+              nFn++;
+              rr = (1 - alpha) * gray + alpha * 245;
+              gg = (1 - alpha) * gray + alpha * 158;
+              bb = (1 - alpha) * gray + alpha * 11;
+            }
+          }
+        } else if (pC) {
+          const pal = CLASS_PALETTE_RGB[cls];
+          rr = (1 - alpha) * gray + alpha * pal[0];
+          gg = (1 - alpha) * gray + alpha * pal[1];
+          bb = (1 - alpha) * gray + alpha * pal[2];
+        }
+        out[off] = rr;
+        out[off + 1] = gg;
+        out[off + 2] = bb;
+        out[off + 3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      const statEl = document.getElementById("spotlightStatText");
+      if (statEl) {
+        if (gtIndexBuf && nValid > 0) {
+          const union = nTp + nFp + nFn;
+          const iou = union > 0 ? (nTp / union * 100.0) : 100.0;
+          const prec = (nTp + nFp) > 0 ? (nTp / (nTp + nFp) * 100.0) : 0.0;
+          const rec = (nTp + nFn) > 0 ? (nTp / (nTp + nFn) * 100.0) : 0.0;
+          statEl.innerText = `Spotlight ${CLASS_NAMES[cls]} -> IoU: ${iou.toFixed(1)}% | Prec: ${prec.toFixed(1)}% | Rec: ${rec.toFixed(1)}% (TP:${nTp} FP:${nFp} FN:${nFn} px)`;
+        } else {
+          const pct = nPx > 0 ? (nPred / nPx * 100.0) : 0.0;
+          statEl.innerText = `Spotlight ${CLASS_NAMES[cls]} -> Predicted Coverage: ${pct.toFixed(1)}% (${nPred} px)`;
+        }
+      }
+    }
+
+    function renderModeToCanvas(mode, targetCanvas) {
+      const w = viewState.imgW;
+      const h = viewState.imgH;
+      targetCanvas.width = w;
+      targetCanvas.height = h;
+      const ctx = targetCanvas.getContext("2d");
+      ctx.clearRect(0, 0, w, h);
+
+      if (!overlayVisible || mode === "raw") {
+        if (rawImgCanvas) ctx.drawImage(rawImgCanvas, 0, 0, w, h);
+        return;
+      }
+      if (mode === "blurred_dual") {
+        if (gtIndexBuf || serverImageCache.has("blurred_dual")) {
+          renderBlurredDualIntoCanvas(targetCanvas);
+        } else {
+          renderModeToCanvas("overlay", targetCanvas);
+        }
+        return;
+      }
+      if (mode === "spotlight") {
+        renderSpotlightIntoCanvas(targetCanvas);
+        return;
+      }
+
+      const opacity = parseFloat(document.getElementById("opacitySlider").value) / 100.0;
+      if (mode === "overlay" || mode === "pred") {
+        if (rawImgCanvas && mode === "overlay") ctx.drawImage(rawImgCanvas, 0, 0, w, h);
+        if (mode === "pred") {
+          const mImg = serverImageCache.get("mask") || predColorCanvas;
+          if (mImg) ctx.drawImage(mImg, 0, 0, w, h);
+        } else if (predColorCanvas) {
+          ctx.save();
+          ctx.globalAlpha = opacity;
+          ctx.drawImage(predColorCanvas, 0, 0, w, h);
+          ctx.restore();
+        } else if (serverImageCache.has("overlay")) {
+          ctx.save();
+          ctx.globalAlpha = opacity;
+          ctx.drawImage(serverImageCache.get("overlay"), 0, 0, w, h);
+          ctx.restore();
+        }
+        return;
+      }
+
+      if (mode === "gt") {
+        const gtImg = serverImageCache.get("gt");
+        if (gtImg) {
+          if (rawImgCanvas) ctx.drawImage(rawImgCanvas, 0, 0, w, h);
+          ctx.drawImage(gtImg, 0, 0, w, h);
+        } else {
+          ctx.fillStyle = "#11192b";
+          ctx.fillRect(0, 0, w, h);
+          ctx.strokeStyle = "#334155";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(4, 4, Math.max(1, w - 8), Math.max(1, h - 8));
+          ctx.fillStyle = "#94a3b8";
+          ctx.font = "bold 12px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("No Reference GT Provided", w / 2, h / 2);
+        }
+        return;
+      }
+
+      const chosen = serverImageCache.get(mode) || serverImageCache.get("overlay") || serverImageCache.get("mask");
+      if (rawImgCanvas) ctx.drawImage(rawImgCanvas, 0, 0, w, h);
+      if (chosen) {
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        ctx.drawImage(chosen, 0, 0, w, h);
+        ctx.restore();
+      }
+    }
+
+    function drawCanvasWithViewState(canvasEl, sourceCanvas) {
+      const parent = canvasEl.parentElement;
+      if (!parent) return;
+      const cw = parent.clientWidth || 600;
+      const ch = parent.clientHeight || 500;
+      if (canvasEl.width !== cw || canvasEl.height !== ch) {
+        canvasEl.width = cw;
+        canvasEl.height = ch;
+      }
+      const ctx = canvasEl.getContext("2d");
+      ctx.clearRect(0, 0, cw, ch);
+      if (!sourceCanvas || sourceCanvas.width === 0) return;
+
+      ctx.save();
+      ctx.imageSmoothingEnabled = viewState.scale < 2.0;
+      ctx.drawImage(
+        sourceCanvas,
+        viewState.panX,
+        viewState.panY,
+        viewState.imgW * viewState.scale,
+        viewState.imgH * viewState.scale
+      );
+      ctx.restore();
+    }
+
+    function renderStageAndSplit() {
+      const stageCanvas = document.getElementById("stageCanvas");
+      if (stageCanvas) {
+        drawCanvasWithViewState(stageCanvas, compositeCanvas);
+      }
+      if (splitCurtainMode) {
+        const leftMode = document.getElementById("splitLeftSelect").value;
+        const rightMode = document.getElementById("splitRightSelect").value;
+        const lcBuf = document.createElement("canvas");
+        const rcBuf = document.createElement("canvas");
+        renderModeToCanvas(leftMode, lcBuf);
+        renderModeToCanvas(rightMode, rcBuf);
+        drawCanvasWithViewState(document.getElementById("splitLeftCanvas"), lcBuf);
+        drawCanvasWithViewState(document.getElementById("splitRightCanvas"), rcBuf);
+        document.getElementById("splitLeftLabel").innerText =
+          document.getElementById("splitLeftSelect").selectedOptions[0].textContent;
+        document.getElementById("splitRightLabel").innerText =
+          document.getElementById("splitRightSelect").selectedOptions[0].textContent;
+      }
+      updateScaleBarAndZoomReadout();
+    }
+
+    function renderActiveViewMode() {
+      updateActiveModeLegend(activeViewMode);
+      const blurBox = document.getElementById("blurredDualControls");
+      if (blurBox) {
+        blurBox.classList.toggle("highlight", activeViewMode === "blurred_dual");
+      }
+      if (activeWorkstationTab === "wsi" || (lastLoadedImageKey && lastLoadedImageKey.startsWith("wsi:"))) {
+        renderStageAndSplit();
+        return;
+      }
+      if (!lastRawImageUrl || !lastResult) return;
+      renderModeToCanvas(activeViewMode, compositeCanvas);
+      renderStageAndSplit();
+    }
+
+    function updateRightSidebarMetrics(result) {
+      document.getElementById("resLabel").innerText = result.mask_shape[1] + " x " + result.mask_shape[0];
+      document.getElementById("latencyLabel").innerText = (result.latency_ms || 0).toFixed(0) + " ms";
+      document.getElementById("methodBadgeFooter").innerText =
+        "Method: " + (result.method_used || "-") + (result.checkpoint_verified ? " [Verified Checkpoint]" : " [Fallback]");
+
+      document.getElementById("valVTP").innerText = result.biomarkers.viable_tumor_percentage.toFixed(1) + "%";
+      document.getElementById("valTSR").innerText = result.biomarkers.tumor_stroma_ratio.toFixed(1) + "%";
+
+      const dist = result.class_distribution;
+      for (const [cls, pct] of Object.entries(dist)) {
+        const pctEl = document.getElementById("pct-" + cls);
+        const barEl = document.getElementById("bar-" + cls);
+        if (pctEl) pctEl.innerText = pct.toFixed(1) + "%";
+        if (barEl) barEl.style.width = pct + "%";
+      }
+
+      const vtp = result.biomarkers.viable_tumor_percentage;
+      const tsr = result.biomarkers.tumor_stroma_ratio;
+      const assessEl = document.getElementById("biomarkerAssessment");
+      if (dist["BACK"] > 95.0) {
+        assessEl.innerText = "Negative Control: Pure unstained glass confirmed by Otsu Guard.";
+      } else if ((dist["TUM"] + dist["STR"]) <= 5.0) {
+        assessEl.innerText = "Non-Tumor/Non-Stroma Dominant Tissue (Insufficient TUM+STR <= 5% for CAP TSR).";
+      } else if (tsr <= 50.0) {
+        assessEl.innerText = "CAP Stroma-Rich Phenotype (TSR <= 50%): High-Risk Profile | VTP = " + vtp.toFixed(1) + "%.";
+      } else {
+        assessEl.innerText = "Stroma-Poor Phenotype (TSR > 50%): Standard Risk | TSR = " + tsr.toFixed(1) + "%.";
+      }
+
+      if (result.spotlight_stats) {
+        const ss = result.spotlight_stats;
+        document.getElementById("spotlightStatText").innerText = ss.iou_pct !== undefined
+          ? (`Spotlight ${ss.class_name} -> IoU: ${ss.iou_pct.toFixed(1)}% | Prec: ${ss.precision_pct.toFixed(1)}% | Rec: ${ss.recall_pct.toFixed(1)}%`)
+          : (`Spotlight ${ss.class_name} -> Predicted Coverage: ${ss.pred_pct.toFixed(1)}%`);
+      }
+
+      const vm = result.verification_metrics;
+      const gtTag = document.getElementById("gtStatusTag");
+      if (vm) {
+        gtTag.innerText = "GT Verified";
+        gtTag.style.color = "var(--match-green)";
+        document.getElementById("qaExactMatch").innerText = vm.exact_match_pct.toFixed(1) + "%";
+        document.getElementById("qaCoreErr").innerText = vm.core_error_pct.toFixed(1) + "%";
+        document.getElementById("qaMIoU").innerText = vm.miou_4cls.toFixed(1) + "%";
+        document.getElementById("qaBF1").innerText = vm.boundary_f1.toFixed(1) + "%";
+
+        const penVal = vm.miou_penalized_4cls !== undefined ? vm.miou_penalized_4cls : vm.miou_4cls;
+        document.getElementById("qaMIoUPenSub").innerText = "Penalized: " + penVal.toFixed(1) + "%";
+        document.getElementById("qaDiceSub").innerText = "mDice: " + (vm.mdice_4cls || 0).toFixed(1) + "%";
+        document.getElementById("qaPxSummary").innerText = `TP ${vm.tp_px || 0} / ${vm.valid_tissue_px || 0} fg px`;
+        document.getElementById("qaErrBreakdown").innerText = `FP:${vm.fp_glass_px || 0} FN:${vm.fn_missed_px || 0} Mis:${vm.misclass_px || 0}`;
+
+        if (vm.top_confusions && vm.top_confusions.length > 0) {
+          document.getElementById("topConfusionsList").innerHTML =
+            "<strong>Top Errors (GT -&gt; AI):</strong> " +
+            vm.top_confusions.map(c => `${c.gt_class} -&gt; ${c.pred_class} (${c.pct_of_patch}%)`).join(" | ");
+        } else {
+          document.getElementById("topConfusionsList").innerText = "Zero core class confusions detected.";
+        }
+      } else {
+        gtTag.innerText = "No GT Mask";
+        gtTag.style.color = "var(--margin-amber)";
+        document.getElementById("qaExactMatch").innerText = "-";
+        document.getElementById("qaCoreErr").innerText = "-";
+        document.getElementById("qaMIoU").innerText = "-";
+        document.getElementById("qaBF1").innerText = "-";
+        document.getElementById("qaMIoUPenSub").innerText = "Penalized: -";
+        document.getElementById("qaDiceSub").innerText = "mDice: -";
+        document.getElementById("qaPxSummary").innerText = "No GT reference";
+        document.getElementById("qaErrBreakdown").innerText = "-";
+        document.getElementById("topConfusionsList").innerText =
+          "Mean Shannon Entropy: " + (result.mean_entropy || 0).toFixed(3) + " (Upload or select sample GT for error map).";
+      }
+
+      const gtBio = result.gt_biomarkers || (lastSampleMeta && lastSampleMeta.gt_biomarkers);
+      if (gtBio) {
+        document.getElementById("gtRefVTP").innerText =
+          "GT Reference VTP: " + gtBio.viable_tumor_percentage.toFixed(1) + "%";
+        document.getElementById("gtRefTSR").innerText =
+          "GT Reference TSR: " + gtBio.tumor_stroma_ratio.toFixed(1) + "%";
+      } else {
+        document.getElementById("gtRefVTP").innerText = "N_tumor / N_tissue * 100%";
+        document.getElementById("gtRefTSR").innerText = "N_tumor / (N_tumor + N_stroma) * 100%";
+      }
+    }
+
+    function readFileAsDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function createOfflineFallbackPatchDataURL() {
       const canvas = document.createElement("canvas");
       canvas.width = 224;
       canvas.height = 224;
       const ctx = canvas.getContext("2d");
-
-      if (type === "glass_control") {
-        // Bright white glass background
-        ctx.fillStyle = "#fafafa";
-        ctx.fillRect(0, 0, 224, 224);
-      } else if (type === "lymph_stroma") {
-        // Pinkish stroma and blue lymphocytic aggregates
-        ctx.fillStyle = "#e8b4cb";
-        ctx.fillRect(0, 0, 224, 224);
-        ctx.fillStyle = "#377EB8";
-        ctx.beginPath();
-        ctx.arc(112, 112, 60, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        // Breast carcinoma: deep purple tumor cluster with pink stroma margin
-        ctx.fillStyle = "#deb0cd";
-        ctx.fillRect(0, 0, 224, 224);
-        ctx.fillStyle = "#8a1c5d";
-        ctx.beginPath();
-        ctx.ellipse(112, 112, 80, 50, Math.PI / 4, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
+      ctx.fillStyle = "#deb0cd";
+      ctx.fillRect(0, 0, 224, 224);
+      ctx.fillStyle = "#8a1c5d";
+      ctx.beginPath();
+      ctx.ellipse(112, 112, 70, 48, Math.PI / 5, 0, Math.PI * 2);
+      ctx.fill();
       return canvas.toDataURL("image/png");
     }
 
-    // Update OpenSeadragon view with base image and overlay
-    function updateViewerImage(imageURL, overlayURL) {
-      currentRawBase64 = imageURL;
-      currentMaskBase64 = overlayURL;
-
-      if (!viewer) return;
-
-      viewer.open({
-        type: "image",
-        url: imageURL,
-      });
-
-      // Handle overlay when image loads
-      viewer.addOnceHandler("open", function() {
-        if (!overlayURL) return;
-        const opacityVal = parseFloat(document.getElementById("opacitySlider").value) / 100.0;
-        
-        // Remove existing overlay if any
-        const existingOverlay = document.getElementById("clinical-segmentation-overlay");
-        if (existingOverlay) {
-          viewer.removeOverlay(existingOverlay);
+    function renderCohortSelect(samples) {
+      const select = document.getElementById("sampleSelect");
+      const prev = select.value;
+      select.innerHTML = "";
+      if (samples && samples.length > 0) {
+        for (const s of samples) {
+          const opt = document.createElement("option");
+          opt.value = s.sample_id;
+          opt.textContent = s.label;
+          select.appendChild(opt);
         }
-
-        const overlayImg = document.createElement("img");
-        overlayImg.id = "clinical-segmentation-overlay";
-        overlayImg.src = overlayURL;
-        overlayImg.style.opacity = opacityVal;
-        overlayImg.style.pointerEvents = "none";
-        overlayImg.style.transition = "opacity 0.15s ease-out";
-
-        const tiledImage = viewer.world.getItemAt(0);
-        if (tiledImage) {
-          const bounds = tiledImage.getBounds();
-          viewer.addOverlay({
-            element: overlayImg,
-            location: bounds,
-          });
+        if (prev && samples.some(s => s.sample_id === prev)) {
+          select.value = prev;
         }
+      } else {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No matching cohort cases";
+        select.appendChild(opt);
+      }
+    }
+
+    async function loadCohortSamples(patientFilter = "", morphFilter = "") {
+      try {
+        const params = new URLSearchParams();
+        if (patientFilter) params.set("patient_id", patientFilter);
+        if (morphFilter) params.set("morphology", morphFilter);
+        const qs = params.toString();
+        const res = await fetch("/api/v1/samples" + (qs ? ("?" + qs) : ""));
+        if (!res.ok) throw new Error("Samples API failed");
+        const data = await res.json();
+        if (!patientFilter && !morphFilter) {
+          allCohortSamples = data.samples || [];
+        }
+        renderCohortSelect(data.samples || []);
+      } catch (err) {
+        if (allCohortSamples.length > 0) {
+          const pQ = patientFilter.toLowerCase();
+          const mQ = morphFilter.toLowerCase();
+          const filtered = allCohortSamples.filter(s =>
+            (!pQ || s.patient_id.toLowerCase().includes(pQ) || s.sample_id.toLowerCase().includes(pQ)) &&
+            (!mQ || (s.label || "").toLowerCase().includes(mQ))
+          );
+          renderCohortSelect(filtered);
+        } else {
+          showToast("Could not load cohort samples: " + err.message, "error");
+        }
+      }
+    }
+
+    function syncSourceBadge(isCustom) {
+      const badge = document.getElementById("activeSourceBadge");
+      if (!badge) return;
+      badge.classList.toggle("custom", isCustom);
+      badge.innerText = isCustom ? "Source: Custom Upload" : "Source: Cohort Sample";
+    }
+
+    function setStageLoading(active, label = "Running WSSS Inference...") {
+      const ov = document.getElementById("stageLoadingOverlay");
+      const txt = document.getElementById("loadingStageText");
+      if (txt) txt.innerText = label;
+      if (ov) ov.classList.toggle("active", active);
+    }
+
+    function setActiveModePill(mode) {
+      activeViewMode = mode;
+      document.querySelectorAll(".mode-pill").forEach(b => {
+        const on = b.dataset.mode === mode;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
       });
     }
 
-    // Call API server for patch prediction
     async function runInference() {
+      if (activeInferenceCtrl) {
+        activeInferenceCtrl.abort();
+      }
+      const myCtrl = new AbortController();
+      activeInferenceCtrl = myCtrl;
+      const signal = myCtrl.signal;
+      const isStale = () => activeInferenceCtrl !== myCtrl || signal.aborted || activeWorkstationTab === "wsi";
+
       const runBtn = document.getElementById("btnRunInference");
       runBtn.disabled = true;
-      runBtn.innerText = "Processing...";
+      runBtn.innerText = "Running Inference...";
+      setStageLoading(true, "Running Multi-Scale WSSS Inference...");
 
       try {
         const fileInput = document.getElementById("patchUpload");
-        let imageData = null;
+        const gtInput = document.getElementById("gtUpload");
+        const sampleId = document.getElementById("sampleSelect").value;
+        const mode = document.getElementById("configSelect").value;
+        const applyOtsu = document.getElementById("otsuToggle").checked;
+
+        const payload = {
+          mode: mode,
+          apply_otsu_gating: applyOtsu,
+          target_class: targetSpotlightClass,
+          blur_sigma: parseFloat(document.getElementById("blurSigmaSlider").value),
+          dim_factor: parseFloat(document.getElementById("heDimSlider").value) / 100.0,
+          gt_alpha: parseFloat(document.getElementById("gtAlphaSlider").value) / 100.0,
+          pred_alpha: parseFloat(document.getElementById("predAlphaSlider").value) / 100.0,
+          error_alpha: parseFloat(document.getElementById("errAlphaSlider").value) / 100.0,
+          tolerance_px: 2,
+          error_breakdown: true,
+        };
+
+        let sourceTag = "fallback";
+        let nextCustomPatchB64 = null;
+        let nextCustomGtB64 = null;
+        let nextRawImageUrl = lastRawImageUrl;
+        let nextSampleMeta = lastSampleMeta;
+        let nextSlideTitle = null;
+        let nextIsCustom = false;
 
         if (fileInput.files.length > 0) {
-          const file = fileInput.files[0];
-          imageData = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsDataURL(file);
-          });
+          nextIsCustom = true;
+          const b64 = await readFileAsDataURL(fileInput.files[0]);
+          if (isStale()) return;
+          payload.image_base64 = b64;
+          nextCustomPatchB64 = b64;
+          nextRawImageUrl = b64;
+          nextSampleMeta = null;
+          sourceTag = "upload:" + fileInput.files[0].name;
+          nextSlideTitle = fileInput.files[0].name;
+          if (gtInput.files.length > 0) {
+            const gtB64 = await readFileAsDataURL(gtInput.files[0]);
+            if (isStale()) return;
+            payload.gt_mask_base64 = gtB64;
+            nextCustomGtB64 = gtB64;
+          }
+        } else if (sampleId) {
+          nextIsCustom = false;
+          const detailRes = await fetch("/api/v1/samples/" + encodeURIComponent(sampleId), { signal });
+          if (isStale()) return;
+          if (detailRes.ok) {
+            const sampleMeta = await detailRes.json();
+            if (isStale()) return;
+            nextSampleMeta = sampleMeta;
+            nextRawImageUrl = sampleMeta.image_base64;
+            sourceTag = "sample:" + sampleId;
+            nextSlideTitle = sampleMeta.patient_id + " (" + sampleMeta.filename.slice(0, 18) + ")";
+          }
+          payload.sample_id = sampleId;
         } else {
-          const sampleType = document.getElementById("sampleSelect").value;
-          imageData = createSyntheticHnEDataURL(sampleType);
+          nextIsCustom = false;
+          const fallbackB64 = createOfflineFallbackPatchDataURL();
+          payload.image_base64 = fallbackB64;
+          nextCustomPatchB64 = fallbackB64;
+          nextRawImageUrl = fallbackB64;
+          nextSampleMeta = null;
+          sourceTag = "synthetic";
+          nextSlideTitle = "Synthetic Fallback";
         }
 
-        const config = document.getElementById("configSelect").value;
         const response = await fetch("/api/v1/predict/patch", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            image_base64: imageData,
-            mode: config,
-          }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal,
         });
-
         if (!response.ok) {
-          throw new Error("HTTP error: " + response.status);
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.detail || ("HTTP " + response.status));
         }
 
-        const result = await response.json();
-        
-        // Update Biomarkers UI
-        document.getElementById("valVTP").innerText = result.biomarkers.viable_tumor_percentage.toFixed(1) + "%";
-        document.getElementById("valTSR").innerText = result.biomarkers.tumor_stroma_ratio.toFixed(1) + "%";
+        if (isStale()) return;
+        const nextResult = await response.json();
+        if (isStale()) return;
 
-        // Update Class Percentages
-        const dist = result.class_distribution;
-        for (const [cls, pct] of Object.entries(dist)) {
+        await hydrateClientBuffers(nextRawImageUrl, nextResult, isStale);
+        if (isStale()) return;
+
+        syncSourceBadge(nextIsCustom);
+        lastCustomPatchB64 = nextCustomPatchB64;
+        lastCustomGtB64 = nextCustomGtB64;
+        lastSampleMeta = nextSampleMeta;
+        lastRawImageUrl = nextRawImageUrl;
+        lastResult = nextResult;
+        if (nextSlideTitle !== null) {
+          document.getElementById("slideNameLabel").innerText = nextSlideTitle;
+        }
+        if (!lastResult.agreement_overlay_base64 && (activeViewMode === "agreement" || activeViewMode === "blurred_dual")) {
+          setActiveModePill("overlay");
+        }
+
+        const curKey = computeCurrentImageKey(sourceTag, lastRawImageUrl, viewState.imgW, viewState.imgH);
+        if (curKey !== lastLoadedImageKey) {
+          fitToViewport();
+          lastLoadedImageKey = curKey;
+        }
+
+        updateRightSidebarMetrics(lastResult);
+        renderActiveViewMode();
+      } catch (err) {
+        if ((err && err.name === "AbortError") || signal.aborted || activeInferenceCtrl !== myCtrl || activeWorkstationTab === "wsi") return;
+        console.error("Inference failed:", err);
+        showToast("Inference error: " + err.message, "error");
+      } finally {
+        if (activeInferenceCtrl === myCtrl) {
+          activeInferenceCtrl = null;
+          setStageLoading(false);
+          runBtn.disabled = false;
+          runBtn.innerText = "Run WSSS Analysis";
+        }
+      }
+    }
+
+    function renderCompareCards(data) {
+      const grid = document.getElementById("compareGrid");
+      const viewType = document.getElementById("compareViewSelect").value;
+      grid.innerHTML = "";
+
+      if (data.gt_color_base64) {
+        grid.innerHTML += `
+          <div class="compare-card">
+            <div class="compare-title">Pathologist Reference (GT)</div>
+            <img src="${data.gt_color_base64}" alt="Doctor GT">
+            <div class="compare-metrics">Hand-annotated multi-class Ground Truth</div>
+          </div>
+        `;
+      }
+
+      for (const item of data.comparisons) {
+        const vm = item.verification_metrics;
+        let imgSrc = item.agreement_overlay_base64 || item.mask_base64;
+        if (viewType === "blurred_dual") imgSrc = item.blurred_dual_overlay_base64 || imgSrc;
+        else if (viewType === "mask") imgSrc = item.mask_base64;
+        else if (viewType === "contour") imgSrc = item.contour_overlay_base64 || imgSrc;
+        else if (viewType === "entropy") imgSrc = item.entropy_overlay_base64 || imgSrc;
+        else if (viewType === "cam") imgSrc = item.cam_overlay_base64 || item.entropy_overlay_base64 || imgSrc;
+
+        const statsHtml = vm
+          ? `mIoU: <strong>${vm.miou_4cls.toFixed(1)}%</strong> (Pen: ${vm.miou_penalized_4cls !== undefined ? vm.miou_penalized_4cls.toFixed(1) : vm.miou_4cls.toFixed(1)}%)<br>Exact Match: <span class="val-green">${vm.exact_match_pct.toFixed(1)}%</span> | Core Err: <span class="val-red">${vm.core_error_pct.toFixed(1)}%</span><br>BF1: ${vm.boundary_f1.toFixed(1)}% | Latency: ${item.latency_ms.toFixed(0)} ms`
+          : `VTP: ${item.biomarkers.viable_tumor_percentage}% | TSR: ${item.biomarkers.tumor_stroma_ratio}%<br>Entropy: ${item.mean_entropy.toFixed(3)} | Latency: ${item.latency_ms.toFixed(0)} ms`;
+
+        grid.innerHTML += `
+          <div class="compare-card">
+            <div class="compare-title">${item.method_used.toUpperCase()}</div>
+            <img src="${imgSrc}" alt="${item.method_used}">
+            <div class="compare-metrics">${statsHtml}</div>
+          </div>
+        `;
+      }
+    }
+
+    async function runSideBySideComparison() {
+      const modal = document.getElementById("compareModal");
+      const grid = document.getElementById("compareGrid");
+      const sub = document.getElementById("compareSubtitle");
+      modal.classList.add("open");
+
+      const checked = Array.from(document.querySelectorAll("#compareMethodChecks input:checked"))
+        .map(el => el.value)
+        .slice(0, 6);
+      const methods = checked.length > 0 ? checked : ["m1", "m6", "sg_dap", "combined"];
+      grid.innerHTML = "<div style='color:var(--text-secondary);'>Running multi-method comparison (" + methods.join(", ") + ")...</div>";
+
+      try {
+        const fileInput = document.getElementById("patchUpload");
+        const sampleId = document.getElementById("sampleSelect").value;
+        const payload = {
+          methods: methods,
+          apply_otsu_gating: document.getElementById("otsuToggle").checked,
+          blur_sigma: parseFloat(document.getElementById("blurSigmaSlider").value),
+          dim_factor: parseFloat(document.getElementById("heDimSlider").value) / 100.0,
+          gt_alpha: parseFloat(document.getElementById("gtAlphaSlider").value) / 100.0,
+          pred_alpha: parseFloat(document.getElementById("predAlphaSlider").value) / 100.0,
+          error_alpha: parseFloat(document.getElementById("errAlphaSlider").value) / 100.0,
+          tolerance_px: 2,
+          error_breakdown: true,
+        };
+        if (fileInput.files.length > 0) {
+          payload.image_base64 = lastCustomPatchB64 || await readFileAsDataURL(fileInput.files[0]);
+          const gtInput = document.getElementById("gtUpload");
+          if (gtInput.files.length > 0) {
+            payload.gt_mask_base64 = lastCustomGtB64 || await readFileAsDataURL(gtInput.files[0]);
+          }
+        } else if (sampleId) {
+          payload.sample_id = sampleId;
+        } else {
+          payload.image_base64 = createOfflineFallbackPatchDataURL();
+        }
+
+        const res = await fetch("/api/v1/compare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        activeCompareData = await res.json();
+        sub.innerText = "Patient / Slide: " + document.getElementById("slideNameLabel").innerText;
+        renderCompareCards(activeCompareData);
+      } catch (err) {
+        grid.innerHTML = "";
+        const errDiv = document.createElement("div");
+        errDiv.style.color = "var(--error-red)";
+        errDiv.textContent = "Comparison failed: " + (err && err.message ? err.message : String(err));
+        grid.appendChild(errDiv);
+        showToast("Comparison failed: " + (err && err.message ? err.message : String(err)), "error");
+      }
+    }
+
+    async function exportQAReport(fmt) {
+      try {
+        const fileInput = document.getElementById("patchUpload");
+        const gtInput = document.getElementById("gtUpload");
+        const sampleId = document.getElementById("sampleSelect").value;
+        const payload = {
+          mode: document.getElementById("configSelect").value,
+          apply_otsu_gating: document.getElementById("otsuToggle").checked,
+          target_class: targetSpotlightClass,
+          blur_sigma: parseFloat(document.getElementById("blurSigmaSlider").value),
+          dim_factor: parseFloat(document.getElementById("heDimSlider").value) / 100.0,
+          gt_alpha: parseFloat(document.getElementById("gtAlphaSlider").value) / 100.0,
+          pred_alpha: parseFloat(document.getElementById("predAlphaSlider").value) / 100.0,
+          error_alpha: parseFloat(document.getElementById("errAlphaSlider").value) / 100.0,
+          tolerance_px: 2,
+          format: fmt,
+        };
+        if (fileInput.files.length > 0) {
+          payload.image_base64 = lastCustomPatchB64 || await readFileAsDataURL(fileInput.files[0]);
+          if (gtInput.files.length > 0) {
+            payload.gt_mask_base64 = lastCustomGtB64 || await readFileAsDataURL(gtInput.files[0]);
+          }
+        } else if (sampleId) {
+          payload.sample_id = sampleId;
+        } else {
+          payload.image_base64 = createOfflineFallbackPatchDataURL();
+        }
+
+        showToast("Generating " + fmt.toUpperCase() + " diagnostic report...", "info");
+        const res = await fetch("/api/v1/export/report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || ("HTTP " + res.status));
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const disp = res.headers.get("Content-Disposition") || "";
+        const m = disp.match(/filename="?([^"]+)"?/i);
+        a.href = url;
+        a.download = m ? m[1] : `wsss_qa_report.${fmt}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast("Downloaded " + a.download, "success");
+      } catch (err) {
+        showToast("Export failed: " + err.message, "error");
+      }
+    }
+
+    async function runWSIStitch() {
+      if (activeInferenceCtrl) {
+        activeInferenceCtrl.abort();
+        activeInferenceCtrl = null;
+      }
+      const runPatchBtn = document.getElementById("btnRunInference");
+      if (runPatchBtn) {
+        runPatchBtn.disabled = false;
+        runPatchBtn.innerText = "Run WSSS Analysis";
+      }
+      if (activeWsiCtrl) {
+        activeWsiCtrl.abort();
+        activeWsiCtrl = null;
+      }
+      const input = document.getElementById("wsiTilesInput");
+      if (!input || input.files.length === 0) {
+        showToast("Please select one or more WSI tile images first.", "error");
+        return;
+      }
+      const myWsiCtrl = new AbortController();
+      activeWsiCtrl = myWsiCtrl;
+      const wsiSignal = myWsiCtrl.signal;
+
+      const files = Array.from(input.files).slice(0, 64);
+      const cols = Math.max(1, parseInt(document.getElementById("wsiColsInput").value || "2", 10));
+      const overlap = Math.max(0, parseInt(document.getElementById("wsiOverlapInput").value || "0", 10));
+      const mode = document.getElementById("wsiMethodSelect").value || "m6";
+
+      const btn = document.getElementById("btnRunWSI");
+      btn.disabled = true;
+      btn.innerText = "Stitching WSI...";
+      setStageLoading(true, `Stitching & analyzing ${files.length} WSI tiles...`);
+
+      try {
+        const tilesPayload = [];
+        const rawCoords = [];
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          const b64 = await readFileAsDataURL(f);
+          if (activeWsiCtrl !== myWsiCtrl || wsiSignal.aborted || activeWorkstationTab !== "wsi") return;
+          const img = await loadImageElement(b64);
+          if (activeWsiCtrl !== myWsiCtrl || wsiSignal.aborted || activeWorkstationTab !== "wsi") return;
+          const match = f.name.match(/xmin(\d+)_ymin(\d+)/i);
+          rawCoords.push({
+            id: f.name,
+            b64,
+            w: img.naturalWidth || 224,
+            h: img.naturalHeight || 224,
+            parsedX: match ? parseInt(match[1], 10) : null,
+            parsedY: match ? parseInt(match[2], 10) : null,
+          });
+        }
+        const allParsed = rawCoords.every(t => t.parsedX !== null && t.parsedY !== null);
+        const distinctParsed = allParsed && (new Set(rawCoords.map(t => `${t.parsedX}_${t.parsedY}`)).size === rawCoords.length);
+        const useParsedCoords = allParsed && distinctParsed;
+        const minX = useParsedCoords ? Math.min(...rawCoords.map(t => t.parsedX)) : 0;
+        const minY = useParsedCoords ? Math.min(...rawCoords.map(t => t.parsedY)) : 0;
+
+        for (let i = 0; i < rawCoords.length; i++) {
+          const t = rawCoords[i];
+          const gx = useParsedCoords ? Math.max(0, t.parsedX - minX) : (i % cols) * Math.max(16, t.w - overlap);
+          const gy = useParsedCoords ? Math.max(0, t.parsedY - minY) : Math.floor(i / cols) * Math.max(16, t.h - overlap);
+          tilesPayload.push({ id: t.id, x: gx, y: gy, image_base64: t.b64 });
+        }
+
+        const res = await fetch("/api/v1/predict/wsi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slide_id: "WSI_COMPOSITE_" + files.length + "_TILES",
+            tiles: tilesPayload,
+            mode: mode,
+          }),
+          signal: wsiSignal,
+        });
+        if (activeWsiCtrl !== myWsiCtrl || wsiSignal.aborted || activeWorkstationTab !== "wsi") return;
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || ("HTTP " + res.status));
+        }
+        const wsi = await res.json();
+        if (activeWsiCtrl !== myWsiCtrl || wsiSignal.aborted || activeWorkstationTab !== "wsi") return;
+        const compUrl = wsi.composite_heatmap_base64 || wsi.composite_overlay_base64 || wsi.composite_mask_base64;
+        const compImg = await loadImageElement(compUrl);
+        if (activeWsiCtrl !== myWsiCtrl || wsiSignal.aborted || activeWorkstationTab !== "wsi") return;
+        viewState.imgW = wsi.composite_shape[1] || compImg.naturalWidth || 224;
+        viewState.imgH = wsi.composite_shape[0] || compImg.naturalHeight || 224;
+
+        const c = document.createElement("canvas");
+        c.width = viewState.imgW;
+        c.height = viewState.imgH;
+        c.getContext("2d").drawImage(compImg, 0, 0, viewState.imgW, viewState.imgH);
+        rawImgCanvas = c;
+        rawPixels = null;
+        predIndexBuf = null;
+        gtIndexBuf = null;
+        confBuf = null;
+        boundaryZoneBuf = null;
+        lastResult = null;
+        lastRawImageUrl = null;
+        predColorCanvas = null;
+        gtColorCanvas = null;
+        serverImageCache.clear();
+        compositeCanvas.width = viewState.imgW;
+        compositeCanvas.height = viewState.imgH;
+        compositeCanvas.getContext("2d").drawImage(compImg, 0, 0, viewState.imgW, viewState.imgH);
+
+        lastLoadedImageKey = "wsi:" + wsi.slide_id + ":" + viewState.imgW + "x" + viewState.imgH;
+        fitToViewport();
+        renderStageAndSplit();
+
+        document.getElementById("slideNameLabel").innerText = wsi.slide_id;
+        document.getElementById("resLabel").innerText = viewState.imgW + " x " + viewState.imgH;
+        document.getElementById("valVTP").innerText = wsi.biomarkers.viable_tumor_percentage.toFixed(1) + "%";
+        document.getElementById("valTSR").innerText = wsi.biomarkers.tumor_stroma_ratio.toFixed(1) + "%";
+        for (const [cls, pct] of Object.entries(wsi.class_distribution || {})) {
           const pctEl = document.getElementById("pct-" + cls);
           const barEl = document.getElementById("bar-" + cls);
           if (pctEl) pctEl.innerText = pct.toFixed(1) + "%";
           if (barEl) barEl.style.width = pct + "%";
         }
-
-        // Assessment Note
-        const vtp = result.biomarkers.viable_tumor_percentage;
-        const tsr = result.biomarkers.tumor_stroma_ratio;
-        const assessEl = document.getElementById("biomarkerAssessment");
-        if (dist["BACK"] > 95.0) {
-          assessEl.innerText = "Negative Control: Slide verified as glass / non-tissue background. Otsu Gating active.";
-        } else if (vtp > 40.0) {
-          assessEl.innerText = "High Malignant Burden: VTP > 40%. Dense neoplastic cell infiltration.";
-        } else {
-          assessEl.innerText = "Moderate / Stroma-Rich Infiltrate: TSR = " + tsr.toFixed(1) + "%.";
-        }
-
-        // Update OpenSeadragon viewer
-        updateViewerImage(imageData, result.overlay_base64);
-
+        const rs = wsi.region_summary || {};
+        document.getElementById("wsiRegionInfo").innerText =
+          `Canvas: ${rs.canvas_width || viewState.imgW}x${rs.canvas_height || viewState.imgH} | Tissue: ${rs.tissue_coverage_pct || 0}% | Dominant: ${rs.dominant_class || "-"}`;
+        showToast(`Stitched ${wsi.num_tiles} tiles (${viewState.imgW}x${viewState.imgH} px).`, "success");
       } catch (err) {
-        console.error("Inference failed:", err);
-        alert("Inference error: " + err.message);
+        if ((err && err.name === "AbortError") || wsiSignal.aborted || activeWsiCtrl !== myWsiCtrl || activeWorkstationTab !== "wsi") {
+          return;
+        }
+        showToast("WSI stitch failed: " + err.message, "error");
       } finally {
-        runBtn.disabled = false;
-        runBtn.innerText = "Run WSSS Analysis";
+        if (activeWsiCtrl === myWsiCtrl) {
+          activeWsiCtrl = null;
+          setStageLoading(false);
+          btn.disabled = false;
+          btn.innerText = "Stitch & Analyze WSI";
+        }
       }
     }
 
-    // Check system health endpoint
     async function checkHealth() {
+      const pill = document.getElementById("systemHealth");
+      const txt = document.getElementById("healthText");
       try {
         const res = await fetch("/api/v1/health");
         if (res.ok) {
           const data = await res.json();
-          document.getElementById("healthText").innerText = "System " + data.status + " (Torch " + data.system.torch_version + ")";
+          const m = data.model || {};
+          if (m.loaded) {
+            pill.classList.remove("warn");
+            txt.innerText = "Verified Weights (" + m.device.toUpperCase() + " | Torch " + data.system.torch_version + ")";
+          } else {
+            pill.classList.add("warn");
+            txt.innerText = "Fallback Mode (No Checkpoints on Disk)";
+          }
         }
-      } catch (e) {
-        console.warn("Health check failed:", e);
+      } catch (_e) {
+        pill.classList.add("warn");
+        txt.innerText = "Health Check Unreachable";
       }
     }
 
-    // Setup event listeners
-    window.addEventListener("DOMContentLoaded", () => {
-      initViewer();
-      checkHealth();
+    function updateSplitPosition(pct) {
+      splitPct = Math.max(5, Math.min(95, pct));
+      document.getElementById("splitSlider").value = splitPct;
+      document.getElementById("splitPctLabel").innerText = Math.round(splitPct) + "%";
+      document.getElementById("splitDivider").style.left = splitPct + "%";
+      document.getElementById("splitLeftCanvas").style.clipPath = `inset(0 ${100 - splitPct}% 0 0)`;
+    }
 
-      // Opacity slider
-      const opacitySlider = document.getElementById("opacitySlider");
-      const opacityLabel = document.getElementById("opacityLabel");
-      opacitySlider.addEventListener("input", (e) => {
-        const val = e.target.value;
-        opacityLabel.innerText = val + "%";
-        const overlay = document.getElementById("clinical-segmentation-overlay");
-        if (overlay) {
-          overlay.style.opacity = parseFloat(val) / 100.0;
+    function zoomAtPoint(factor, clientX = null, clientY = null) {
+      const stage = document.getElementById("openseadragon-viewer");
+      if (!stage) return;
+      const rect = stage.getBoundingClientRect();
+      const cx = clientX !== null ? (clientX - rect.left) : rect.width / 2.0;
+      const cy = clientY !== null ? (clientY - rect.top) : rect.height / 2.0;
+      const oldScale = viewState.scale;
+      const newScale = Math.max(0.25, Math.min(24.0, oldScale * factor));
+      if (Math.abs(newScale - oldScale) < 1e-6) return;
+      const imgX = (cx - viewState.panX) / oldScale;
+      const imgY = (cy - viewState.panY) / oldScale;
+      viewState.scale = newScale;
+      viewState.panX = cx - imgX * newScale;
+      viewState.panY = cy - imgY * newScale;
+      renderStageAndSplit();
+    }
+
+    function updatePixelInspectorAndLoupe(clientX, clientY, targetRect) {
+      const ix = Math.floor((clientX - targetRect.left - viewState.panX) / viewState.scale);
+      const iy = Math.floor((clientY - targetRect.top - viewState.panY) / viewState.scale);
+      const hud = document.getElementById("pixelInspectorHUD");
+      const loupe = document.getElementById("magnifierLoupe");
+
+      if (ix < 0 || iy < 0 || ix >= viewState.imgW || iy >= viewState.imgH) {
+        if (hud) hud.innerText = "Hover tissue to inspect (x, y, GT, Pred, Conf%)";
+        if (loupe) loupe.style.display = "none";
+        return;
+      }
+
+      const idx = iy * viewState.imgW + ix;
+      const predC = predIndexBuf ? CLASS_NAMES[Math.min(4, predIndexBuf[idx])] : "-";
+      const gtVal = gtIndexBuf ? gtIndexBuf[idx] : null;
+      const gtC = gtVal !== null ? (gtVal <= 4 ? CLASS_NAMES[gtVal] : "IGN") : "N/A";
+      const confStr = confBuf ? Math.round((confBuf[idx] / 255.0) * 100.0) + "%" : "-";
+      let statusStr = "Pred";
+      if (gtIndexBuf && predIndexBuf && gtVal <= 4) {
+        if (gtVal === predIndexBuf[idx]) statusStr = "MATCH";
+        else if (boundaryZoneBuf && boundaryZoneBuf[idx] === 1) statusStr = "MARGIN";
+        else statusStr = "ERROR";
+      }
+      if (hud) {
+        hud.innerText = `(${ix}, ${iy}) | GT: ${gtC} | Pred: ${predC} | ${statusStr} | Conf: ${confStr}`;
+      }
+
+      if (loupe && loupeEnabled && !splitCurtainMode) {
+        const lx = Math.max(8, Math.min(targetRect.width - 130, clientX - targetRect.left + 18));
+        const ly = Math.max(8, Math.min(targetRect.height - 130, clientY - targetRect.top - 60));
+        loupe.style.left = lx + "px";
+        loupe.style.top = ly + "px";
+        loupe.style.display = "block";
+        const lctx = loupe.getContext("2d");
+        lctx.clearRect(0, 0, 120, 120);
+        lctx.imageSmoothingEnabled = false;
+        const imgW = compositeCanvas.width || viewState.imgW;
+        const imgH = compositeCanvas.height || viewState.imgH;
+        const win = Math.min(28, imgW, imgH);
+        const half = Math.floor(win / 2);
+        const sx = imgW > win ? Math.max(0, Math.min(imgW - win, ix - half)) : 0;
+        const sy = imgH > win ? Math.max(0, Math.min(imgH - win, iy - half)) : 0;
+        lctx.drawImage(
+          compositeCanvas,
+          sx,
+          sy,
+          win,
+          win,
+          0,
+          0,
+          120,
+          120
+        );
+        const cx = ((ix - sx + 0.5) / Math.max(1, win)) * 120;
+        const cy = ((iy - sy + 0.5) / Math.max(1, win)) * 120;
+        lctx.strokeStyle = "rgba(56, 189, 248, 0.85)";
+        lctx.lineWidth = 1;
+        lctx.beginPath();
+        lctx.moveTo(cx, 0);
+        lctx.lineTo(cx, 120);
+        lctx.moveTo(0, cy);
+        lctx.lineTo(120, cy);
+        lctx.stroke();
+      } else if (loupe) {
+        loupe.style.display = "none";
+      }
+    }
+
+    function scheduleBlurredRedraw() {
+      if (blurredRafPending) return;
+      blurredRafPending = true;
+      requestAnimationFrame(() => {
+        blurredRafPending = false;
+        if (activeViewMode === "blurred_dual") {
+          renderActiveViewMode();
+        } else if (splitCurtainMode) {
+          renderStageAndSplit();
+        }
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      checkHealth();
+      await loadCohortSamples();
+
+      // Header tab switching (Patch QA vs WSI Multi-Tile)
+      const tabPatch = document.getElementById("tabPatchQA");
+      const tabWSI = document.getElementById("tabWSI");
+      const setWorkstationTab = (isWsi) => {
+        activeWorkstationTab = isWsi ? "wsi" : "patch";
+        if (isWsi) {
+          if (activeInferenceCtrl) {
+            activeInferenceCtrl.abort();
+            activeInferenceCtrl = null;
+          }
+          setStageLoading(false);
+          const runBtn = document.getElementById("btnRunInference");
+          if (runBtn) {
+            runBtn.disabled = false;
+            runBtn.innerText = "Run WSSS Analysis";
+          }
+        } else {
+          if (activeWsiCtrl) {
+            activeWsiCtrl.abort();
+            activeWsiCtrl = null;
+          }
+          setStageLoading(false);
+          const wsiBtn = document.getElementById("btnRunWSI");
+          if (wsiBtn) {
+            wsiBtn.disabled = false;
+            wsiBtn.innerText = "Stitch & Analyze WSI";
+          }
+        }
+        tabPatch.setAttribute("aria-selected", isWsi ? "false" : "true");
+        tabWSI.setAttribute("aria-selected", isWsi ? "true" : "false");
+        document.getElementById("patchIngestionCard").style.display = isWsi ? "none" : "block";
+        document.getElementById("wsiControlPanel").style.display = isWsi ? "block" : "none";
+        if (!isWsi && lastLoadedImageKey && lastLoadedImageKey.startsWith("wsi:")) {
+          runInference();
+        }
+      };
+      tabPatch.addEventListener("click", () => setWorkstationTab(false));
+      tabWSI.addEventListener("click", () => setWorkstationTab(true));
+
+      // Cohort search & morphology filter (debounced 250ms)
+      let filterTimer = null;
+      const triggerCohortFilter = () => {
+        clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => {
+          loadCohortSamples(
+            document.getElementById("sampleSearchInput").value.trim(),
+            document.getElementById("morphologyFilter").value
+          );
+        }, 250);
+      };
+      document.getElementById("sampleSearchInput").addEventListener("input", triggerCohortFilter);
+      document.getElementById("morphologyFilter").addEventListener("change", triggerCohortFilter);
+
+      document.getElementById("sampleSelect").addEventListener("change", () => {
+        document.getElementById("patchUpload").value = "";
+        document.getElementById("gtUpload").value = "";
+        syncSourceBadge(false);
+        runInference();
+      });
+
+      document.getElementById("btnClearUpload").addEventListener("click", () => {
+        document.getElementById("patchUpload").value = "";
+        document.getElementById("gtUpload").value = "";
+        syncSourceBadge(false);
+        runInference();
+      });
+
+      document.getElementById("patchUpload").addEventListener("change", () => {
+        if (document.getElementById("patchUpload").files.length > 0) {
+          syncSourceBadge(true);
+          runInference();
+        }
+      });
+      document.getElementById("gtUpload").addEventListener("change", () => {
+        if (document.getElementById("patchUpload").files.length > 0) {
+          runInference();
         }
       });
 
-      // Toggle overlay visibility
+      document.getElementById("configSelect").addEventListener("change", runInference);
+      document.getElementById("otsuToggle").addEventListener("change", runInference);
+      document.getElementById("btnRunInference").addEventListener("click", runInference);
+      document.getElementById("btnRunWSI").addEventListener("click", runWSIStitch);
+
+      document.getElementById("btnCompareMethods").addEventListener("click", runSideBySideComparison);
+      document.getElementById("btnRunCompareNow").addEventListener("click", runSideBySideComparison);
+      document.getElementById("compareViewSelect").addEventListener("change", () => {
+        if (activeCompareData) renderCompareCards(activeCompareData);
+      });
+      document.getElementById("btnCloseCompare").addEventListener("click", () => {
+        document.getElementById("compareModal").classList.remove("open");
+      });
+      document.getElementById("compareModal").addEventListener("click", (e) => {
+        if (e.target === document.getElementById("compareModal")) {
+          document.getElementById("compareModal").classList.remove("open");
+        }
+      });
+
+      document.getElementById("btnExportPng").addEventListener("click", () => exportQAReport("png"));
+      document.getElementById("btnExportJson").addEventListener("click", () => exportQAReport("json"));
+      document.getElementById("btnExportCsv").addEventListener("click", () => exportQAReport("csv"));
+
+      document.getElementById("opacitySlider").addEventListener("input", (e) => {
+        document.getElementById("opacityLabel").innerText = e.target.value + "%";
+        renderActiveViewMode();
+      });
+
+      const bindBlurredSlider = (id, labelId, suffix) => {
+        document.getElementById(id).addEventListener("input", (e) => {
+          document.getElementById(labelId).innerText = e.target.value + suffix;
+          scheduleBlurredRedraw();
+        });
+      };
+      bindBlurredSlider("blurSigmaSlider", "blurSigmaLabel", " px");
+      bindBlurredSlider("heDimSlider", "heDimLabel", "%");
+      bindBlurredSlider("gtAlphaSlider", "gtAlphaLabel", "%");
+      bindBlurredSlider("predAlphaSlider", "predAlphaLabel", "%");
+      bindBlurredSlider("errAlphaSlider", "errAlphaLabel", "%");
+
       document.getElementById("btnToggleOverlay").addEventListener("click", () => {
         overlayVisible = !overlayVisible;
-        const overlay = document.getElementById("clinical-segmentation-overlay");
-        if (overlay) {
-          overlay.style.display = overlayVisible ? "block" : "none";
+        renderActiveViewMode();
+      });
+
+      const splitBtn = document.getElementById("btnToggleSplit");
+      splitBtn.addEventListener("click", () => {
+        splitCurtainMode = !splitCurtainMode;
+        splitBtn.classList.toggle("active-toggle", splitCurtainMode);
+        document.getElementById("splitContainer").classList.toggle("active", splitCurtainMode);
+        document.getElementById("splitControlBox").style.display = splitCurtainMode ? "block" : "none";
+        if (splitCurtainMode) {
+          updateSplitPosition(parseFloat(document.getElementById("splitSlider").value));
+          renderStageAndSplit();
         }
       });
 
-      // Run inference
-      document.getElementById("btnRunInference").addEventListener("click", runInference);
+      const warnIfMissingGtLayer = (selectEl) => {
+        if (selectEl && selectEl.value === "gt" && !gtIndexBuf && !serverImageCache.get("gt")) {
+          showToast("No Reference GT mask available for this patch.", "info");
+        }
+      };
+      document.getElementById("splitLeftSelect").addEventListener("change", (e) => {
+        warnIfMissingGtLayer(e.target);
+        renderStageAndSplit();
+      });
+      document.getElementById("splitRightSelect").addEventListener("change", (e) => {
+        warnIfMissingGtLayer(e.target);
+        renderStageAndSplit();
+      });
+      document.getElementById("splitSlider").addEventListener("input", (e) => {
+        updateSplitPosition(parseFloat(e.target.value));
+      });
 
-      // Load initial default sample
-      setTimeout(() => {
-        runInference();
-      }, 500);
+      // Main Canvas Pan & Zoom + Pixel Inspector + Loupe
+      const stage = document.getElementById("openseadragon-viewer");
+      let stagePanning = false;
+      let lastPtr = { x: 0, y: 0 };
+
+      stage.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 1.0 / 1.15;
+        zoomAtPoint(factor, e.clientX, e.clientY);
+      }, { passive: false });
+
+      stage.addEventListener("pointerdown", (e) => {
+        if (e.target.closest(".zoom-toolbar")) return;
+        stagePanning = true;
+        stage.classList.add("panning");
+        lastPtr = { x: e.clientX, y: e.clientY };
+        if (stage.setPointerCapture) stage.setPointerCapture(e.pointerId);
+      });
+      stage.addEventListener("pointermove", (e) => {
+        const rect = stage.getBoundingClientRect();
+        if (stagePanning) {
+          viewState.panX += e.clientX - lastPtr.x;
+          viewState.panY += e.clientY - lastPtr.y;
+          lastPtr = { x: e.clientX, y: e.clientY };
+          renderStageAndSplit();
+        }
+        updatePixelInspectorAndLoupe(e.clientX, e.clientY, rect);
+      });
+      const stopStagePan = (e) => {
+        if (!stagePanning) return;
+        stagePanning = false;
+        stage.classList.remove("panning");
+        if (stage.releasePointerCapture && stage.hasPointerCapture && stage.hasPointerCapture(e.pointerId)) {
+          stage.releasePointerCapture(e.pointerId);
+        }
+      };
+      stage.addEventListener("pointerup", stopStagePan);
+      stage.addEventListener("pointercancel", stopStagePan);
+      stage.addEventListener("pointerleave", () => {
+        const loupe = document.getElementById("magnifierLoupe");
+        if (loupe) loupe.style.display = "none";
+      });
+
+      // Zoom Toolbar Controls
+      document.getElementById("btnZoomIn").addEventListener("click", () => zoomAtPoint(1.25));
+      document.getElementById("btnZoomOut").addEventListener("click", () => zoomAtPoint(0.8));
+      document.getElementById("btnZoomOne").addEventListener("click", () => {
+        const rect = stage.getBoundingClientRect();
+        viewState.scale = 1.0;
+        viewState.panX = (rect.width - viewState.imgW) / 2.0;
+        viewState.panY = (rect.height - viewState.imgH) / 2.0;
+        renderStageAndSplit();
+      });
+      document.getElementById("btnZoomFit").addEventListener("click", () => {
+        fitToViewport();
+        renderStageAndSplit();
+      });
+      const loupeBtn = document.getElementById("btnToggleLoupe");
+      loupeBtn.addEventListener("click", () => {
+        loupeEnabled = !loupeEnabled;
+        loupeBtn.classList.toggle("active", loupeEnabled);
+        loupeBtn.setAttribute("aria-pressed", loupeEnabled ? "true" : "false");
+        if (!loupeEnabled) {
+          document.getElementById("magnifierLoupe").style.display = "none";
+        }
+      });
+
+      // Split-Curtain Drag + Synchronized Pan/Zoom
+      const splitFrame = document.getElementById("splitFrame");
+      const splitDivider = document.getElementById("splitDivider");
+      let draggingDivider = false;
+      let panningSplit = false;
+      let splitPtr = { x: 0, y: 0 };
+
+      const updateSplitFromClientX = (clientX) => {
+        const rect = splitFrame.getBoundingClientRect();
+        if (rect.width > 0) {
+          updateSplitPosition(((clientX - rect.left) / rect.width) * 100.0);
+        }
+      };
+      splitFrame.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 1.0 / 1.15;
+        zoomAtPoint(factor, e.clientX, e.clientY);
+      }, { passive: false });
+
+      splitFrame.addEventListener("pointerdown", (e) => {
+        if (e.target === splitDivider || e.target.closest("#splitDivider")) {
+          draggingDivider = true;
+          updateSplitFromClientX(e.clientX);
+        } else {
+          panningSplit = true;
+          splitPtr = { x: e.clientX, y: e.clientY };
+        }
+        if (splitFrame.setPointerCapture) splitFrame.setPointerCapture(e.pointerId);
+      });
+      splitFrame.addEventListener("pointermove", (e) => {
+        if (draggingDivider) {
+          updateSplitFromClientX(e.clientX);
+        } else if (panningSplit) {
+          viewState.panX += e.clientX - splitPtr.x;
+          viewState.panY += e.clientY - splitPtr.y;
+          splitPtr = { x: e.clientX, y: e.clientY };
+          renderStageAndSplit();
+        }
+      });
+      const stopSplitDrag = (e) => {
+        draggingDivider = false;
+        panningSplit = false;
+        if (splitFrame.releasePointerCapture && splitFrame.hasPointerCapture && splitFrame.hasPointerCapture(e.pointerId)) {
+          splitFrame.releasePointerCapture(e.pointerId);
+        }
+      };
+      splitFrame.addEventListener("pointerup", stopSplitDrag);
+      splitFrame.addEventListener("pointercancel", stopSplitDrag);
+
+      // Mode Pills
+      document.querySelectorAll(".mode-pill").forEach(btn => {
+        btn.addEventListener("click", () => {
+          if (activeWorkstationTab === "wsi" || (lastLoadedImageKey && lastLoadedImageKey.startsWith("wsi:"))) {
+            showToast("WSI composite active: switch to Single Patch QA tab to inspect patch overlay modes.", "info");
+            return;
+          }
+          if (btn.dataset.mode === "gt" && !gtIndexBuf && !serverImageCache.get("gt")) {
+            showToast("No Reference GT mask available for this patch.", "info");
+          }
+          setActiveModePill(btn.dataset.mode);
+          renderActiveViewMode();
+        });
+      });
+
+      // Instant Client-Side Class Spotlight (Zero CNN re-run!)
+      document.querySelectorAll(".legend-item").forEach(item => {
+        item.addEventListener("click", () => {
+          if (activeWorkstationTab === "wsi" || (lastLoadedImageKey && lastLoadedImageKey.startsWith("wsi:"))) {
+            showToast("WSI composite active: switch to Single Patch QA tab to spotlight individual patch classes.", "info");
+            return;
+          }
+          targetSpotlightClass = parseInt(item.dataset.cls || "0", 10);
+          document.querySelectorAll(".legend-item").forEach(el => {
+            const sel = el === item;
+            el.classList.toggle("selected-spotlight", sel);
+            el.setAttribute("aria-pressed", sel ? "true" : "false");
+          });
+          setActiveModePill("spotlight");
+          renderActiveViewMode();
+        });
+      });
+
+      // Keyboard Shortcuts
+      document.addEventListener("keydown", (e) => {
+        const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : "";
+        if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+
+        if (e.key === "Escape") {
+          document.getElementById("compareModal").classList.remove("open");
+          return;
+        }
+        if (e.key >= "1" && e.key <= "9") {
+          const pills = document.querySelectorAll(".mode-pill");
+          const idx = parseInt(e.key, 10) - 1;
+          if (pills[idx]) pills[idx].click();
+          return;
+        }
+        if (e.key === " ") {
+          e.preventDefault();
+          document.getElementById("btnToggleOverlay").click();
+        } else if (e.key.toLowerCase() === "s") {
+          document.getElementById("btnToggleSplit").click();
+        } else if (e.key.toLowerCase() === "l") {
+          document.getElementById("btnToggleLoupe").click();
+        } else if (e.key === "+" || e.key === "=") {
+          zoomAtPoint(1.25);
+        } else if (e.key === "-") {
+          zoomAtPoint(0.8);
+        } else if (e.key === "0") {
+          fitToViewport();
+          renderStageAndSplit();
+        } else if (e.key === "[" || e.key === "]") {
+          if (activeWorkstationTab !== "patch") return;
+          const sel = document.getElementById("sampleSelect");
+          if (sel && sel.options.length > 0) {
+            const nextIdx = e.key === "]"
+              ? Math.min(sel.options.length - 1, sel.selectedIndex + 1)
+              : Math.max(0, sel.selectedIndex - 1);
+            if (nextIdx !== sel.selectedIndex) {
+              sel.selectedIndex = nextIdx;
+              sel.dispatchEvent(new Event("change"));
+            }
+          }
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        renderStageAndSplit();
+      });
+
+      runInference();
     });
   </script>
 </body>

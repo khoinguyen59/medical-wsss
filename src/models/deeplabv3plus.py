@@ -20,6 +20,7 @@ Standard ASCII hyphens (-) are strictly enforced.
 """
 
 from typing import Any, Dict, List, Optional, Tuple, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -30,14 +31,43 @@ from src.losses_metrics.losses import (
 )
 
 
+def _build_norm_layer(norm_layer: Optional[Any], num_channels: int) -> nn.Module:
+    """Builds normalization layer, defaulting to BatchNorm2d or adapting GroupNorm."""
+    if norm_layer is None or norm_layer is nn.BatchNorm2d:
+        return nn.BatchNorm2d(num_channels)
+    if norm_layer is nn.GroupNorm:
+        groups = min(32, num_channels)
+        return nn.GroupNorm(num_groups=groups, num_channels=num_channels)
+    return norm_layer(num_channels)
+
+
+def convert_to_group_norm(module: nn.Module, num_groups: int = 32) -> nn.Module:
+    """Recursively converts BatchNorm2d layers to GroupNorm for safe training with batch size 1."""
+    for name, child in module.named_children():
+        if isinstance(child, nn.BatchNorm2d):
+            groups = min(num_groups, child.num_features)
+            while child.num_features % groups != 0 and groups > 1:
+                groups -= 1
+            gn = nn.GroupNorm(num_groups=groups, num_channels=child.num_features)
+            if child.affine:
+                with torch.no_grad():
+                    gn.weight.copy_(child.weight)
+                    gn.bias.copy_(child.bias)
+            setattr(module, name, gn)
+        else:
+            convert_to_group_norm(child, num_groups=num_groups)
+    return module
+
+
 class ASPPConv(nn.Sequential):
-    """Atrous (dilated) convolution block with batch normalization and ReLU."""
+    """Atrous (dilated) convolution block with normalization and ReLU."""
 
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
         dilation: int,
+        norm_layer: Optional[Any] = None,
     ) -> None:
         modules = [
             nn.Conv2d(
@@ -49,7 +79,7 @@ class ASPPConv(nn.Sequential):
                 dilation=dilation,
                 bias=False,
             ),
-            nn.BatchNorm2d(out_channels),
+            _build_norm_layer(norm_layer, out_channels),
             nn.ReLU(inplace=True),
         ]
         super().__init__(*modules)
@@ -62,6 +92,7 @@ class ASPPPooling(nn.Sequential):
         self,
         in_channels: int,
         out_channels: int,
+        norm_layer: Optional[Any] = None,
     ) -> None:
         super().__init__(
             nn.AdaptiveAvgPool2d((1, 1)),
@@ -89,6 +120,7 @@ class ASPP(nn.Module):
         out_channels: int = 256,
         dilations: Optional[List[int]] = None,
         dropout_rate: float = 0.5,
+        norm_layer: Optional[Any] = None,
     ) -> None:
         super().__init__()
         if dilations is None:
@@ -100,18 +132,18 @@ class ASPP(nn.Module):
 
         self.branch1 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, bias=False),
-            nn.BatchNorm2d(out_channels),
+            _build_norm_layer(norm_layer, out_channels),
             nn.ReLU(inplace=True),
         )
-        self.branch2 = ASPPConv(in_channels, out_channels, dilation=dilations[1])
-        self.branch3 = ASPPConv(in_channels, out_channels, dilation=dilations[2])
-        self.branch4 = ASPPConv(in_channels, out_channels, dilation=dilations[3])
-        self.branch5 = ASPPPooling(in_channels, out_channels)
+        self.branch2 = ASPPConv(in_channels, out_channels, dilation=dilations[1], norm_layer=norm_layer)
+        self.branch3 = ASPPConv(in_channels, out_channels, dilation=dilations[2], norm_layer=norm_layer)
+        self.branch4 = ASPPConv(in_channels, out_channels, dilation=dilations[3], norm_layer=norm_layer)
+        self.branch5 = ASPPPooling(in_channels, out_channels, norm_layer=norm_layer)
 
         total_channels = out_channels * 5
         self.project = nn.Sequential(
             nn.Conv2d(total_channels, out_channels, kernel_size=1, stride=1, bias=False),
-            nn.BatchNorm2d(out_channels),
+            _build_norm_layer(norm_layer, out_channels),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout_rate),
         )
@@ -157,6 +189,7 @@ class DeepLabV3PlusDecoder(nn.Module):
         low_level_projected_channels: int = 48,
         decoder_channels: int = 256,
         dropout_rate: float = 0.5,
+        norm_layer: Optional[Any] = None,
     ) -> None:
         super().__init__()
         self.num_classes = num_classes
@@ -169,7 +202,7 @@ class DeepLabV3PlusDecoder(nn.Module):
                 kernel_size=1,
                 bias=False,
             ),
-            nn.BatchNorm2d(low_level_projected_channels),
+            _build_norm_layer(norm_layer, low_level_projected_channels),
             nn.ReLU(inplace=True),
         )
 
@@ -184,7 +217,7 @@ class DeepLabV3PlusDecoder(nn.Module):
                 padding=1,
                 bias=False,
             ),
-            nn.BatchNorm2d(decoder_channels),
+            _build_norm_layer(norm_layer, decoder_channels),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout_rate),
             nn.Conv2d(
@@ -195,7 +228,7 @@ class DeepLabV3PlusDecoder(nn.Module):
                 padding=1,
                 bias=False,
             ),
-            nn.BatchNorm2d(decoder_channels),
+            _build_norm_layer(norm_layer, decoder_channels),
             nn.ReLU(inplace=True),
             nn.Dropout(0.1),
         )
@@ -214,7 +247,7 @@ class DeepLabV3PlusDecoder(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(m, nn.BatchNorm2d):
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 nn.init.constant_(m.weight, 1.0)
                 nn.init.constant_(m.bias, 0.0)
 
@@ -256,7 +289,7 @@ class ClassificationGateMechanism(nn.Module):
     def __init__(
         self,
         penalty_value: float = -1e4,
-        threshold: float = 0.5,
+        threshold: float = 0.10,
         default_background_idx: Optional[int] = None,
     ) -> None:
         super().__init__()
@@ -484,6 +517,7 @@ class DeepLabV3PlusWithCGM(nn.Module):
         ignore_index: int = 255,
         dropout_rate: float = 0.5,
         backbone: Optional[str] = "resnet101",
+        norm_layer: Optional[Any] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__()
@@ -501,6 +535,7 @@ class DeepLabV3PlusWithCGM(nn.Module):
             out_channels=256,
             dilations=aspp_dilations or [1, 6, 12, 18],
             dropout_rate=dropout_rate,
+            norm_layer=norm_layer,
         )
 
         # 3. Decoder Module
@@ -511,6 +546,7 @@ class DeepLabV3PlusWithCGM(nn.Module):
             low_level_projected_channels=48,
             decoder_channels=256,
             dropout_rate=dropout_rate,
+            norm_layer=norm_layer,
         )
 
         # 4. Classification Gate Mechanism

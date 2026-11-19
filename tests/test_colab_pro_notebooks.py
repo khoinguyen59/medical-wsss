@@ -16,10 +16,11 @@ All hyphens strictly use standard ASCII 0x2D ('-').
 import ast
 import json
 from pathlib import Path
+
 import numpy as np
-from PIL import Image
 import pytest
 import torch
+from PIL import Image
 
 NOTEBOOKS = {
     "stage1": Path("notebooks/01_Train_Stage1_Classifier.ipynb"),
@@ -278,8 +279,8 @@ def test_clinical_biomarkers_mathematical_consistency():
 
 def test_notebook_forward_pass_tensor_shapes_and_loss():
     """Verify Stage 1 forward_stage1_with_pda outputs (B, 4) logits matching MultiLabelSoftMarginLoss."""
-    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
     from src.models.sam_wsss_adapter import CAM_Prompt_Generator
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
 
     model = WSSSTissueStage1NetCAM(num_classes=4)
     model.eval()
@@ -417,8 +418,8 @@ def test_stage2_gpu_affinity_refine_zero_phantom_classes():
     from scripts.build_t4_l4_notebook_suites import get_clean_cell_8_stage2
 
     lines = get_clean_cell_8_stage2()
-    start = next(i for i, l in enumerate(lines) if "def gpu_affinity_refine" in l)
-    end = next(i for i, l in enumerate(lines) if "all_train_files" in l)
+    start = next(i for i, ln in enumerate(lines) if "def gpu_affinity_refine" in ln)
+    end = next(i for i, ln in enumerate(lines) if "all_train_files" in ln)
     func_code = "import cv2\nimport numpy as np\n" + "".join(lines[start:end])
     local_scope = {}
     exec(func_code, local_scope)
@@ -443,8 +444,8 @@ def test_stage2_resolve_split_path_fallback_resilience():
     from scripts.build_t4_l4_notebook_suites import get_clean_cell_6_stage2
 
     lines = get_clean_cell_6_stage2()
-    start = next(i for i, l in enumerate(lines) if "def resolve_split_path" in l)
-    end = next(i for i, l in enumerate(lines) if "TRAIN_DIR =" in l)
+    start = next(i for i, ln in enumerate(lines) if "def resolve_split_path" in ln)
+    end = next(i for i, ln in enumerate(lines) if "TRAIN_DIR =" in ln)
     func_code = "from pathlib import Path\n" + "".join(lines[start:end])
     local_scope = {}
     exec(func_code, local_scope)
@@ -471,8 +472,8 @@ def test_stage2_mlps_loss_gradient_flow():
     from scripts.build_t4_l4_notebook_suites import get_clean_cell_10_stage2
 
     lines = get_clean_cell_10_stage2()
-    start = next(i for i, l in enumerate(lines) if "class MLPSLoss" in l)
-    end = next(i for i, l in enumerate(lines) if "criterion_s2 =" in l)
+    start = next(i for i, ln in enumerate(lines) if "class MLPSLoss" in ln)
+    end = next(i for i, ln in enumerate(lines) if "criterion_s2 =" in ln)
     func_code = "import torch\n" + "".join(lines[start:end])
     local_scope = {}
     exec(func_code, local_scope)
@@ -562,10 +563,10 @@ def test_paletted_mode_p_mask_preserves_class_indices():
 def test_generator_clean_cells_have_safe_paletted_mask_loading():
     """Verify that notebook generator cell definitions guard mode 'P' mask loading."""
     from scripts.build_t4_l4_notebook_suites import (
-        get_clean_cell_14_stage2,
-        get_clean_cell_16_stage2,
-        get_clean_cell_14_stage3,
         get_clean_cell_10_stage4,
+        get_clean_cell_14_stage2,
+        get_clean_cell_14_stage3,
+        get_clean_cell_16_stage2,
     )
 
     cell_funcs = {

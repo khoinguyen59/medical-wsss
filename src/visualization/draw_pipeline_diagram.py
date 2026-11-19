@@ -1,14 +1,14 @@
 """
-Scientific Figure Generator for SE374.R11 Medical AI.
+Scientific Figure Generator for BCSS-WSSS Medical AI.
 Generates publication-grade, high-resolution (300 DPI) vector/raster diagrams
 for the Standard Whole Slide Image (WSI) Processing Pipeline.
 """
 
 import os
+
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.patches import FancyBboxPatch, ArrowStyle, FancyArrowPatch
 import numpy as np
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 
 def generate_standard_wsi_pipeline_figure(output_png_path: str, output_svg_path: str = None):
@@ -30,7 +30,6 @@ def generate_standard_wsi_pipeline_figure(output_png_path: str, output_svg_path:
     # Font styling
     font_title = {"fontsize": 13, "fontweight": "bold", "color": "#1A202C", "ha": "center", "va": "center"}
     font_sub = {"fontsize": 9.5, "color": "#4A5568", "ha": "center", "va": "center"}
-    font_item = {"fontsize": 10, "fontweight": "semibold", "color": "#2D3748", "ha": "left", "va": "center"}
     font_tag = {"fontsize": 8.5, "fontweight": "bold", "color": "#FFFFFF", "ha": "center", "va": "center"}
 
     # ----------------------------------------------------
@@ -98,13 +97,13 @@ def generate_standard_wsi_pipeline_figure(output_png_path: str, output_svg_path:
     ax.add_patch(arr2)
 
     # ----------------------------------------------------
-    # BLOCK 3: FEATURE EXTRACTOR (FROZEN ❄) (x: 5.8 to 8.5)
+    # BLOCK 3: FEATURE EXTRACTOR (FROZEN) (x: 5.8 to 8.5)
     # ----------------------------------------------------
     fe_box = FancyBboxPatch((5.8, 1.4), 2.9, 4.4, boxstyle="round,pad=0.08,rounding_size=0.2",
                             facecolor="#F0FFF4", edgecolor="#38A169", linewidth=2.0)
     ax.add_patch(fe_box)
 
-    # Badge: Frozen ❄
+    # Badge: Frozen
     badge_frozen = FancyBboxPatch((6.3, 5.3), 1.9, 0.45, boxstyle="round,pad=0.04,rounding_size=0.15",
                                   facecolor="#2B6CB0", edgecolor="none")
     ax.add_patch(badge_frozen)
@@ -160,13 +159,13 @@ def generate_standard_wsi_pipeline_figure(output_png_path: str, output_svg_path:
     ax.add_patch(arr4)
 
     # ----------------------------------------------------
-    # BLOCK 5: TRAINABLE MODEL (FIRE 🔥) (x: 11.3 to 13.6)
+    # BLOCK 5: TRAINABLE MODEL (x: 11.3 to 13.6)
     # ----------------------------------------------------
     tm_box = FancyBboxPatch((11.3, 1.4), 2.5, 4.4, boxstyle="round,pad=0.08,rounding_size=0.2",
                             facecolor="#FFFAF0", edgecolor="#DD6B20", linewidth=2.0)
     ax.add_patch(tm_box)
 
-    # Badge: Trainable 🔥
+    # Badge: Trainable
     badge_train = FancyBboxPatch((11.6, 5.3), 1.9, 0.45, boxstyle="round,pad=0.04,rounding_size=0.15",
                                  facecolor="#C53030", edgecolor="none")
     ax.add_patch(badge_train)
@@ -179,7 +178,7 @@ def generate_standard_wsi_pipeline_figure(output_png_path: str, output_svg_path:
         ("CLAM", "Clustering-constrained MIL"),
         ("TransMIL", "Transformer-based MIL"),
         ("ABMIL / DSMIL", "Attention / Dual-Stream"),
-        ("WSSS Decoder", "CAM + PDA + MLPS (Topic 6)")
+        ("WSSS Decoder", "CAM + PDA + MLPS")
     ]
     for i, (m_name, m_desc) in enumerate(mil_models):
         y_pos = 4.1 - i * 0.65

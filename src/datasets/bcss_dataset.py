@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from src.datasets.patient_split import extract_patient_id
+from src.datasets.patient_split import extract_patient_id, load_patient_splits
 
 
 class BCSSDataset(Dataset):
@@ -31,13 +31,17 @@ class BCSSDataset(Dataset):
         root_dir: str,
         split: str = "train",
         transform: Optional[Callable] = None,
+        strict_masks: bool = False,
+        enforce_patient_split: bool = False,
     ) -> None:
         super().__init__()
         assert split in ["train", "valid", "test", "val", "training"], f"Invalid split: {split}"
         self.root_dir = root_dir
         self.split = split
         self.transform = transform
-        
+        self.strict_masks = strict_masks
+        self.enforce_patient_split = enforce_patient_split
+
         self.image_paths: List[str] = []
         self.mask_paths: List[str] = []
         self.labels: List[np.ndarray] = []
@@ -48,11 +52,27 @@ class BCSSDataset(Dataset):
     def _load_dataset(self) -> None:
         is_train_split = self.split in ["train", "training"]
         if is_train_split:
-            train_dir = os.path.join(self.root_dir, "training")
-            if not os.path.isdir(train_dir):
-                train_dir = os.path.join(self.root_dir, "train")
-            pattern = os.path.join(train_dir, "*.png")
-            self.image_paths = sorted(glob.glob(pattern))
+            candidates = [
+                os.path.join(self.root_dir, "training"),
+                os.path.join(self.root_dir, "train", "img"),
+                os.path.join(self.root_dir, "train"),
+                os.path.join(self.root_dir, "BCSS-WSSS", "training"),
+                os.path.join(self.root_dir, "BCSS-WSSS", "train", "img"),
+                os.path.join(self.root_dir, "BCSS-WSSS", "train"),
+                self.root_dir,
+            ]
+            for cand in candidates:
+                if os.path.isdir(cand):
+                    found = sorted(glob.glob(os.path.join(cand, "*.png")))
+                    if found:
+                        self.image_paths = found
+                        break
+
+            if self.enforce_patient_split:
+                splits = load_patient_splits()
+                allowed_pids = set(splits.get("train", []))
+                if allowed_pids:
+                    self.image_paths = [p for p in self.image_paths if extract_patient_id(p) in allowed_pids]
 
             for path in self.image_paths:
                 patient_id = extract_patient_id(path)
@@ -60,17 +80,37 @@ class BCSSDataset(Dataset):
                 label = self._extract_weak_label(path)
                 self.labels.append(label)
         else:
-            split_name = "val" if self.split in ["val", "valid"] else self.split
-            img_dir = os.path.join(self.root_dir, split_name, "img")
-            mask_dir = os.path.join(self.root_dir, split_name, "mask")
-            if not os.path.isdir(img_dir) and self.split in ["val", "valid"]:
-                alt_name = "valid" if split_name == "val" else "val"
-                if os.path.isdir(os.path.join(self.root_dir, alt_name, "img")):
-                    img_dir = os.path.join(self.root_dir, alt_name, "img")
-                    mask_dir = os.path.join(self.root_dir, alt_name, "mask")
-            pattern = os.path.join(img_dir, "*.png")
-            self.image_paths = sorted(glob.glob(pattern))
+            split_aliases = ["val", "valid"] if self.split in ["val", "valid"] else [self.split]
+            mask_dir = os.path.join(self.root_dir, split_aliases[0], "mask")
 
+            found_paths: List[str] = []
+            for sp in split_aliases:
+                for sub_root in [self.root_dir, os.path.join(self.root_dir, "BCSS-WSSS")]:
+                    cand_img = os.path.join(sub_root, sp, "img")
+                    cand_mask = os.path.join(sub_root, sp, "mask")
+                    if os.path.isdir(cand_img):
+                        matches = sorted(glob.glob(os.path.join(cand_img, "*.png")))
+                        if matches:
+                            mask_dir = cand_mask
+                            found_paths = matches
+                            break
+                    cand_flat = os.path.join(sub_root, sp)
+                    if os.path.isdir(cand_flat):
+                        matches = sorted(glob.glob(os.path.join(cand_flat, "*.png")))
+                        if matches:
+                            mask_dir = cand_mask
+                            found_paths = matches
+                            break
+                if found_paths:
+                    break
+
+            self.image_paths = found_paths
+            if self.enforce_patient_split:
+                splits = load_patient_splits()
+                split_key = "val" if self.split in ["val", "valid"] else "test"
+                allowed_pids = set(splits.get(split_key, []))
+                if allowed_pids:
+                    self.image_paths = [p for p in self.image_paths if extract_patient_id(p) in allowed_pids]
             for path in self.image_paths:
                 patient_id = extract_patient_id(path)
                 self.patient_ids.append(patient_id)
@@ -127,8 +167,14 @@ class BCSSDataset(Dataset):
                     mask_np = np.array(mask.convert("L"), dtype=np.int64)
                 if mask_np.ndim == 3:
                     mask_np = mask_np[:, :, 0]
+                ignore_mask = mask_np == 255
                 mask_np = np.clip(mask_np, 0, 4)
+                mask_np[ignore_mask] = 255
                 mask_tensor = torch.from_numpy(mask_np)
             else:
-                mask_tensor = torch.zeros((img_np.shape[0], img_np.shape[1]), dtype=torch.int64)
+                if self.strict_masks:
+                    raise FileNotFoundError(f"Missing ground-truth segmentation mask: {mask_path}")
+                h_t = int(img_tensor.shape[-2]) if isinstance(img_tensor, torch.Tensor) and img_tensor.ndim >= 2 else img.height
+                w_t = int(img_tensor.shape[-1]) if isinstance(img_tensor, torch.Tensor) and img_tensor.ndim >= 2 else img.width
+                mask_tensor = torch.zeros((h_t, w_t), dtype=torch.int64)
             return img_tensor, mask_tensor, os.path.basename(img_path)

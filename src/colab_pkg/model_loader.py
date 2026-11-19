@@ -1,5 +1,5 @@
 """
-Models, Checkpoints Loader & Multi-Method SOTA WSSS Engine for SE374.R11.
+Models, Checkpoints Loader & Multi-Method SOTA WSSS Engine for BCSS-WSSS.
 
 Provides:
 1. Exact Stage-2 DeepLabV3+ ResNet-101 architecture (59,339,940 parameters, MedIA 2022).
@@ -17,12 +17,12 @@ All hyphens strictly use standard ASCII 0x2D ('-').
 import contextlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
 import cv2
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 
 IMAGENET_MEAN: List[float] = [0.485, 0.456, 0.406]
 IMAGENET_STD: List[float] = [0.229, 0.224, 0.225]
@@ -571,9 +571,9 @@ def safe_torch_load(
     """Safely loads PyTorch checkpoints across PyTorch 1.x and 2.6+ (where weights_only=True is default)."""
     dev = torch.device(device) if isinstance(device, str) else device
     try:
-        return torch.load(checkpoint_path, map_location=dev, weights_only=False)
-    except TypeError:
-        return torch.load(checkpoint_path, map_location=dev)
+        return torch.load(checkpoint_path, map_location=dev, weights_only=True)
+    except Exception:
+        return torch.load(checkpoint_path, map_location=dev, weights_only=False)  # nosec B614
 
 
 def build_and_load_deeplabv3plus(
@@ -897,6 +897,7 @@ class MultiMethodWSSSEngine:
         self.min_island_area = min_island_area
         self.cls_threshold = cls_threshold
         self.cam_fusion_alpha = cam_fusion_alpha
+        self.m6_cam_fusion_alpha = 0.22
         self.min_glass_area = min_glass_area
         self.use_full_d8_in_m5 = use_full_d8_in_m5
 
@@ -966,7 +967,7 @@ class MultiMethodWSSSEngine:
                             [x_orig, x_hflip, x_vflip, x_hvflip, x_r90, x_r90_h, x_r90_v, x_r270],
                             dim=0,
                         )
-                        batch_probs = torch.softmax(model(batch_x).float(), dim=1)
+                        batch_probs = torch.softmax(model(batch_x)[:, :4].float(), dim=1)
 
                         p0 = batch_probs[0]
                         p1 = torch.flip(batch_probs[1], dims=[2])
@@ -979,8 +980,8 @@ class MultiMethodWSSSEngine:
                     else:
                         batch_reg = torch.cat([x_orig, x_hflip, x_vflip, x_hvflip], dim=0)
                         batch_rot = torch.cat([x_r90, x_r90_h, x_r90_v, x_r270], dim=0)
-                        probs_reg = torch.softmax(model(batch_reg).float(), dim=1)
-                        probs_rot = torch.softmax(model(batch_rot).float(), dim=1)
+                        probs_reg = torch.softmax(model(batch_reg)[:, :4].float(), dim=1)
+                        probs_rot = torch.softmax(model(batch_rot)[:, :4].float(), dim=1)
 
                         p0 = probs_reg[0]
                         p1 = torch.flip(probs_reg[1], dims=[2])
@@ -996,7 +997,7 @@ class MultiMethodWSSSEngine:
                     probs_d8 = 0.125 * (sum_d4 + p4 + p5 + p6 + p7)
                 else:
                     batch_x = torch.cat([x_orig, x_hflip, x_vflip, x_hvflip], dim=0)
-                    batch_probs = torch.softmax(model(batch_x).float(), dim=1)
+                    batch_probs = torch.softmax(model(batch_x)[:, :4].float(), dim=1)
 
                     p0 = batch_probs[0]
                     p1 = torch.flip(batch_probs[1], dims=[2])
@@ -1091,7 +1092,7 @@ class MultiMethodWSSSEngine:
                         x_base, size=(sh, sw), mode="bilinear", align_corners=True
                     )
                     with self._get_autocast_context(dev, use_amp=self.use_amp, amp_dtype=self.amp_dtype):
-                        logits_s = model(x_scaled).float()
+                        logits_s = model(x_scaled)[:, :4].float()
                     probs_batch_s = torch.softmax(logits_s, dim=1)
                     p_s_interp = F.interpolate(
                         probs_batch_s, size=(H, W), mode="bilinear", align_corners=True
@@ -1250,6 +1251,9 @@ class MultiMethodWSSSEngine:
     @staticmethod
     def apply_cgm_gate(probs: np.ndarray, cgm_gate: Optional[np.ndarray]) -> np.ndarray:
         """Applies Stage-1 Classification Gate Mechanism to suppress non-present tissue classes."""
+        if probs.shape[0] > 4:
+            probs = probs[:4]
+            probs = (probs / np.maximum(probs.sum(axis=0, keepdims=True), 1e-8)).astype(np.float32)
         if cgm_gate is None:
             return probs
         gated = probs * cgm_gate.reshape(4, 1, 1)
@@ -1627,7 +1631,9 @@ class MultiMethodWSSSEngine:
             stage1, img_tensor, (H, W)
         )
         probs_m6_gated = self.apply_cgm_gate(probs_ms_d4, soft_gate)
-        probs_m6_fused = self.apply_cam_fusion(probs_m6_gated, cam_probs_v2, alpha=0.22)
+        probs_m6_fused = self.apply_cam_fusion(
+            probs_m6_gated, cam_probs_v2, alpha=float(getattr(self, "m6_cam_fusion_alpha", 0.22))
+        )
         probs_m6 = self.apply_prior_calibration(probs_m6_fused)
         pred_m6 = np.argmax(probs_m6, axis=0).astype(np.uint8)
         if raw_rgb is not None:
@@ -1663,6 +1669,32 @@ class MultiMethodWSSSEngine:
         if raw_rgb is not None:
             pred_m7 = self.apply_pure_glass_guard(pred_m7, raw_rgb=raw_rgb, background_class_idx=4)
         return pred_m7
+
+    def predict_uniform_multiscale_baseline(
+        self,
+        model: torch.nn.Module,
+        img_tensor: Optional[torch.Tensor] = None,
+        raw_rgb: Optional[np.ndarray] = None,
+        model_stage1: Optional[torch.nn.Module] = None,
+        scales: Tuple[float, ...] = (0.75, 1.0, 1.25),
+    ) -> np.ndarray:
+        """Uniform Multi-Scale Baseline (1/3, 1/3, 1/3 fixed weights without entropy weighting)."""
+        try:
+            from .evaluator import predict_uniform_multiscale_baseline as _predict_fn
+        except ImportError:
+            try:
+                from evaluator import predict_uniform_multiscale_baseline as _predict_fn
+            except ImportError:
+                from src.clinical.exhaustive_evaluator import predict_uniform_multiscale_baseline as _predict_fn
+
+        pred, _ = _predict_fn(
+            model=model,
+            img_tensor=self._ensure_img_tensor(model, img_tensor, raw_rgb),
+            raw_rgb=raw_rgb,
+            model_stage1=model_stage1 if model_stage1 is not None else self.model_stage1,
+            scales=scales,
+        )
+        return pred
 
     def predict_all_methods(
         self,
@@ -1747,7 +1779,9 @@ class MultiMethodWSSSEngine:
 
             # Method 6: Multi-Scale Pyramid D4 + Stage-1 D4 Soft-Gate + Cross-Stage CAM Fusion + Prior Calibration
             probs_m6_gated = self.apply_cgm_gate(probs_ms_d4, soft_gate)
-            probs_m6_fused = self.apply_cam_fusion(probs_m6_gated, cam_probs_v2, alpha=0.22)
+            probs_m6_fused = self.apply_cam_fusion(
+                probs_m6_gated, cam_probs_v2, alpha=float(getattr(self, "m6_cam_fusion_alpha", 0.22))
+            )
             probs_m6 = self.apply_prior_calibration(probs_m6_fused)
             pred_m6_raw = np.argmax(probs_m6, axis=0).astype(np.uint8)
             pred_m6 = (
