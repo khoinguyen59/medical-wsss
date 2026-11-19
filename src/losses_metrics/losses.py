@@ -56,6 +56,7 @@ class MultiLayerPseudoSupervisionLoss(nn.Module):
             pred_logits: (B, C, H, W) model prediction logits.
             pseudo_masks: Dictionary with keys 'bn7', 'b5_2', 'b4_5' containing (B, H, W) masks.
         """
+        pred_logits = pred_logits.float()
         total_loss = pred_logits.sum() * 0.0
         for layer_name, weight in self.weights.items():
             if layer_name in pseudo_masks:
@@ -114,6 +115,7 @@ class UncertaintyRegularizationLoss(nn.Module):
             pred_logits: (B, C, H, W) prediction logits.
             pseudo_mask: (B, H, W) pseudo-mask labels.
         """
+        pred_logits = pred_logits.float()
         probs = F.softmax(pred_logits, dim=1)  # (B, C, H, W)
         # Compute normalized entropy: H(p) = - sum(p * log(p)) / log(C)
         num_classes = probs.shape[1]
@@ -208,20 +210,23 @@ class MultiPrototypePPCLoss(nn.Module):
             feats_c = feats[mask_c]      # (N_c, D)
             weights_c = weights[mask_c]  # (N_c,)
 
-            # Assign each pixel to the nearest sub-prototype
-            sim_k = torch.matmul(feats_c, self.prototypes[c].t())  # (N_c, K)
-            assign_k = sim_k.argmax(dim=-1)
+            # Assign each pixel to the nearest sub-prototype in strict FP32
+            with torch.amp.autocast(device_type=feats.device.type, enabled=False):
+                feats_cf = feats_c.float()
+                w_cf = weights_c.float()
+                sim_k = torch.matmul(feats_cf, self.prototypes[c].float().t())  # (N_c, K)
+                assign_k = sim_k.argmax(dim=-1)
 
-            for k in range(self.num_prototypes):
-                mask_k = assign_k == k
-                if mask_k.sum() > 0:
-                    w_k = weights_c[mask_k].unsqueeze(-1)
-                    mean_feat = (feats_c[mask_k] * w_k).sum(dim=0) / (w_k.sum() + 1e-6)
-                    new_proto = (
-                        self.momentum * self.prototypes[c, k]
-                        + (1.0 - self.momentum) * mean_feat
-                    )
-                    self.prototypes[c, k] = F.normalize(new_proto, dim=-1)
+                for k in range(self.num_prototypes):
+                    mask_k = assign_k == k
+                    if mask_k.sum() > 0:
+                        w_k = w_cf[mask_k].unsqueeze(-1)
+                        mean_feat = (feats_cf[mask_k] * w_k).sum(dim=0) / (w_k.sum() + 1e-6)
+                        new_proto = (
+                            self.momentum * self.prototypes[c, k].float()
+                            + (1.0 - self.momentum) * mean_feat
+                        )
+                        self.prototypes[c, k] = F.normalize(new_proto, dim=-1)
 
     def forward(
         self,
@@ -239,51 +244,55 @@ class MultiPrototypePPCLoss(nn.Module):
         Returns:
             loss: Scalar tensor representing L_MP-PPC loss.
         """
-        b, d, h, w = proj_feats.shape
-        proj_feats = F.normalize(proj_feats, dim=1)
+        with torch.amp.autocast(device_type=proj_feats.device.type, enabled=False):
+            b, d, h, w = proj_feats.shape
+            proj_feats = F.normalize(proj_feats.float(), dim=1)
+            cam_probs_f = cam_probs.float()
+            img_labels_f = img_labels.float()
 
-        # Gate probabilities with image-level labels
-        valid_probs = cam_probs * img_labels.view(b, self.num_classes, 1, 1)
-        valid_probs = valid_probs / (valid_probs.sum(dim=1, keepdim=True) + 1e-6)
-        max_probs, pseudo_labels = valid_probs.max(dim=1)  # (B, H, W)
+            # Gate probabilities with image-level labels
+            valid_probs = cam_probs_f * img_labels_f.view(b, self.num_classes, 1, 1)
+            valid_probs = valid_probs / (valid_probs.sum(dim=1, keepdim=True) + 1e-6)
+            max_probs, pseudo_labels = valid_probs.max(dim=1)  # (B, H, W)
 
-        norm_entropy = math.log(float(max(self.num_classes, 2))) + 1e-7
-        entropy = -(valid_probs * torch.log(valid_probs + 1e-6)).sum(dim=1) / norm_entropy
-        conf_weights = (1.0 - entropy).detach()
+            norm_entropy = math.log(float(max(self.num_classes, 2))) + 1e-7
+            entropy = -(valid_probs * torch.log(valid_probs.clamp(min=1e-7))).sum(dim=1) / norm_entropy
+            conf_weights = (1.0 - entropy).detach()
 
-        confident_mask = max_probs >= self.conf_thresh
-        if confident_mask.sum() < 16:
-            return proj_feats.sum() * 0.0
+            confident_mask = max_probs >= self.conf_thresh
+            if confident_mask.sum() < 16:
+                return proj_feats.sum() * 0.0
 
-        flat_feats = proj_feats.permute(0, 2, 3, 1)[confident_mask]
-        flat_labels = pseudo_labels[confident_mask]
-        flat_weights = conf_weights[confident_mask]
+            flat_feats = proj_feats.permute(0, 2, 3, 1)[confident_mask]
+            flat_labels = pseudo_labels[confident_mask]
+            flat_weights = conf_weights[confident_mask]
 
-        # Subsample to cap memory usage
-        if flat_feats.size(0) > self.max_samples:
-            perm = torch.randperm(flat_feats.size(0), device=flat_feats.device)[: self.max_samples]
-            flat_feats = flat_feats[perm]
-            flat_labels = flat_labels[perm]
-            flat_weights = flat_weights[perm]
+            # Subsample to cap memory usage
+            if flat_feats.size(0) > self.max_samples:
+                perm = torch.randperm(flat_feats.size(0), device=flat_feats.device)[: self.max_samples]
+                flat_feats = flat_feats[perm]
+                flat_labels = flat_labels[perm]
+                flat_weights = flat_weights[perm]
 
-        # Update prototypes via EMA strictly during training mode
-        if self.training:
-            self._update_prototypes(flat_feats.detach(), flat_labels, flat_weights)
+            # Update prototypes via EMA strictly during training mode
+            if self.training:
+                self._update_prototypes(flat_feats.detach(), flat_labels, flat_weights)
 
-        # Cosine similarity with all prototypes: (N, C, K)
-        all_sims = torch.einsum("nd,ckd->nck", flat_feats, self.prototypes) / self.temp
-        pos_sims_k = all_sims[torch.arange(flat_feats.size(0)), flat_labels]
-        pos_sim, _ = pos_sims_k.max(dim=-1)
+            # Cosine similarity with all prototypes in FP32 with log-sum-exp stabilization: (N, C, K)
+            all_sims = torch.einsum("nd,ckd->nck", flat_feats, self.prototypes.float()) / self.temp
+            pos_sims_k = all_sims[torch.arange(flat_feats.size(0), device=flat_feats.device), flat_labels]
+            pos_sim, _ = pos_sims_k.max(dim=-1)
 
-        exp_pos = torch.exp(pos_sim)
-        exp_all = torch.exp(all_sims)
+            sim_max = all_sims.amax(dim=(1, 2), keepdim=True).detach()
+            exp_pos = torch.exp(pos_sim - sim_max.squeeze(-1).squeeze(-1))
+            exp_all = torch.exp(all_sims - sim_max)
 
-        pair_w = self.hard_weights[flat_labels]
-        neg_mask = F.one_hot(flat_labels, num_classes=self.num_classes) == 0
-        exp_neg = (exp_all.sum(dim=-1) * pair_w * neg_mask.float()).sum(dim=-1)
+            pair_w = self.hard_weights[flat_labels].float()
+            neg_mask = F.one_hot(flat_labels, num_classes=self.num_classes) == 0
+            exp_neg = (exp_all.sum(dim=-1) * pair_w * neg_mask.float()).sum(dim=-1)
 
-        loss = -flat_weights * torch.log(exp_pos / (exp_pos + exp_neg + 1e-6))
-        return loss.mean()
+            loss = -flat_weights * torch.log((exp_pos / (exp_pos + exp_neg + 1e-12)).clamp(min=1e-12))
+            return loss.mean()
 
 
 class UncertaintyAwareBoundaryLoss(nn.Module):
@@ -312,6 +321,9 @@ class UncertaintyAwareBoundaryLoss(nn.Module):
         Returns:
             loss: Scalar boundary alignment regularization loss.
         """
+        pred_probs = pred_probs.float()
+        stain_gradient = stain_gradient.float()
+        uncertainty_map = uncertainty_map.float()
         diff_h = torch.abs(pred_probs[:, :, :, 1:] - pred_probs[:, :, :, :-1]).sum(dim=1, keepdim=True)
         diff_v = torch.abs(pred_probs[:, :, 1:, :] - pred_probs[:, :, :-1, :]).sum(dim=1, keepdim=True)
 

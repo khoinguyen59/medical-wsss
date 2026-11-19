@@ -100,6 +100,9 @@ class CompositeWSSSLoss(nn.Module):
         Returns:
             Dict containing 'total_loss', 'focal_loss', 'dice_loss', 'iou_loss', 'head_loss'.
         """
+        pred_logits = pred_logits.float()
+        if iou_predictions is not None:
+            iou_predictions = iou_predictions.float()
         device = pred_logits.device
         b, num_cls, h, w = pred_logits.shape
 

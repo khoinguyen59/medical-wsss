@@ -54,26 +54,29 @@ class AttentionModule(nn.Module):
         Returns:
             masked_x: (B, 4096, H, W) feature map modulated by attention mask.
         """
-        cams = F.conv2d(x, fc_weights)
-        cams = F.relu(cams)  # (B, 4, H, W)
-        b, c, h, w = cams.size()
+        with torch.amp.autocast(device_type=x.device.type, enabled=False):
+            x_f = x.float()
+            cams = F.conv2d(x_f, fc_weights.float())
+            cams = F.relu(cams)  # (B, 4, H, W)
+            b, c, h, w = cams.size()
 
-        cam_mean = torch.mean(cams, dim=1)  # (B, H, W)
-        zero = torch.zeros_like(cam_mean)
-        mean_drop_cam = zero.clone()
+            cam_mean = torch.mean(cams, dim=1)  # (B, H, W)
+            zero = torch.zeros_like(cam_mean)
+            mean_drop_cam = zero.clone()
 
-        for i in range(c):
-            sub_cam = cams[:, i, :, :]  # (B, H, W)
-            sub_cam_max = torch.amax(sub_cam.view(b, -1), dim=-1).view(b, 1, 1)
-            thr = sub_cam_max * gamma
-            thr = thr.expand_as(sub_cam)
-            sub_cam_with_drop = torch.where(sub_cam > thr, zero, sub_cam)
-            mean_drop_cam = mean_drop_cam + sub_cam_with_drop
+            for i in range(c):
+                sub_cam = cams[:, i, :, :]  # (B, H, W)
+                sub_cam_max = torch.amax(sub_cam.view(b, -1), dim=-1).view(b, 1, 1)
+                thr = sub_cam_max * float(gamma)
+                thr = thr.expand_as(sub_cam)
+                sub_cam_with_drop = torch.where(sub_cam > thr, zero, sub_cam)
+                mean_drop_cam = mean_drop_cam + sub_cam_with_drop
 
-        mean_drop_cam = mean_drop_cam / max(c, 1)
-        mean_drop_cam = mean_drop_cam.unsqueeze(1)  # (B, 1, H, W)
+            mean_drop_cam = mean_drop_cam / max(c, 1)
+            mean_drop_cam = mean_drop_cam.unsqueeze(1)  # (B, 1, H, W)
 
-        return x * mean_drop_cam
+            # Return FP32 to prevent float16 >65504 overflow on unnormalized 4096-ch CAM products
+            return x_f * mean_drop_cam
 
 
 class AsymmetricLoss(nn.Module):
@@ -103,29 +106,34 @@ class AsymmetricLoss(nn.Module):
             logits: (B, C) unnormalized raw predictions.
             targets: (B, C) multi-hot binary ground truth in {0, 1}.
         """
-        probs = torch.sigmoid(logits)
+        # Compute loss strictly in FP32 with autocast disabled so eps never underflows
+        with torch.amp.autocast(device_type=logits.device.type, enabled=False):
+            logits_f = logits.float()
+            targets_f = targets.float()
+            eps = float(self.eps)
+            probs = torch.sigmoid(logits_f)
 
-        # Positive margin
-        pos_probs = probs
-        pos_loss = targets * torch.log(pos_probs.clamp(min=self.eps))
-        if self.gamma_pos > 0:
-            pos_weight = (1.0 - pos_probs).pow(self.gamma_pos)
-            pos_loss = pos_loss * pos_weight
+            # Positive margin
+            pos_probs = probs
+            pos_loss = targets_f * torch.log(pos_probs.clamp(min=eps))
+            if self.gamma_pos > 0:
+                pos_weight = (1.0 - pos_probs).clamp(min=0.0).pow(self.gamma_pos)
+                pos_loss = pos_loss * pos_weight
 
-        # Negative margin with hard probability clipping
-        neg_probs = (1.0 - probs).clamp(min=self.eps)
-        if self.clip > 0:
-            asym_probs = (probs - self.clip).clamp(min=0.0)
-            neg_loss = (1.0 - targets) * torch.log((1.0 - asym_probs).clamp(min=self.eps))
-        else:
-            neg_loss = (1.0 - targets) * torch.log(neg_probs)
+            # Negative margin with hard probability clipping
+            neg_probs = (1.0 - probs).clamp(min=eps)
+            if self.clip > 0:
+                asym_probs = (probs - float(self.clip)).clamp(min=0.0)
+                neg_loss = (1.0 - targets_f) * torch.log((1.0 - asym_probs).clamp(min=eps))
+            else:
+                neg_loss = (1.0 - targets_f) * torch.log(neg_probs)
 
-        if self.gamma_neg > 0:
-            neg_weight = probs.pow(self.gamma_neg)
-            neg_loss = neg_loss * neg_weight
+            if self.gamma_neg > 0:
+                neg_weight = probs.clamp(min=0.0).pow(self.gamma_neg)
+                neg_loss = neg_loss * neg_weight
 
-        total_loss = - (pos_loss + neg_loss)
-        return total_loss.mean()
+            total_loss = -(pos_loss + neg_loss)
+            return total_loss.mean()
 
 
 class Stage1Trainer:
@@ -167,14 +175,16 @@ class Stage1Trainer:
         """Forward pass with conditional Progressive Dropout Attention."""
         conv6 = self.model.forward_backbone(images)  # (B, 4096, 28, 28)
 
-        if enable_pda:
-            conv6 = self.attention_module(conv6, self.model.fc8.weight, self.gamma)
+        with torch.amp.autocast(device_type=conv6.device.type, enabled=False):
+            conv6_f = conv6.float()
+            if enable_pda:
+                conv6_f = self.attention_module(conv6_f, self.model.fc8.weight.float(), self.gamma)
 
-        x = self.model.dropout7(conv6)
-        x = self.model.pool(x)
-        logits = self.model.fc8(x).view(x.size(0), -1)  # (B, 4)
-        probs = torch.sigmoid(logits)
-        return logits, probs
+            x = self.model.dropout7(conv6_f)
+            x = self.model.pool(x)
+            logits = F.conv2d(x, self.model.fc8.weight.float()).view(x.size(0), -1)  # (B, 4)
+            probs = torch.sigmoid(logits)
+            return logits, probs
 
     def train_epoch(
         self,
@@ -201,6 +211,10 @@ class Stage1Trainer:
             with torch.amp.autocast(device_type=self.device.type, enabled=self.enable_amp):
                 logits, probs = self.forward_with_pda(images, enable_pda=enable_pda)
                 loss = self.criterion(logits, targets)
+
+            if not torch.isfinite(loss):
+                self.optimizer.zero_grad(set_to_none=True)
+                continue
 
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
