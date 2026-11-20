@@ -18,6 +18,8 @@ from src.training.dataset_loader import (
     NUM_FOREGROUND,
     BCSSEvalDataset,
     BCSSStage1Dataset,
+    BCSSStage1TrainDataset,
+    BCSSStage1ValDataset,
     BCSSStage2MultiMaskDataset,
     create_eval_dataloader,
     create_stage1_dataloaders,
@@ -26,6 +28,7 @@ from src.training.dataset_loader import (
     find_image_files,
     load_bcss_patient_splits,
     parse_patch_filename,
+    sample_patient_stratified,
 )
 from src.training.generate_pseudo_masks import (
     MultiLayerCAMExtractor,
@@ -67,6 +70,8 @@ __all__ = [
     "NUM_FOREGROUND",
     "BCSSEvalDataset",
     "BCSSStage1Dataset",
+    "BCSSStage1TrainDataset",
+    "BCSSStage1ValDataset",
     "BCSSStage2MultiMaskDataset",
     "create_eval_dataloader",
     "create_stage1_dataloaders",
@@ -75,6 +80,7 @@ __all__ = [
     "find_image_files",
     "load_bcss_patient_splits",
     "parse_patch_filename",
+    "sample_patient_stratified",
     "AsymmetricLoss",
     "AttentionModule",
     "Stage1Trainer",

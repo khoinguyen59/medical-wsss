@@ -278,35 +278,41 @@ def test_clinical_biomarkers_mathematical_consistency():
 
 
 def test_notebook_forward_pass_tensor_shapes_and_loss():
-    """Verify Stage 1 forward_stage1_with_pda outputs (B, 4) logits matching MultiLabelSoftMarginLoss."""
+    """Execute REAL forward_stage1_dual / forward_stage1_with_pda code from 01_Train_Stage1_Classifier_L4.ipynb."""
     from src.models.sam_wsss_adapter import CAM_Prompt_Generator
     from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.train_stage1 import AttentionModule
+
+    nb_data = json.loads(NOTEBOOKS["stage1_l4"].read_text(encoding="utf-8"))
+    cell10_src = "".join(nb_data["cells"][10]["source"])
+    start_idx = cell10_src.index("def forward_stage1_dual(")
+    fn_code = cell10_src[start_idx:]
+
+    ns = {"torch": torch, "AttentionModule": AttentionModule}
+    exec(fn_code, ns)
+    forward_dual = ns["forward_stage1_dual"]
+    forward_pda = ns["forward_stage1_with_pda"]
 
     model = WSSSTissueStage1NetCAM(num_classes=4)
     model.eval()
     images = torch.randn(2, 3, 224, 224)
     targets = torch.tensor([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]])
+    attn_mod = AttentionModule()
 
-    # 1. Forward with PDA (Notebook 01 logic)
-    conv6 = model.forward_backbone(images)
-    cam = torch.nn.functional.conv2d(conv6, model.fc8.weight)
-    cam_flat = cam.view(cam.size(0), cam.size(1), -1)
-    cam_max = cam_flat.max(dim=-1, keepdim=True)[0].unsqueeze(-1)
-    cam_norm = torch.nn.functional.relu(cam) / (cam_max + 1e-5)
-    salient_mask = (cam_norm.max(dim=1, keepdim=True)[0] > 0.7).float()
-    keep_prob = 1.0 - 0.5 * salient_mask
-    dropout_mask = torch.bernoulli(keep_prob)
-    conv6_pda = conv6 * dropout_mask
+    # 1. Execute actual notebook forward_stage1_dual & forward_stage1_with_pda (gamma=1.0 identity & gamma=0.80 bounded)
+    logits_c, probs_c, logits_p_id, _ = forward_dual(
+        model, images, enable_pda=True, gamma=1.0, attn_module=attn_mod
+    )
+    assert logits_c.shape == (2, 4) and logits_p_id is not None
+    assert torch.allclose(logits_c, logits_p_id, atol=1e-5)
 
-    x = model.dropout7(conv6_pda)
-    x = model.pool(x)
-    logits = model.fc8(x).view(x.size(0), -1)
-    assert logits.shape == (2, 4), f"Expected logits shape (2, 4), got {logits.shape}"
+    logits_p, probs_p = forward_pda(model, images, enable_pda=True, gamma=0.80, attn_module=attn_mod)
+    assert logits_p.shape == (2, 4) and probs_p.shape == (2, 4)
+    assert torch.isfinite(logits_p).all()
 
     criterion = torch.nn.MultiLabelSoftMarginLoss()
-    loss = criterion(logits, targets)
-    assert not torch.isnan(loss) and not torch.isinf(loss)
-    assert loss.item() > 0.0
+    loss = 0.5 * criterion(logits_c, targets) + 0.5 * criterion(logits_p, targets)
+    assert torch.isfinite(loss) and loss.item() > 0.0
 
     # 2. Forward CAM for Notebook 02 and 03
     cam_raw, cls_probs = model.forward_cam(images)
@@ -658,6 +664,41 @@ def test_notebook_01_zero_tie_and_compact_best_checkpoint():
         assert "best_state = {k: v for k, v in latest_state.items() if k not in ('optimizer', 'scheduler')}" in content, (
             f"{key} missing compact inference-only best checkpoint stripping optimizer/scheduler"
         )
+
+
+def test_notebook_01_stage1_parity_and_spawn_guards():
+    """Verify Notebook 01 enforces C-D1..C-D5 parity fixes (picklable datasets, spawn, dual-branch, grad clip, resume)."""
+    for key in ("stage1", "stage1_t4", "stage1_l4"):
+        nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
+        c8 = "".join(nb_data["cells"][8]["source"])
+        c10 = "".join(nb_data["cells"][10]["source"])
+        c12 = "".join(nb_data["cells"][12]["source"])
+        c14 = "".join(nb_data["cells"][14]["source"])
+
+        # C-D3 / C-D4: No ColorJitter, picklable Datasets from src.training.dataset_loader, spawn + persistent_workers
+        assert "transforms.ColorJitter" not in c8, f"{key} Cell 8 must not include transforms.ColorJitter"
+        assert "from src.training.dataset_loader import" in c8
+        assert "BCSSStage1TrainDataset" in c8 and "BCSSStage1ValDataset" in c8
+        assert "class BCSSStage1Dataset" not in c8 and "class BCSSStage1ValDataset" not in c8
+        assert "'multiprocessing_context': 'spawn'" in c8 and "'persistent_workers': True" in c8
+        assert "strict_patient_filter=True" in c8
+
+        # C-D2 / C-D3: model.train() before build_optimizer_and_scheduler; forward_stage1_with_pda default gamma=1.0
+        assert c10.index("model.train()") < c10.index("build_optimizer_and_scheduler("), (
+            f"{key} Cell 10 must call model.train() before build_optimizer_and_scheduler"
+        )
+        assert "gamma=1.0" in c10 and "def forward_stage1_dual(" in c10
+
+        # C-D5: resume epoch=-1 default & epochs_without_improve restored
+        assert "int(ckpt.get('epoch', -1)) + 1" in c12
+        assert "epochs_without_improve = int(ckpt.get('epochs_without_improve', 0))" in c12
+
+        # C-D1 / C-D3 / C-D4 / C-D5: PDA_START_EPOCH=3, dual-branch loss, clip_grad_norm_, pbar cleanup, collapse break
+        assert "PDA_START_EPOCH = 3" in c14
+        assert "0.5 * criterion(logits_clean, labels) + 0.5 * criterion(logits_pda, labels)" in c14
+        assert "clip_grad_norm_(model.parameters(), max_norm=5.0)" in c14
+        assert "pbar.close()" in c14 and "gc.collect()" in c14
+        assert "val_best_f1 < 0.55 or val_loss > 1.2" in c14 and "break" in c14
 
 
 def test_notebook_02_gradcam_sgdap_guards_and_prose_parity():

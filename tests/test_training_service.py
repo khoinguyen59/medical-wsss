@@ -1166,6 +1166,218 @@ def test_stage2_dataset_resizes_non_224_masks_nearest(tmp_path: Path):
         assert 255 in uniq, f"ignore_index=255 lost during NEAREST resize in {key}"
 
 
+def test_stage1_bn_and_early_stages_freeze_parity():
+    """Verify WSSSTissueStage1NetCAM.train() freezes all BatchNorm2d and not_training stages matching resnet38d.py."""
+    from src.colab_pkg.model_loader import WSSSTissueStage1NetCAM as ColabStage1
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM as SrcStage1
+    from src.training.train_stage1 import build_optimizer_and_scheduler
+
+    for ModelCls in (SrcStage1, ColabStage1):
+        model = ModelCls(n_class=4)
+        model.train()
+
+        # 1. Early stages (conv1a, b2, b2_1, b2_2) are frozen & eval
+        for mod in (model.conv1a, model.b2, model.b2_1, model.b2_2):
+            assert mod.training is False, f"{ModelCls.__name__} failed to set early stage {mod} to eval"
+            for p in mod.parameters():
+                assert p.requires_grad is False
+
+        # 2. All BatchNorm2d layers stay in eval mode with frozen affine weights/biases
+        bn_count = 0
+        for mod in model.modules():
+            if isinstance(mod, nn.BatchNorm2d):
+                bn_count += 1
+                assert mod.training is False
+                if mod.weight is not None:
+                    assert mod.weight.requires_grad is False
+                if mod.bias is not None:
+                    assert mod.bias.requires_grad is False
+        assert bn_count >= 30
+
+        # 3. bn7.running_var & running_mean stay bit-exact across forward+backward steps
+        bn7_var_before = model.bn7.running_var.detach().clone()
+        bn7_mean_before = model.bn7.running_mean.detach().clone()
+        conv1a_before = model.conv1a.weight.detach().clone()
+
+        opt, _ = build_optimizer_and_scheduler(model, lr=1e-4, weight_decay=1e-4, epochs=5)
+        # Verify fc8.weight gets non-zero weight_decay and frozen params are excluded
+        opt_param_ids = {id(p) for g in opt.param_groups for p in g["params"]}
+        assert id(model.conv1a.weight) not in opt_param_ids
+        assert id(model.bn7.weight) not in opt_param_ids
+        assert id(model.fc8.weight) in opt_param_ids
+        fc8_group = next(g for g in opt.param_groups if any(p is model.fc8.weight for p in g["params"]))
+        assert fc8_group["weight_decay"] == pytest.approx(1e-4)
+
+        x = torch.randn(2, 3, 64, 64) * 5.0 + 2.0
+        y = torch.tensor([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+        for _ in range(3):
+            opt.zero_grad()
+            conv6 = model.forward_backbone(x)
+            logits = model.fc8(model.pool(conv6)).view(2, 4)
+            loss = nn.MultiLabelSoftMarginLoss()(logits, y)
+            loss.backward()
+            opt.step()
+
+        assert torch.equal(model.bn7.running_var, bn7_var_before), "bn7.running_var drifted during training!"
+        assert torch.equal(model.bn7.running_mean, bn7_mean_before), "bn7.running_mean drifted during training!"
+        assert torch.equal(model.conv1a.weight, conv1a_before), "conv1a.weight mutated despite not_training!"
+
+
+def test_attention_module_bounded_identity_and_mean_preservation():
+    """Verify AttentionModule returns identity at gamma=1.0 and bounded mean-preserving features at gamma<1.0."""
+    torch.manual_seed(17)
+    attn = AttentionModule()
+    x = torch.rand(2, 64, 14, 14) * 2.0
+    # Give spatial hotspots so CAMs have clear peaks above threshold
+    x[:, :, 2:5, 2:5] = 8.0
+    x.requires_grad_(True)
+    w = torch.randn(4, 64, 1, 1) * 0.2
+    w.requires_grad_(True)
+
+    # 1. gamma >= 1.0 -> exact identity (zero shock on activation)
+    out_id = attn(x, w, gamma=1.0)
+    assert torch.equal(out_id, x.float())
+
+    # 2. gamma < 1.0 -> drops peaks, preserves expected spatial magnitude, no fc_weight grad leak
+    out_drop = attn(x, w, gamma=0.80)
+    assert out_drop.shape == x.shape
+    assert torch.isfinite(out_drop).all()
+    assert not torch.allclose(out_drop, x)
+    # Bounded inverted-dropout scale means total feature mean stays close to input mean (never 2x-38x explosion)
+    in_mean = float(x.detach().mean())
+    out_mean = float(out_drop.detach().mean())
+    assert 0.5 * in_mean <= out_mean <= 1.5 * in_mean, f"Feature mean drifted: in={in_mean:.4f}, out={out_mean:.4f}"
+    assert float(out_drop.detach().max()) <= float(x.detach().max()) * 4.0 + 1e-5
+    # Verify detached fc_weights receive zero gradients from AttentionModule while x receives grads
+    out_drop.sum().backward()
+    assert x.grad is not None and torch.isfinite(x.grad).all()
+    assert w.grad is None, "AttentionModule must detach fc_weights so CAM thresholding never leaks grads into fc8!"
+
+    # 3. Inactive class with zero CAM must not zero out features
+    w_inactive = torch.zeros(4, 64, 1, 1)
+    out_inactive = attn(x, w_inactive, gamma=0.70)
+    assert torch.allclose(out_inactive, x.float())
+
+
+def test_stage1_multiepoch_pda_calibration_no_collapse(tmp_path: Path):
+    """Verify 5-epoch Stage1Trainer (pda_start_epoch=3) keeps logits_clean and logits_pda calibrated without fc8 collapse."""
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.train_stage1 import Stage1Trainer, build_optimizer_and_scheduler
+
+    torch.manual_seed(42)
+    # Construct separable synthetic dataset (20 train, 12 val) with distinct color/pattern signatures per class
+    n_train, n_val = 20, 12
+    train_imgs = torch.rand(n_train, 3, 64, 64) * 0.2
+    train_lbls = torch.zeros(n_train, 4)
+    val_imgs = torch.rand(n_val, 3, 64, 64) * 0.2
+    val_lbls = torch.zeros(n_val, 4)
+    for i in range(n_train):
+        c = i % 4
+        train_lbls[i, c] = 1.0
+        train_imgs[i, c % 3, 16:48, 16:48] += 0.7 if c < 3 else 0.0
+        if c == 3:
+            train_imgs[i, :, 16:48, 16:48] += 0.7
+    for i in range(n_val):
+        c = i % 4
+        val_lbls[i, c] = 1.0
+        val_imgs[i, c % 3, 16:48, 16:48] += 0.7 if c < 3 else 0.0
+        if c == 3:
+            val_imgs[i, :, 16:48, 16:48] += 0.7
+
+    train_loader = DataLoader(
+        TensorDataset(train_imgs.clamp(0, 1), train_lbls, torch.zeros(n_train)),
+        batch_size=4,
+        shuffle=True,
+    )
+    val_loader = DataLoader(
+        TensorDataset(val_imgs.clamp(0, 1), val_lbls, torch.zeros(n_val)),
+        batch_size=4,
+        shuffle=False,
+    )
+
+    model = WSSSTissueStage1NetCAM(n_class=4)
+    model.train()
+    bn7_var_init = model.bn7.running_var.detach().clone()
+    optimizer, scheduler = build_optimizer_and_scheduler(model, lr=2e-4, weight_decay=1e-4, epochs=5)
+    trainer = Stage1Trainer(
+        model=model,
+        optimizer=optimizer,
+        criterion=nn.MultiLabelSoftMarginLoss(),
+        scheduler=scheduler,
+        device=torch.device("cpu"),
+        enable_amp=False,
+        pda_start_epoch=3,
+        initial_gamma=1.0,
+        gamma_decay=0.985,
+    )
+
+    val_maps = []
+    for ep in range(5):
+        if ep == 3:
+            assert trainer.gamma < 1.0, f"Expected gamma < 1.0 at Ep 4 PDA activation, got {trainer.gamma}"
+        trainer.train_epoch(train_loader, epoch=ep)
+        vm = trainer.evaluate(val_loader)
+        val_maps.append(vm["val_mAP"])
+        assert np.isfinite(vm["val_loss"])
+        assert abs(vm["val_logits_mean"]) < 10.0, f"Logits collapsed at epoch {ep+1}: {vm['val_logits_mean']}"
+
+    # 1. bn7.running_var must remain completely frozen (0% drift)
+    assert torch.equal(model.bn7.running_var, bn7_var_init)
+    # 2. Clean vs PDA branch logits stay well-calibrated (no 2x-38x explosion)
+    model.eval()
+    with torch.no_grad():
+        l_clean, _, l_pda, _ = trainer.forward_dual_branches(val_imgs[:4].clamp(0, 1), enable_pda=True)
+        assert l_pda is not None
+        logit_diff = float((l_clean - l_pda).abs().mean())
+        assert logit_diff < 5.0, f"Clean vs PDA logit divergence too large: {logit_diff}"
+    # 3. fc8.weight mean stays balanced near zero (no catastrophic negative shift)
+    assert float(model.fc8.weight.detach().mean()) > -0.1
+    assert val_maps[-1] >= 0.40
+
+
+def test_stage1_spawn_persistent_workers_dataloader_3_epochs(mock_dataset_dir: Path):
+    """Verify BCSSStage1TrainDataset & BCSSStage1ValDataset run 3 epochs cleanly with spawn + persistent_workers."""
+    from torch.utils.data import DataLoader
+
+    from src.training.dataset_loader import BCSSStage1TrainDataset, BCSSStage1ValDataset
+
+    train_ds = BCSSStage1TrainDataset(
+        mock_dataset_dir / "train",
+        patient_ids=["TCGA-A1-A0SK", "TCGA-A2-A04N"],
+        strict_patient_filter=True,
+    )
+    val_ds = BCSSStage1ValDataset(
+        mock_dataset_dir / "val" / "img",
+        mock_dataset_dir / "val" / "mask",
+        patient_ids=["TCGA-AN-A03X"],
+        strict_patient_filter=True,
+    )
+    # Strict non-empty patient filtering must raise ValueError on unmatched patient IDs
+    with pytest.raises(ValueError, match="Patient ID filter matched 0"):
+        BCSSStage1TrainDataset(
+            mock_dataset_dir / "train",
+            patient_ids=["TCGA-NONEXISTENT"],
+            strict_patient_filter=True,
+        )
+
+    mp_kwargs = {"persistent_workers": True, "prefetch_factor": 2, "multiprocessing_context": "spawn"}
+    train_loader = DataLoader(train_ds, batch_size=2, shuffle=True, num_workers=2, **mp_kwargs)
+    val_loader = DataLoader(val_ds, batch_size=2, shuffle=False, num_workers=2, **mp_kwargs)
+
+    for _ in range(3):
+        train_batches = list(train_loader)
+        val_batches = list(val_loader)
+        assert len(train_batches) == 2
+        assert len(val_batches) == 1
+        fnames, imgs, lbls = train_batches[0]
+        assert len(fnames) == 2 and imgs.shape == (2, 3, 224, 224) and lbls.shape == (2, 4)
+        vfnames, vimgs, vlbls, vmasks = val_batches[0]
+        assert len(vfnames) == 2 and vimgs.shape == (2, 3, 224, 224) and vmasks.shape == (2, 224, 224)
+
+
+
 
 
 

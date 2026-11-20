@@ -363,7 +363,8 @@ class AttentionModule(nn.Module):
     """Progressive Dropout Attention (PDA) Module for ResNet-38d.
 
     Prevents network from focusing solely on the most discriminative focal points
-    by adaptively dropping out high-activation regions of the Class Activation Map.
+    by adaptively dropping out peak regions of the detached Class Activation Map
+    with a bounded, mean-preserving inverted-dropout spatial mask.
     """
 
     def __init__(self) -> None:
@@ -373,7 +374,7 @@ class AttentionModule(nn.Module):
         self,
         x: torch.Tensor,
         fc_weights: torch.Tensor,
-        gamma: float,
+        gamma: float = 1.0,
     ) -> torch.Tensor:
         """Args:
             x: (B, 4096, H, W) feature map from bn7.
@@ -381,31 +382,34 @@ class AttentionModule(nn.Module):
             gamma: Dropout threshold factor in [0.65, 1.0].
 
         Returns:
-            masked_x: (B, 4096, H, W) feature map modulated by attention mask.
+            masked_x: (B, 4096, H, W) feature map modulated by bounded attention mask.
         """
         with torch.amp.autocast(device_type=x.device.type, enabled=False):
             x_f = x.float()
-            cams = F.conv2d(x_f, fc_weights.float())
-            cams = F.relu(cams)  # (B, 4, H, W)
+            gamma_f = float(gamma)
+            cams = F.relu(F.conv2d(x_f, fc_weights.float().detach()))  # (B, C, H, W)
             b, c, h, w = cams.size()
 
-            cam_mean = torch.mean(cams, dim=1)  # (B, H, W)
-            zero = torch.zeros_like(cam_mean)
-            mean_drop_cam = zero.clone()
+            if gamma_f >= 1.0 or c == 0:
+                return x_f
+
+            ones = torch.ones((b, h, w), device=x_f.device, dtype=x_f.dtype)
+            zeros = torch.zeros((b, h, w), device=x_f.device, dtype=x_f.dtype)
+            mean_drop_mask = torch.zeros((b, h, w), device=x_f.device, dtype=x_f.dtype)
 
             for i in range(c):
                 sub_cam = cams[:, i, :, :]  # (B, H, W)
                 sub_cam_max = torch.amax(sub_cam.view(b, -1), dim=-1).view(b, 1, 1)
-                thr = sub_cam_max * float(gamma)
-                thr = thr.expand_as(sub_cam)
-                sub_cam_with_drop = torch.where(sub_cam > thr, zero, sub_cam)
-                mean_drop_cam = mean_drop_cam + sub_cam_with_drop
+                active = sub_cam_max > 1e-6
+                thr = sub_cam_max * gamma_f
+                class_mask = torch.where(active & (sub_cam > thr), zeros, ones)
+                mean_drop_mask = mean_drop_mask + class_mask
 
-            mean_drop_cam = mean_drop_cam / max(c, 1)
-            mean_drop_cam = mean_drop_cam.unsqueeze(1)  # (B, 1, H, W)
+            mean_drop_mask = (mean_drop_mask / float(c)).unsqueeze(1)  # (B, 1, H, W) in [0, 1]
+            scale = mean_drop_mask.mean(dim=(2, 3), keepdim=True).clamp(min=0.25)
 
-            # Return FP32 to prevent float16 >65504 overflow on unnormalized 4096-ch CAM products
-            return x_f * mean_drop_cam
+            # Return FP32 with inverted-dropout rescaling to preserve expected feature magnitude
+            return x_f * (mean_drop_mask / scale)
 
 
 class AsymmetricLoss(nn.Module):
@@ -476,9 +480,9 @@ class Stage1Trainer:
         scheduler: Optional[Any] = None,
         device: Optional[torch.device] = None,
         enable_amp: bool = True,
-        pda_start_epoch: int = 2,
+        pda_start_epoch: int = 3,
         initial_gamma: float = 1.0,
-        gamma_decay: float = 0.98,
+        gamma_decay: float = 0.985,
         min_gamma: float = 0.65,
     ) -> None:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -488,7 +492,14 @@ class Stage1Trainer:
         self.scheduler = scheduler
 
         self.enable_amp = enable_amp and (self.device.type == "cuda")
-        self.scaler = torch.amp.GradScaler("cuda", enabled=self.enable_amp)
+        if self.enable_amp:
+            self.amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        else:
+            self.amp_dtype = torch.float32
+        self.scaler = torch.amp.GradScaler(
+            "cuda",
+            enabled=(self.enable_amp and self.amp_dtype == torch.float16),
+        )
 
         self.attention_module = AttentionModule().to(self.device)
         self.pda_start_epoch = pda_start_epoch
@@ -496,24 +507,46 @@ class Stage1Trainer:
         self.gamma_decay = gamma_decay
         self.min_gamma = min_gamma
 
+    def forward_dual_branches(
+        self,
+        images: torch.Tensor,
+        enable_pda: bool,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Forward pass returning clean logits/probs and optional PDA-masked logits/probs."""
+        with torch.amp.autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=self.enable_amp):
+            conv6 = self.model.forward_backbone(images)  # (B, 4096, 28, 28)
+
+        with torch.amp.autocast(device_type=conv6.device.type, enabled=False):
+            conv6_f = conv6.float()
+            fc8_w = self.model.fc8.weight.float()
+
+            x_clean = self.model.dropout7(conv6_f)
+            x_clean = self.model.pool(x_clean)
+            logits_clean = F.conv2d(x_clean, fc8_w).view(x_clean.size(0), -1)
+            probs_clean = torch.sigmoid(logits_clean)
+
+            if not enable_pda:
+                return logits_clean, probs_clean, None, None
+
+            conv6_pda = self.attention_module(conv6_f, fc8_w, self.gamma)
+            x_pda = self.model.dropout7(conv6_pda)
+            x_pda = self.model.pool(x_pda)
+            logits_pda = F.conv2d(x_pda, fc8_w).view(x_pda.size(0), -1)
+            probs_pda = torch.sigmoid(logits_pda)
+            return logits_clean, probs_clean, logits_pda, probs_pda
+
     def forward_with_pda(
         self,
         images: torch.Tensor,
         enable_pda: bool,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass with conditional Progressive Dropout Attention."""
-        conv6 = self.model.forward_backbone(images)  # (B, 4096, 28, 28)
-
-        with torch.amp.autocast(device_type=conv6.device.type, enabled=False):
-            conv6_f = conv6.float()
-            if enable_pda:
-                conv6_f = self.attention_module(conv6_f, self.model.fc8.weight.float(), self.gamma)
-
-            x = self.model.dropout7(conv6_f)
-            x = self.model.pool(x)
-            logits = F.conv2d(x, self.model.fc8.weight.float()).view(x.size(0), -1)  # (B, 4)
-            probs = torch.sigmoid(logits)
-            return logits, probs
+        logits_clean, probs_clean, logits_pda, probs_pda = self.forward_dual_branches(
+            images, enable_pda=enable_pda
+        )
+        if enable_pda and logits_pda is not None and probs_pda is not None:
+            return logits_pda, probs_pda
+        return logits_clean, probs_clean
 
     def train_epoch(
         self,
@@ -535,25 +568,35 @@ class Stage1Trainer:
             images = images.to(self.device, non_blocking=True)
             targets = targets.to(self.device, non_blocking=True)
 
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
 
-            with torch.amp.autocast(device_type=self.device.type, enabled=self.enable_amp):
-                logits, probs = self.forward_with_pda(images, enable_pda=enable_pda)
-                loss = self.criterion(logits, targets)
+            logits_clean, probs_clean, logits_pda, _ = self.forward_dual_branches(
+                images, enable_pda=enable_pda
+            )
+            with torch.amp.autocast(device_type=self.device.type, enabled=False):
+                if enable_pda and logits_pda is not None:
+                    loss = 0.5 * self.criterion(logits_clean, targets) + 0.5 * self.criterion(
+                        logits_pda, targets
+                    )
+                else:
+                    loss = self.criterion(logits_clean, targets)
 
             if not torch.isfinite(loss):
                 self.optimizer.zero_grad(set_to_none=True)
                 continue
 
             self.scaler.scale(loss).backward()
+            if self.scaler.is_enabled():
+                self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
-            # Batch metrics
+            # Batch metrics (computed on clean branch matching evaluate() calibration)
             total_loss += loss.item() * images.size(0)
             total_samples += images.size(0)
 
-            binary_preds = (probs > 0.5).long().cpu().numpy()
+            binary_preds = (probs_clean > 0.5).long().cpu().numpy()
             binary_gt = targets.long().cpu().numpy()
 
             # Exact match (all 4 classes correct)
@@ -568,8 +611,8 @@ class Stage1Trainer:
         if self.scheduler is not None:
             self.scheduler.step()
 
-        # Update gamma schedule for PDA
-        if enable_pda and self.gamma > self.min_gamma:
+        # Decay gamma from Epoch 0 per Paper Eq. 11 so first PDA epoch activates with gamma < 1.0
+        if self.gamma > self.min_gamma:
             self.gamma = max(self.min_gamma, self.gamma * self.gamma_decay)
 
         # Compute F1 scores
@@ -606,6 +649,7 @@ class Stage1Trainer:
         total_samples = 0
         all_probs: List[np.ndarray] = []
         all_targets: List[np.ndarray] = []
+        all_logits: List[np.ndarray] = []
 
         pm_inter = np.zeros(NUM_FOREGROUND, dtype=np.float64)
         pm_union = np.zeros(NUM_FOREGROUND, dtype=np.float64)
@@ -623,7 +667,8 @@ class Stage1Trainer:
             images = images.to(self.device, non_blocking=True)
             targets = targets.to(self.device, non_blocking=True)
 
-            conv6 = self.model.forward_backbone(images)
+            with torch.amp.autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=self.enable_amp):
+                conv6 = self.model.forward_backbone(images)
             with torch.amp.autocast(device_type=conv6.device.type, enabled=False):
                 conv6_f = conv6.float()
                 fc_w = self.model.fc8.weight.float()
@@ -634,6 +679,7 @@ class Stage1Trainer:
 
                 total_loss += float(loss.item()) * images.size(0)
                 total_samples += images.size(0)
+                all_logits.append(logits.detach().cpu().numpy())
                 all_probs.append(probs.detach().cpu().numpy())
                 all_targets.append(targets.detach().cpu().numpy())
 
@@ -668,15 +714,19 @@ class Stage1Trainer:
         if all_probs:
             y_prob = np.concatenate(all_probs, axis=0)
             y_true = np.concatenate(all_targets, axis=0)
+            y_logits = np.concatenate(all_logits, axis=0)
             ml_metrics = compute_multilabel_validation_metrics(y_true, y_prob)
+            logits_mean = float(np.mean(y_logits))
         else:
             ml_metrics = compute_multilabel_validation_metrics(
                 np.zeros((0, NUM_FOREGROUND), dtype=np.float32),
                 np.zeros((0, NUM_FOREGROUND), dtype=np.float32),
             )
+            logits_mean = 0.0
 
         out: Dict[str, Any] = {
             "val_loss": avg_loss,
+            "val_logits_mean": logits_mean,
             **ml_metrics,
         }
         if has_valid_masks:
@@ -705,22 +755,42 @@ def build_optimizer_and_scheduler(
     weight_decay: float = 1e-4,
     epochs: int = 20,
 ) -> Tuple[torch.optim.Optimizer, Any]:
-    """Build AdamW optimizer with 10x higher learning rate on classification head."""
-    backbone_params = []
-    head_params = []
+    """Build AdamW optimizer with 10x higher learning rate on classification head.
+
+    Applies weight_decay to trainable weights (including fc8.weight) and 0.0 only to
+    biases or 1D parameters. Frozen parameters (requires_grad=False) are excluded.
+    """
+    backbone_decay = []
+    backbone_no_decay = []
+    head_decay = []
+    head_no_decay = []
 
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
+        is_no_decay = name.endswith(".bias") or param.ndim <= 1
         if "fc8" in name:
-            head_params.append(param)
+            if is_no_decay:
+                head_no_decay.append(param)
+            else:
+                head_decay.append(param)
         else:
-            backbone_params.append(param)
+            if is_no_decay:
+                backbone_no_decay.append(param)
+            else:
+                backbone_decay.append(param)
 
-    optimizer = torch.optim.AdamW([
-        {"params": backbone_params, "lr": lr, "weight_decay": weight_decay},
-        {"params": head_params, "lr": 10.0 * lr, "weight_decay": 0.0},
-    ])
+    param_groups: List[Dict[str, Any]] = []
+    if backbone_decay:
+        param_groups.append({"params": backbone_decay, "lr": lr, "weight_decay": weight_decay})
+    if backbone_no_decay:
+        param_groups.append({"params": backbone_no_decay, "lr": lr, "weight_decay": 0.0})
+    if head_decay:
+        param_groups.append({"params": head_decay, "lr": 10.0 * lr, "weight_decay": weight_decay})
+    if head_no_decay:
+        param_groups.append({"params": head_no_decay, "lr": 10.0 * lr, "weight_decay": 0.0})
+
+    optimizer = torch.optim.AdamW(param_groups)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
@@ -746,6 +816,12 @@ def train_stage1_pipeline(
     dry_run: bool = False,
     device_str: Optional[str] = None,
     seed: int = 42,
+    pda_start_epoch: int = 3,
+    initial_gamma: float = 1.0,
+    gamma_decay: float = 0.985,
+    min_gamma: float = 0.65,
+    num_workers: Optional[int] = None,
+    enable_regression_guard: bool = True,
 ) -> Dict[str, Any]:
     """Execute end-to-end Stage 1 classifier training pipeline with Rule 17 validation gate.
 
@@ -764,6 +840,12 @@ def train_stage1_pipeline(
         dry_run: If True, executes 1 batch per epoch on 4 samples for smoke testing.
         device_str: 'cuda', 'cpu', etc.
         seed: Random seed for reproducibility.
+        pda_start_epoch: 0-indexed epoch to enable PDA (default 3 -> Epoch 4, after 3 warmup epochs).
+        initial_gamma: Initial PDA threshold ratio (default 1.0).
+        gamma_decay: Per-epoch multiplicative decay for gamma (default 0.985 per Paper Eq. 11).
+        min_gamma: Minimum floor for gamma (default 0.65).
+        num_workers: Optional DataLoader worker count (default 0 if dry_run else 2).
+        enable_regression_guard: Enable early collapse / regression break guard when not dry_run.
 
     Returns:
         Summary metrics dictionary.
@@ -789,6 +871,9 @@ def train_stage1_pipeline(
     start_epoch = 0
     best_val_score = -1.0
     best_macro_f1 = 0.0
+    epochs_without_improve = 0
+    resumed_gamma = initial_gamma
+    history: List[Dict[str, Any]] = []
     pretrained_info: Dict[str, Any] = {
         "loaded_layers": 0,
         "total_backbone_layers": sum(1 for k in model.state_dict() if not k.startswith("fc8.")),
@@ -808,6 +893,10 @@ def train_stage1_pipeline(
             start_epoch = int(loaded.get("epoch", -1)) + 1
             best_macro_f1 = float(loaded.get("macro_f1", 0.0))
             best_val_score = float(loaded.get("best_val_score", best_macro_f1))
+            epochs_without_improve = int(loaded.get("epochs_without_improve", 0))
+            resumed_gamma = float(loaded.get("pda_gamma", initial_gamma))
+            if isinstance(loaded.get("history"), list):
+                history = list(loaded["history"])
         else:
             state_dict = loaded
         model.load_state_dict(state_dict, strict=False)
@@ -842,6 +931,8 @@ def train_stage1_pipeline(
         loss_key = "soft_margin"
         criterion = nn.MultiLabelSoftMarginLoss()
 
+    # Call model.train() BEFORE building optimizer so frozen BN & not_training params are excluded
+    model.train()
     optimizer, scheduler = build_optimizer_and_scheduler(model, lr=lr, epochs=epochs)
     if loaded_resume_obj is not None:
         if "optimizer" in loaded_resume_obj:
@@ -854,16 +945,18 @@ def train_stage1_pipeline(
     max_val = 4 if dry_run else None
     effective_epochs = 1 if dry_run else epochs
     effective_bs = 2 if dry_run else batch_size
+    effective_workers = (0 if dry_run else 2) if num_workers is None else int(num_workers)
 
     train_loader, val_loader = create_stage1_dataloaders(
         data_dir=data_dir,
         batch_size=effective_bs,
-        num_workers=0 if dry_run else 2,
+        num_workers=effective_workers,
         pin_memory=False if dry_run else True,
         max_train_samples=max_train,
         max_val_samples=max_val,
         input_norm=norm_mode,
         return_val_masks=True,
+        strict_patient_filter=not dry_run,
     )
 
     if not dry_run and (val_loader is None or len(val_loader) == 0):
@@ -879,9 +972,12 @@ def train_stage1_pipeline(
         scheduler=scheduler,
         device=device,
         enable_amp=not dry_run,
+        pda_start_epoch=pda_start_epoch,
+        initial_gamma=resumed_gamma,
+        gamma_decay=gamma_decay,
+        min_gamma=min_gamma,
     )
 
-    history: List[Dict[str, Any]] = []
     best_save_path = checkpoint_path / "stage1_retrained_best.pth"
     latest_save_path = checkpoint_path / "stage1_latest.pth"
     selection_metric = "val_mAP"
@@ -914,6 +1010,9 @@ def train_stage1_pipeline(
         improved = current_val_score >= best_val_score
         if improved:
             best_val_score = max(best_val_score, current_val_score)
+            epochs_without_improve = 0
+        else:
+            epochs_without_improve += 1
 
         compact_payload = {
             "epoch": epoch,
@@ -924,6 +1023,7 @@ def train_stage1_pipeline(
             "val_auroc": float(val_metrics.get("val_auroc", 0.0)),
             "val_best_f1": float(val_metrics.get("val_best_f1", 0.0)),
             "val_gated_pm_miou": float(val_metrics.get("val_gated_pm_miou", 0.0)),
+            "pda_gamma": float(trainer.gamma),
             "input_norm": norm_mode,
             "loss_type": loss_key,
             "pretrained_source": pretrained_info["source"],
@@ -935,6 +1035,8 @@ def train_stage1_pipeline(
         if not dry_run:
             latest_payload = {
                 **compact_payload,
+                "epochs_without_improve": epochs_without_improve,
+                "history": history,
                 "optimizer": optimizer.state_dict(),
                 "scheduler": scheduler.state_dict(),
             }
@@ -942,6 +1044,24 @@ def train_stage1_pipeline(
 
         if improved or dry_run or not best_save_path.is_file():
             torch.save(compact_payload, best_save_path)
+
+        if enable_regression_guard and not dry_run:
+            val_best_f1 = float(val_metrics.get("val_best_f1", 1.0))
+            val_loss = float(val_metrics.get("val_loss", 0.0))
+            if epoch >= trainer.pda_start_epoch and (val_best_f1 < 0.55 or val_loss > 1.2):
+                print(
+                    f"[EARLY REGRESSION ALARM] Epoch {epoch + 1}: Calibration/collapse detected "
+                    f"(val_best_f1={val_best_f1:.4f}, val_loss={val_loss:.4f}). Halting.",
+                    flush=True,
+                )
+                break
+            if epochs_without_improve >= 5:
+                print(
+                    f"[EARLY REGRESSION ALARM] No validation improvement for {epochs_without_improve} "
+                    f"consecutive epochs (best {selection_metric}={best_val_score:.4f}). Halting.",
+                    flush=True,
+                )
+                break
 
     return {
         "best_macro_f1": best_macro_f1,

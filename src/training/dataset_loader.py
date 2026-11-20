@@ -24,6 +24,7 @@ import os
 import random
 import re
 import warnings
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
@@ -207,6 +208,37 @@ def derive_multilabel_from_mask(mask_np: np.ndarray) -> np.ndarray:
     )
 
 
+def sample_patient_stratified(
+    files: List[Path],
+    max_samples: Optional[int],
+    seed: int = 42,
+) -> List[Path]:
+    """Deterministically sample up to max_samples patches balanced across patient IDs."""
+    if max_samples is None or max_samples <= 0 or len(files) <= max_samples:
+        return list(files)
+    rng = random.Random(seed)
+    by_pid: Dict[str, List[Path]] = defaultdict(list)
+    for f in files:
+        by_pid[extract_patient_id(f.name)].append(f)
+    pids = sorted(by_pid.keys())
+    for pid in pids:
+        rng.shuffle(by_pid[pid])
+    selected: List[Path] = []
+    idx = 0
+    while len(selected) < max_samples:
+        progressed = False
+        for pid in pids:
+            if idx < len(by_pid[pid]):
+                selected.append(by_pid[pid][idx])
+                progressed = True
+                if len(selected) >= max_samples:
+                    break
+        if not progressed:
+            break
+        idx += 1
+    return selected
+
+
 class BCSSStage1Dataset(Dataset):
     """PyTorch Dataset for Stage-1 ResNet38d classifier training and validation on BCSS-WSSS.
 
@@ -227,6 +259,7 @@ class BCSSStage1Dataset(Dataset):
         mask_dir: Optional[Union[str, Path]] = None,
         return_mask: bool = False,
         input_norm: str = "imagenet",
+        strict_patient_filter: bool = False,
     ) -> None:
         super().__init__()
         self.root_dir = Path(root_dir)
@@ -258,6 +291,12 @@ class BCSSStage1Dataset(Dataset):
                 if pid not in allowed_set:
                     continue
             filtered_files.append(f)
+
+        if strict_patient_filter and allowed_set is not None and len(filtered_files) == 0:
+            raise ValueError(
+                f"[STAGE1 ERROR] Patient ID filter matched 0 patches in {self.root_dir} "
+                f"(total scanned={len(all_files)})."
+            )
 
         if max_samples is not None and max_samples > 0:
             filtered_files = filtered_files[:max_samples]
@@ -308,6 +347,152 @@ class BCSSStage1Dataset(Dataset):
             mask_tensor = torch.from_numpy(mask_np).long()
             return image_tensor, label_tensor, mask_tensor, path.stem
         return image_tensor, label_tensor, path.stem
+
+
+class BCSSStage1TrainDataset(Dataset):
+    """Picklable Stage-1 training dataset returning (filename, image, label).
+
+    Designed for safe multiprocessing ('spawn' + persistent_workers) in both scripts
+    and Colab notebooks with strict patient-level filtering.
+    """
+
+    def __init__(
+        self,
+        img_dir: Union[str, Path],
+        transform: Optional[Callable] = None,
+        limit: Optional[int] = None,
+        patient_ids: Optional[Iterable[str]] = None,
+        input_norm: str = "zero_one",
+        strict_patient_filter: bool = True,
+        seed: int = 42,
+    ) -> None:
+        super().__init__()
+        self.img_dir = Path(img_dir)
+        self.input_norm = str(input_norm or "zero_one").strip().lower()
+        if self.input_norm not in ("imagenet", "zero_one"):
+            raise ValueError(
+                f"Unsupported input_norm={input_norm!r}. Expected 'imagenet' or 'zero_one'."
+            )
+
+        if transform is not None:
+            self.transform = transform
+        else:
+            ops: List[Any] = [
+                transforms.Resize((224, 224)),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomVerticalFlip(p=0.5),
+                transforms.ToTensor(),
+            ]
+            if self.input_norm == "imagenet":
+                ops.append(transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
+            self.transform = transforms.Compose(ops)
+
+        files = sorted(self.img_dir.glob("*.png")) if self.img_dir.is_dir() else []
+        if len(files) == 0 and (self.img_dir / "img").is_dir():
+            files = sorted((self.img_dir / "img").glob("*.png"))
+        if len(files) == 0 and self.img_dir.is_dir():
+            files = sorted(self.img_dir.rglob("*.png"))
+        if len(files) == 0:
+            raise FileNotFoundError(
+                f"[STAGE1 ERROR] No patches found in {self.img_dir}."
+            )
+
+        if patient_ids is not None:
+            allowed_pids = {str(p).upper() for p in patient_ids}
+            filtered = [f for f in files if extract_patient_id(f.name) in allowed_pids]
+            if strict_patient_filter and len(filtered) == 0:
+                raise ValueError(
+                    f"[STAGE1 ERROR] Patient ID filter matched 0 train patches in {self.img_dir} "
+                    f"(total={len(files)})."
+                )
+            files = filtered
+
+        self.files = sample_patient_stratified(files, limit, seed=seed) if (limit is not None and limit > 0) else files
+
+    def __len__(self) -> int:
+        return len(self.files)
+
+    def __getitem__(self, idx: int) -> Tuple[str, torch.Tensor, torch.Tensor]:
+        filepath = self.files[idx]
+        image = Image.open(filepath).convert("RGB")
+        if self.transform is not None:
+            image = self.transform(image)
+        if _has_filename_label_brackets(filepath.name):
+            _, _, _, label_np = parse_patch_filename(filepath.name)
+            label = torch.from_numpy(label_np).float()
+        else:
+            label = torch.zeros(NUM_FOREGROUND, dtype=torch.float32)
+        return filepath.name, image, label
+
+
+class BCSSStage1ValDataset(Dataset):
+    """Picklable Stage-1 validation dataset returning (filename, image, label, gt_mask)."""
+
+    def __init__(
+        self,
+        img_dir: Union[str, Path],
+        mask_dir: Optional[Union[str, Path]] = None,
+        transform: Optional[Callable] = None,
+        limit: Optional[int] = None,
+        patient_ids: Optional[Iterable[str]] = None,
+        input_norm: str = "zero_one",
+        strict_patient_filter: bool = True,
+        seed: int = 42,
+    ) -> None:
+        super().__init__()
+        self.img_dir = Path(img_dir)
+        self.mask_dir = Path(mask_dir) if mask_dir is not None else None
+        self.input_norm = str(input_norm or "zero_one").strip().lower()
+        if self.input_norm not in ("imagenet", "zero_one"):
+            raise ValueError(
+                f"Unsupported input_norm={input_norm!r}. Expected 'imagenet' or 'zero_one'."
+            )
+
+        if transform is not None:
+            self.transform = transform
+        else:
+            ops: List[Any] = [transforms.Resize((224, 224)), transforms.ToTensor()]
+            if self.input_norm == "imagenet":
+                ops.append(transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
+            self.transform = transforms.Compose(ops)
+
+        files = sorted(self.img_dir.glob("*.png")) if self.img_dir.is_dir() else []
+        if len(files) == 0 and self.img_dir.is_dir():
+            files = sorted(self.img_dir.rglob("*.png"))
+
+        if patient_ids is not None:
+            allowed_pids = {str(p).upper() for p in patient_ids}
+            filtered = [f for f in files if extract_patient_id(f.name) in allowed_pids]
+            if strict_patient_filter and len(filtered) == 0:
+                raise ValueError(
+                    f"[STAGE1 ERROR] Patient ID filter matched 0 val patches in {self.img_dir} "
+                    f"(total={len(files)})."
+                )
+            files = filtered
+
+        self.files = sample_patient_stratified(files, limit, seed=seed) if (limit is not None and limit > 0) else files
+
+    def __len__(self) -> int:
+        return len(self.files)
+
+    def __getitem__(self, idx: int) -> Tuple[str, torch.Tensor, torch.Tensor, torch.Tensor]:
+        filepath = self.files[idx]
+        image = Image.open(filepath).convert("RGB")
+        if self.transform is not None:
+            image = self.transform(image)
+        mask_path = (
+            (self.mask_dir / filepath.name)
+            if (self.mask_dir is not None and self.mask_dir.is_dir())
+            else None
+        )
+        if mask_path is not None and mask_path.is_file():
+            gt_arr = _load_mode_p_mask_array(mask_path, target_size=(224, 224))
+            label_np = derive_multilabel_from_mask(gt_arr)
+            label = torch.from_numpy(label_np).float()
+        else:
+            gt_arr = np.full((224, 224), 255, dtype=np.int64)
+            label = torch.zeros(NUM_FOREGROUND, dtype=torch.float32)
+        return filepath.name, image, label, torch.from_numpy(gt_arr).long()
 
 
 class BCSSStage2MultiMaskDataset(Dataset):
@@ -551,6 +736,19 @@ class BCSSEvalDataset(Dataset):
         return img_tensor, mask_tensor, cls_label, img_path.stem
 
 
+def _worker_dataloader_kwargs(num_workers: int, pin_memory: bool) -> Dict[str, Any]:
+    """Build multiprocessing-safe DataLoader kwargs (spawn + persistent_workers on Python 3.13)."""
+    kwargs: Dict[str, Any] = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory and torch.cuda.is_available(),
+    }
+    if num_workers > 0:
+        kwargs["persistent_workers"] = True
+        kwargs["prefetch_factor"] = 2
+        kwargs["multiprocessing_context"] = "spawn"
+    return kwargs
+
+
 def create_stage1_dataloaders(
     data_dir: Union[str, Path],
     batch_size: int = 32,
@@ -561,6 +759,7 @@ def create_stage1_dataloaders(
     max_val_samples: Optional[int] = None,
     input_norm: str = "imagenet",
     return_val_masks: bool = False,
+    strict_patient_filter: bool = False,
 ) -> Tuple[DataLoader, Optional[DataLoader]]:
     """Build high-throughput DataLoaders for Stage 1 multi-label training.
 
@@ -605,15 +804,16 @@ def create_stage1_dataloaders(
         is_train=True,
         max_samples=max_train_samples,
         input_norm=input_norm,
+        strict_patient_filter=strict_patient_filter,
     )
 
+    train_workers = num_workers if len(train_dataset) > 0 else 0
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        pin_memory=pin_memory and torch.cuda.is_available(),
         drop_last=True if len(train_dataset) > batch_size else False,
+        **_worker_dataloader_kwargs(train_workers, pin_memory),
     )
 
     val_loader: Optional[DataLoader] = None
@@ -626,14 +826,15 @@ def create_stage1_dataloaders(
             mask_dir=val_mask_dir,
             return_mask=return_val_masks,
             input_norm=input_norm,
+            strict_patient_filter=strict_patient_filter,
         )
+        val_workers = num_workers if len(val_dataset) > 0 else 0
         val_loader = DataLoader(
             val_dataset,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=num_workers,
-            pin_memory=pin_memory and torch.cuda.is_available(),
             drop_last=False,
+            **_worker_dataloader_kwargs(val_workers, pin_memory),
         )
 
     return train_loader, val_loader
@@ -660,13 +861,13 @@ def create_stage2_dataloader(
         max_samples=max_samples,
     )
 
+    eff_workers = num_workers if len(dataset) > 0 else 0
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        pin_memory=pin_memory and torch.cuda.is_available(),
         drop_last=True if len(dataset) > batch_size else False,
+        **_worker_dataloader_kwargs(eff_workers, pin_memory),
     )
 
 
@@ -690,11 +891,11 @@ def create_eval_dataloader(
         max_samples=max_samples,
     )
 
+    eff_workers = num_workers if len(dataset) > 0 else 0
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory and torch.cuda.is_available(),
         drop_last=False,
+        **_worker_dataloader_kwargs(eff_workers, pin_memory),
     )
