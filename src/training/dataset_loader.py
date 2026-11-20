@@ -21,6 +21,7 @@ Key Architectural Guarantees:
 
 import json
 import os
+import random
 import re
 import warnings
 from pathlib import Path
@@ -28,7 +29,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Un
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageFilter
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
@@ -173,13 +174,47 @@ def find_image_files(root_dir: Union[str, Path], recursive: bool = True) -> List
     return files
 
 
+def _has_filename_label_brackets(filepath_or_name: Union[str, Path]) -> bool:
+    """Return True if filename contains an explicit weak-label bracket vector like [1 0 0 0]."""
+    basename = os.path.basename(str(filepath_or_name))
+    return re.search(r"\[([0-9\s,]+)\]", basename) is not None
+
+
+def _load_mode_p_mask_array(
+    mask_path: Path,
+    target_size: Tuple[int, int] = (224, 224),
+) -> np.ndarray:
+    """Safely load a paletted ('P') or grayscale mask preserving discrete class IDs and ignore=255."""
+    mask_img = Image.open(mask_path)
+    if mask_img.mode != "P":
+        mask_img = mask_img.convert("L")
+    if mask_img.size != target_size:
+        mask_img = mask_img.resize(target_size, Image.NEAREST)
+    mask_np = np.array(mask_img, dtype=np.int64)
+    if mask_np.ndim == 3:
+        mask_np = mask_np[:, :, 0]
+    ignore_mask = mask_np == 255
+    mask_np = np.clip(mask_np, 0, 4)
+    mask_np[ignore_mask] = 255
+    return mask_np
+
+
+def derive_multilabel_from_mask(mask_np: np.ndarray) -> np.ndarray:
+    """Derive 4-class binary presence vector [TUM, STR, LYM, NEC] from a ground-truth mask."""
+    return np.array(
+        [1.0 if np.any(mask_np == c) else 0.0 for c in range(NUM_FOREGROUND)],
+        dtype=np.float32,
+    )
+
+
 class BCSSStage1Dataset(Dataset):
-    """PyTorch Dataset for Stage-1 ResNet38d classifier training on BCSS-WSSS.
+    """PyTorch Dataset for Stage-1 ResNet38d classifier training and validation on BCSS-WSSS.
 
     Returns:
-        image: torch.Tensor of shape (3, 224, 224), float32 normalized
-        label: torch.Tensor of shape (4,), float32 multi-hot [TUM, STR, LYM, NEC]
-        name: patch filename string
+        When return_mask=False (default):
+            (image, label, name)
+        When return_mask=True:
+            (image, label, mask, name)
     """
 
     def __init__(
@@ -189,10 +224,26 @@ class BCSSStage1Dataset(Dataset):
         transform: Optional[Callable] = None,
         is_train: bool = True,
         max_samples: Optional[int] = None,
+        mask_dir: Optional[Union[str, Path]] = None,
+        return_mask: bool = False,
+        input_norm: str = "imagenet",
     ) -> None:
         super().__init__()
         self.root_dir = Path(root_dir)
         self.is_train = is_train
+        self.return_mask = return_mask
+        self.input_norm = str(input_norm or "imagenet").strip().lower()
+        if self.input_norm not in ("imagenet", "zero_one"):
+            raise ValueError(
+                f"Unsupported input_norm={input_norm!r}. Expected 'imagenet' or 'zero_one'."
+            )
+
+        if mask_dir is not None:
+            self.mask_dir: Optional[Path] = Path(mask_dir)
+        elif self.root_dir.name == "img" and (self.root_dir.parent / "mask").is_dir():
+            self.mask_dir = self.root_dir.parent / "mask"
+        else:
+            self.mask_dir = None
 
         # Scan patches
         all_files = find_image_files(self.root_dir)
@@ -216,29 +267,46 @@ class BCSSStage1Dataset(Dataset):
         if transform is not None:
             self.transform = transform
         else:
+            ops: List[Any] = [transforms.Resize((224, 224))]
             if is_train:
-                self.transform = transforms.Compose([
+                ops.extend([
                     transforms.RandomHorizontalFlip(p=0.5),
                     transforms.RandomVerticalFlip(p=0.5),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
                 ])
-            else:
-                self.transform = transforms.Compose([
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-                ])
+            ops.append(transforms.ToTensor())
+            if self.input_norm == "imagenet":
+                ops.append(transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
+            self.transform = transforms.Compose(ops)
 
     def __len__(self) -> int:
         return len(self.files)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, str]:
+    def __getitem__(self, idx: int) -> Tuple[Any, ...]:
         path = self.files[idx]
         image = Image.open(path).convert("RGB")
-        _, _, _, label_np = parse_patch_filename(path.name)
-        label_tensor = torch.from_numpy(label_np).float()
+        has_brackets = _has_filename_label_brackets(path.name)
 
+        mask_np: Optional[np.ndarray] = None
+        if self.mask_dir is not None:
+            mask_path = self.mask_dir / path.name
+            if mask_path.is_file() and (self.return_mask or not has_brackets):
+                mask_np = _load_mode_p_mask_array(mask_path, target_size=(224, 224))
+
+        if has_brackets:
+            _, _, _, label_np = parse_patch_filename(path.name)
+        elif mask_np is not None:
+            label_np = derive_multilabel_from_mask(mask_np)
+        else:
+            _, _, _, label_np = parse_patch_filename(path.name)
+
+        label_tensor = torch.from_numpy(label_np).float()
         image_tensor = self.transform(image)
+
+        if self.return_mask:
+            if mask_np is None:
+                mask_np = np.full((224, 224), 255, dtype=np.int64)
+            mask_tensor = torch.from_numpy(mask_np).long()
+            return image_tensor, label_tensor, mask_tensor, path.stem
         return image_tensor, label_tensor, path.stem
 
 
@@ -317,14 +385,15 @@ class BCSSStage2MultiMaskDataset(Dataset):
     def __len__(self) -> int:
         return len(self.files)
 
-    def _load_mask(self, mask_dir: Path, filename: str) -> np.ndarray:
+    def _load_mask(self, mask_dir: Path, filename: str, target_size: Tuple[int, int] = (224, 224)) -> np.ndarray:
         mask_path = mask_dir / filename
         if mask_path.exists():
             mask_img = Image.open(mask_path)
-            if mask_img.mode == "P":
-                arr = np.array(mask_img, dtype=np.int64)
-            else:
-                arr = np.array(mask_img.convert("L"), dtype=np.int64)
+            if mask_img.mode != "P":
+                mask_img = mask_img.convert("L")
+            if mask_img.size != target_size:
+                mask_img = mask_img.resize(target_size, Image.NEAREST)
+            arr = np.array(mask_img, dtype=np.int64)
             if arr.ndim == 3:
                 arr = arr[:, :, 0]
             ignore_mask = arr == 255
@@ -333,19 +402,21 @@ class BCSSStage2MultiMaskDataset(Dataset):
             return arr
         elif self.fallback_mask:
             # Fallback to ignore_index (255) so missing pseudo-masks never train as Tumor (0)
-            return np.full((224, 224), 255, dtype=np.int64)
+            return np.full((target_size[1], target_size[0]), 255, dtype=np.int64)
         else:
             raise FileNotFoundError(f"Pseudo-mask not found at: {mask_path}")
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         img_path = self.files[idx]
         image = Image.open(img_path).convert("RGB")
+        if image.size != (224, 224):
+            image = image.resize((224, 224), Image.BILINEAR)
         _, _, _, label_np = parse_patch_filename(img_path.name)
         cls_label = torch.from_numpy(label_np).float()
 
-        mask_bn7 = self._load_mask(self.pm_bn7_dir, img_path.name)
-        mask_b5_2 = self._load_mask(self.pm_b5_2_dir, img_path.name)
-        mask_b4_5 = self._load_mask(self.pm_b4_5_dir, img_path.name)
+        mask_bn7 = self._load_mask(self.pm_bn7_dir, img_path.name, target_size=(224, 224))
+        mask_b5_2 = self._load_mask(self.pm_b5_2_dir, img_path.name, target_size=(224, 224))
+        mask_b4_5 = self._load_mask(self.pm_b4_5_dir, img_path.name, target_size=(224, 224))
 
         # Synchronized spatial augmentations for training (full 8-element D4 dihedral group)
         if self.is_train:
@@ -380,6 +451,13 @@ class BCSSStage2MultiMaskDataset(Dataset):
                 mask_bn7 = np.flipud(mask_bn7).copy()
                 mask_b5_2 = np.flipud(mask_b5_2).copy()
                 mask_b4_5 = np.flipud(mask_b4_5).copy()
+
+            # Random Gaussian blur on RGB image only (matching repos/WSSS-Tissue/tool/custom_transforms.py)
+            if random.random() < 0.5:
+                image = image.filter(ImageFilter.GaussianBlur(radius=random.random()))
+
+        if image.size != (224, 224):
+            image = image.resize((224, 224), Image.BILINEAR)
 
         img_tensor = transforms.functional.to_tensor(image)
         img_tensor = self.normalize(img_tensor)
@@ -450,24 +528,23 @@ class BCSSEvalDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, str]:
         img_path = self.files[idx]
         image = Image.open(img_path).convert("RGB")
-        _, _, _, label_np = parse_patch_filename(img_path.name)
-        cls_label = torch.from_numpy(label_np).float()
+        if image.size != (224, 224):
+            image = image.resize((224, 224), Image.BILINEAR)
 
         mask_path = self.mask_dir / img_path.name
         if mask_path.exists():
-            mask_img = Image.open(mask_path)
-            if mask_img.mode == "P":
-                mask_np = np.array(mask_img, dtype=np.int64)
-            else:
-                mask_np = np.array(mask_img.convert("L"), dtype=np.int64)
-            if mask_np.ndim == 3:
-                mask_np = mask_np[:, :, 0]
-            ignore_mask = mask_np == 255
-            mask_np = np.clip(mask_np, 0, 4)
-            mask_np[ignore_mask] = 255
+            mask_np = _load_mode_p_mask_array(mask_path, target_size=(224, 224))
         else:
             # Fallback ignore_index (255) if ground-truth mask is absent
             mask_np = np.full((224, 224), 255, dtype=np.int64)
+
+        if _has_filename_label_brackets(img_path.name):
+            _, _, _, label_np = parse_patch_filename(img_path.name)
+        elif mask_path.exists():
+            label_np = derive_multilabel_from_mask(mask_np)
+        else:
+            _, _, _, label_np = parse_patch_filename(img_path.name)
+        cls_label = torch.from_numpy(label_np).float()
 
         img_tensor = self.transform(image)
         mask_tensor = torch.from_numpy(mask_np).long()
@@ -482,6 +559,8 @@ def create_stage1_dataloaders(
     splits_config: Optional[Union[str, Path]] = None,
     max_train_samples: Optional[int] = None,
     max_val_samples: Optional[int] = None,
+    input_norm: str = "imagenet",
+    return_val_masks: bool = False,
 ) -> Tuple[DataLoader, Optional[DataLoader]]:
     """Build high-throughput DataLoaders for Stage 1 multi-label training.
 
@@ -500,14 +579,16 @@ def create_stage1_dataloaders(
         train_dir = data_path
 
     val_dir = None
-    for cand in [
-        data_path / "val" / "img",
-        data_path / "valid" / "img",
-        data_path / "BCSS-WSSS" / "val" / "img",
-        data_path / "BCSS-WSSS" / "valid" / "img",
+    val_mask_dir = None
+    for cand_v, cand_m in [
+        (data_path / "val" / "img", data_path / "val" / "mask"),
+        (data_path / "valid" / "img", data_path / "valid" / "mask"),
+        (data_path / "BCSS-WSSS" / "val" / "img", data_path / "BCSS-WSSS" / "val" / "mask"),
+        (data_path / "BCSS-WSSS" / "valid" / "img", data_path / "BCSS-WSSS" / "valid" / "mask"),
     ]:
-        if cand.exists():
-            val_dir = cand
+        if cand_v.exists():
+            val_dir = cand_v
+            val_mask_dir = cand_m if cand_m.exists() else None
             break
 
     splits = load_bcss_patient_splits(splits_config)
@@ -523,6 +604,7 @@ def create_stage1_dataloaders(
         patient_ids=train_patients if train_patients else None,
         is_train=True,
         max_samples=max_train_samples,
+        input_norm=input_norm,
     )
 
     train_loader = DataLoader(
@@ -541,6 +623,9 @@ def create_stage1_dataloaders(
             patient_ids=val_patients if val_patients else None,
             is_train=False,
             max_samples=max_val_samples,
+            mask_dir=val_mask_dir,
+            return_mask=return_val_masks,
+            input_norm=input_norm,
         )
         val_loader = DataLoader(
             val_dataset,

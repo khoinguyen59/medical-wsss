@@ -1,22 +1,24 @@
 """
 Stage-2 DeepLabV3+ Segmentation Training Engine for Histopathology WSSS.
 
-Trains the 59M-parameter DeepLabV3+ (ResNet-101 backbone + ASPP) from scratch on generated
+Trains the 59M-parameter DeepLabV3+ (ImageNet-pretrained ResNet-101 backbone + ASPP) on generated
 multi-layer pseudo-masks with:
 1. Multi-Layer Pseudo-Supervision (MLPS) Loss (Han et al., MedIA 2022):
-   L_total = L_mlps + 0.50 * L_unc
-   with canonical layer weights: bn7=1.0, b5_2=0.5, b4_5=0.25.
+   L_total = L_mlps + 0.20 * L_unc (+ optional uabl_weight * L_uabl)
+   with paper-parity layer weights: bn7=0.6, b5_2=0.2, b4_5=0.2.
 2. Boundary Uncertainty Regularization Loss: down-weights ambiguous transition pixels.
 3. Classification Gate Mechanism (CGM) during validation and evaluation.
 4. Synchronized patient-level separation and zero patient leakage (Invariant 08).
 5. Poly/Cosine learning rate scheduling with layer-wise multiplier (10x on decoder).
-6. Checkpoint saving to checkpoints/stage2_retrained_best.pth.
+6. Compact inference-only checkpoint saving to checkpoints/stage2_retrained_best.pth
+   (with optimizer/scheduler state persisted in checkpoints/stage2_latest.pth for resume).
 7. Pure ASCII hyphen '-' (0x2D) enforced throughout (Invariant 12).
 """
 
 import argparse
 import random
 import sys
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -104,8 +106,122 @@ def prepare_stage1_input(
     return images
 
 
-def load_imagenet_pretrained_resnet101(model: DeepLabV3Plus) -> None:
-    """Loads torchvision ImageNet pretrained weights into DeepLabV3Plus ResNet101 backbone."""
+def load_stage1_checkpoint_into_model(
+    model: WSSSTissueStage1NetCAM,
+    checkpoint_path: Union[str, Path],
+    stage1_norm_mode: str = "auto",
+    min_matched_layers: int = 100,
+    allow_random_init: bool = False,
+) -> Tuple[str, int]:
+    """Loads Stage-1 ResNet-38d checkpoint with prefix stripping and >=100-layer verification.
+
+    Strips leading 'module.' / 'model.' prefixes, checks tensor shape compatibility, and raises
+    FileNotFoundError / RuntimeError on missing, corrupt, or under-loaded checkpoints unless
+    allow_random_init=True is explicitly requested.
+    """
+    ckpt_p = Path(checkpoint_path)
+    if not ckpt_p.is_file():
+        msg = f"[STAGE 1 ERROR] Stage-1 checkpoint not found at: {ckpt_p}"
+        if allow_random_init:
+            warnings.warn(
+                f"{msg}; continuing with random Stage-1 weights ONLY because allow_random_init=True.",
+                UserWarning,
+                stacklevel=2,
+            )
+            fallback_norm = infer_stage1_norm_mode(
+                None, checkpoint_path=ckpt_p, requested_mode=stage1_norm_mode
+            )
+            return fallback_norm, 0
+        raise FileNotFoundError(msg)
+
+    try:
+        try:
+            state = torch.load(ckpt_p, map_location="cpu", weights_only=True)
+        except Exception:
+            state = torch.load(ckpt_p, map_location="cpu", weights_only=False)  # nosec B614
+    except Exception as exc:
+        msg = f"[STAGE 1 ERROR] Failed to load corrupt Stage-1 checkpoint {ckpt_p}: {exc}"
+        if allow_random_init:
+            warnings.warn(
+                f"{msg}; continuing with random Stage-1 weights ONLY because allow_random_init=True.",
+                UserWarning,
+                stacklevel=2,
+            )
+            fallback_norm = infer_stage1_norm_mode(
+                None, checkpoint_path=ckpt_p, requested_mode=stage1_norm_mode
+            )
+            return fallback_norm, 0
+        raise RuntimeError(msg) from exc
+
+    resolved_norm = infer_stage1_norm_mode(
+        state,
+        checkpoint_path=ckpt_p,
+        requested_mode=stage1_norm_mode,
+    )
+    if (
+        str(stage1_norm_mode or "auto").strip().lower() == "auto"
+        and ckpt_p.name == "stage1_checkpoint_trained_on_bcss.pth"
+        and not (isinstance(state, dict) and "input_norm" in state)
+    ):
+        resolved_norm = "zero_one"
+
+    raw_sd = state.get("state_dict", state.get("model", state)) if isinstance(state, dict) else state
+    if not isinstance(raw_sd, dict):
+        msg = (
+            f"[STAGE 1 ERROR] Invalid Stage-1 checkpoint payload in {ckpt_p}: "
+            f"expected state_dict mapping, got {type(raw_sd).__name__}."
+        )
+        if allow_random_init:
+            warnings.warn(
+                f"{msg} Continuing with random Stage-1 weights ONLY because allow_random_init=True.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return resolved_norm, 0
+        raise RuntimeError(msg)
+
+    cleaned_sd: Dict[str, Any] = {}
+    for k, v in raw_sd.items():
+        clean_k = str(k)
+        while clean_k.startswith("module.") or clean_k.startswith("model."):
+            if clean_k.startswith("module."):
+                clean_k = clean_k[7:]
+            elif clean_k.startswith("model."):
+                clean_k = clean_k[6:]
+        cleaned_sd[clean_k] = v
+
+    model_dict = model.state_dict()
+    matched = {
+        k: v
+        for k, v in cleaned_sd.items()
+        if k in model_dict and isinstance(v, torch.Tensor) and v.shape == model_dict[k].shape
+    }
+    matched_count = len(matched)
+    if matched_count < min_matched_layers:
+        msg = (
+            f"[STAGE 1 ERROR] Loaded only {matched_count}/{len(model_dict)} matched ResNet-38d layers "
+            f"from {ckpt_p} (expected >= {min_matched_layers}). Refusing under-loaded Stage-1 weights."
+        )
+        if allow_random_init:
+            warnings.warn(msg, UserWarning, stacklevel=2)
+        else:
+            raise RuntimeError(msg)
+
+    model.load_state_dict(matched, strict=False)
+    return resolved_norm, matched_count
+
+
+def load_imagenet_pretrained_resnet101(
+    model: DeepLabV3Plus,
+    allow_random_init_fallback: bool = False,
+    min_loaded_layers: int = 100,
+) -> int:
+    """Loads torchvision ImageNet pretrained weights into DeepLabV3Plus ResNet101 backbone.
+
+    Raises RuntimeError on failure or under-loading unless allow_random_init_fallback=True
+    (prevents silent training from random ResNet-101 weights per Rule 17).
+    """
+    model_dict = model.backbone.state_dict()
     try:
         import torchvision.models as tv_models
         try:
@@ -114,16 +230,40 @@ def load_imagenet_pretrained_resnet101(model: DeepLabV3Plus) -> None:
         except Exception:
             tv_model = tv_models.resnet101(pretrained=True)
         pretrained_dict = tv_model.state_dict()
-        model_dict = model.backbone.state_dict()
         filtered = {
             k: v for k, v in pretrained_dict.items()
             if k in model_dict and v.shape == model_dict[k].shape
         }
+        loaded_count = len(filtered)
+        if loaded_count < min_loaded_layers:
+            msg = (
+                f"[STAGE 2 ERROR] Loaded only {loaded_count}/{len(model_dict)} ImageNet ResNet-101 "
+                f"layers (expected >= {min_loaded_layers}). Refusing silent random-init fallback (Rule 17)."
+            )
+            if allow_random_init_fallback:
+                warnings.warn(msg, UserWarning, stacklevel=2)
+                return loaded_count
+            raise RuntimeError(msg)
         model_dict.update(filtered)
         model.backbone.load_state_dict(model_dict)
-        print(f"[STAGE 2] Loaded {len(filtered)} layers from ImageNet ResNet-101 into backbone.")
+        print(f"[STAGE 2] Loaded {loaded_count}/{len(model_dict)} layers from ImageNet ResNet-101 into backbone.")
+        return loaded_count
+    except RuntimeError:
+        raise
     except Exception as e:
-        print(f"[STAGE 2] ImageNet weights not loaded ({e}); continuing with initialized backbone.")
+        msg = (
+            f"[STAGE 2 ERROR] Failed to load ImageNet ResNet-101 pretrained weights ({e}). "
+            "Pass allow_random_init_fallback=True only for offline/unit-test runs."
+        )
+        if allow_random_init_fallback:
+            warnings.warn(
+                f"[STAGE 2 WARN] ImageNet weights not loaded ({e}); continuing with initialized "
+                "backbone ONLY because allow_random_init_fallback=True.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return 0
+        raise RuntimeError(msg) from e
 
 
 class Stage2Trainer:
@@ -137,9 +277,10 @@ class Stage2Trainer:
         stage1_model: Optional[WSSSTissueStage1NetCAM] = None,
         device: Optional[torch.device] = None,
         enable_amp: bool = True,
-        unc_weight: float = 0.50,
+        unc_weight: float = 0.20,
         uabl_weight: float = 0.0,
         stage1_norm_mode: str = "zero_one",
+        mlps_weights: Optional[Dict[str, float]] = None,
     ) -> None:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
@@ -152,7 +293,7 @@ class Stage2Trainer:
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.enable_amp)
 
         self.mlps_loss = MultiLayerPseudoSupervisionLoss(
-            weights={"bn7": 1.0, "b5_2": 0.5, "b4_5": 0.25},
+            weights=mlps_weights or {"bn7": 0.6, "b5_2": 0.2, "b4_5": 0.2},
             ignore_index=255,
         )
         self.unc_loss = UncertaintyRegularizationLoss(entropy_threshold=0.65, ignore_index=255)
@@ -284,11 +425,14 @@ class Stage2Trainer:
                 pred_logits = raw_logits
 
             preds = torch.argmax(pred_logits, dim=1).cpu().numpy()  # (B, H, W)
+            # Exclude outside-ROI background (class 4) per repos/WSSS-Tissue/3_train_stage2.py
+            preds_roi = preds.copy()
+            preds_roi[targets_np == 4] = 4
 
-            # Accumulate 5x5 confusion matrix
+            # Accumulate 5x5 confusion matrix (with outside-ROI class 4 excluded from foreground FP)
             mask = (targets_np >= 0) & (targets_np < NUM_CLASSES)
             cm_batch = np.bincount(
-                NUM_CLASSES * targets_np[mask] + preds[mask],
+                NUM_CLASSES * targets_np[mask] + preds_roi[mask],
                 minlength=NUM_CLASSES * NUM_CLASSES,
             ).reshape(NUM_CLASSES, NUM_CLASSES)
             confusion_matrix += cm_batch
@@ -306,12 +450,19 @@ class Stage2Trainer:
             ious.append(float(iou))
             dices.append(float(dice))
 
-        miou = float(np.mean(ious))
-        mdice = float(np.mean(dices))
+        # Primary 4-class foreground mIoU and Macro-Dice (excluding class 4 background)
+        fg_ious = [ious[c] for c in range(NUM_FOREGROUND) if (confusion_matrix[c, :].sum() + confusion_matrix[:, c].sum()) > 0]
+        fg_dices = [dices[c] for c in range(NUM_FOREGROUND) if (confusion_matrix[c, :].sum() + confusion_matrix[:, c].sum()) > 0]
+        miou_4cls = float(np.mean(fg_ious)) if fg_ious else 0.0
+        mdice_4cls = float(np.mean(fg_dices)) if fg_dices else 0.0
+        miou_5cls = float(np.mean(ious))
 
         return {
-            "mIoU": miou,
-            "mDice": mdice,
+            "mIoU": miou_4cls,
+            "mDice": mdice_4cls,
+            "mIoU_4cls": miou_4cls,
+            "mDice_4cls": mdice_4cls,
+            "mIoU_5cls": miou_5cls,
             "iou_tum": ious[0],
             "iou_str": ious[1],
             "iou_lym": ious[2],
@@ -356,7 +507,7 @@ def build_stage2_optimizer_and_scheduler(
 def train_stage2_pipeline(
     data_dir: Union[str, Path],
     pm_dir: Optional[Union[str, Path]] = None,
-    stage1_checkpoint: Optional[Union[str, Path]] = "checkpoints/stage1_retrained_best.pth",
+    stage1_checkpoint: Optional[Union[str, Path]] = "checkpoints/stage1_checkpoint_trained_on_bcss.pth",
     checkpoint_dir: Union[str, Path] = "checkpoints",
     epochs: int = 25,
     batch_size: int = 16,
@@ -367,6 +518,10 @@ def train_stage2_pipeline(
     seed: int = 42,
     use_uabl: bool = False,
     stage1_norm_mode: str = "auto",
+    allow_random_init_fallback: Optional[bool] = None,
+    allow_random_init: bool = False,
+    unc_weight: float = 0.20,
+    uabl_weight: float = 0.05,
 ) -> Dict[str, Any]:
     """Execute end-to-end Stage 2 DeepLabV3+ segmentation training pipeline."""
     random.seed(seed)
@@ -411,39 +566,51 @@ def train_stage2_pipeline(
 
     # Initialize Stage 2 DeepLabV3Plus (5 classes: TUM, STR, LYM, NEC, BACK)
     model = DeepLabV3Plus(num_classes=5, output_stride=16)
-    load_imagenet_pretrained_resnet101(model)
+    effective_fallback = dry_run if allow_random_init_fallback is None else bool(allow_random_init_fallback)
+    loaded_backbone_layers = load_imagenet_pretrained_resnet101(
+        model,
+        allow_random_init_fallback=effective_fallback,
+    )
 
     # Optionally load Stage 1 model for CGM gating during eval
     stage1_model: Optional[WSSSTissueStage1NetCAM] = None
     resolved_stage1_norm = infer_stage1_norm_mode(
         None, checkpoint_path=stage1_checkpoint, requested_mode=stage1_norm_mode
     )
-    if stage1_checkpoint and Path(stage1_checkpoint).exists():
+    if stage1_checkpoint is not None:
         stage1_model = WSSSTissueStage1NetCAM(n_class=NUM_FOREGROUND)
-        try:
-            st = torch.load(stage1_checkpoint, map_location="cpu", weights_only=True)
-        except Exception:
-            st = torch.load(stage1_checkpoint, map_location="cpu", weights_only=False)  # nosec B614
-        resolved_stage1_norm = infer_stage1_norm_mode(
-            st, checkpoint_path=stage1_checkpoint, requested_mode=stage1_norm_mode
+        resolved_stage1_norm, _ = load_stage1_checkpoint_into_model(
+            stage1_model,
+            checkpoint_path=stage1_checkpoint,
+            stage1_norm_mode=stage1_norm_mode,
+            min_matched_layers=100,
+            allow_random_init=allow_random_init,
         )
-        st_dict = st.get("state_dict", st) if isinstance(st, dict) else st
-        stage1_model.load_state_dict(st_dict, strict=False)
 
     # Resume from checkpoint if requested
     start_epoch = 0
     best_miou = 0.0
+    loaded_resume_obj: Optional[Dict[str, Any]] = None
     if resume_path and Path(resume_path).exists():
         try:
             loaded = torch.load(resume_path, map_location="cpu", weights_only=True)
         except Exception:
             loaded = torch.load(resume_path, map_location="cpu", weights_only=False)  # nosec B614
-        state_dict = loaded.get("state_dict", loaded)
+        if isinstance(loaded, dict):
+            loaded_resume_obj = loaded
+            state_dict = loaded.get("state_dict", loaded)
+            start_epoch = int(loaded.get("epoch", -1)) + 1
+            best_miou = float(loaded.get("mIoU", 0.0))
+        else:
+            state_dict = loaded
         model.load_state_dict(state_dict, strict=False)
-        start_epoch = loaded.get("epoch", 0)
-        best_miou = loaded.get("mIoU", 0.0)
 
     optimizer, scheduler = build_stage2_optimizer_and_scheduler(model, lr=lr, epochs=epochs)
+    if loaded_resume_obj is not None:
+        if "optimizer" in loaded_resume_obj:
+            optimizer.load_state_dict(loaded_resume_obj["optimizer"])
+        if "scheduler" in loaded_resume_obj:
+            scheduler.load_state_dict(loaded_resume_obj["scheduler"])
 
     effective_epochs = 1 if dry_run else epochs
     effective_bs = 2 if dry_run else batch_size
@@ -479,41 +646,57 @@ def train_stage2_pipeline(
         stage1_model=stage1_model,
         device=device,
         enable_amp=not dry_run,
-        unc_weight=0.50,
-        uabl_weight=0.15 if use_uabl else 0.0,
+        unc_weight=unc_weight,
+        uabl_weight=uabl_weight if use_uabl else 0.0,
         stage1_norm_mode=resolved_stage1_norm,
     )
 
     history: List[Dict[str, Any]] = []
     best_save_path = checkpoint_path / "stage2_retrained_best.pth"
+    latest_save_path = checkpoint_path / "stage2_latest.pth"
 
     for epoch in range(start_epoch, effective_epochs):
         train_metrics = trainer.train_epoch(train_loader, epoch=epoch)
 
         eval_metrics: Dict[str, Any] = {}
         if val_loader is not None and len(val_loader) > 0:
-            eval_metrics = trainer.evaluate(val_loader, use_cgm=True)
+            eval_metrics = trainer.evaluate(val_loader, use_cgm=(stage1_model is not None))
 
         epoch_record = {**train_metrics, **eval_metrics, "epoch": epoch}
         history.append(epoch_record)
 
         current_miou = eval_metrics.get("mIoU", 0.0)
-        if current_miou >= best_miou or dry_run:
+        improved = current_miou >= best_miou
+        if improved:
             best_miou = current_miou
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "mIoU": best_miou,
-                    "state_dict": model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "metrics": epoch_record,
-                },
-                best_save_path,
-            )
+
+        compact_payload = {
+            "epoch": epoch,
+            "mIoU": best_miou,
+            "input_norm": "imagenet",
+            "pretrained_backbone_layers": loaded_backbone_layers,
+            "stage1_checkpoint": str(stage1_checkpoint) if stage1_checkpoint else None,
+            "stage1_norm_mode": resolved_stage1_norm,
+            "state_dict": model.state_dict(),
+            "metrics": epoch_record,
+        }
+
+        if not dry_run:
+            latest_payload = {
+                **compact_payload,
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+            }
+            torch.save(latest_payload, latest_save_path)
+
+        if improved or dry_run or not best_save_path.is_file():
+            torch.save(compact_payload, best_save_path)
 
     return {
         "best_mIoU": best_miou,
+        "pretrained_backbone_layers": loaded_backbone_layers,
         "checkpoint_path": str(best_save_path),
+        "latest_checkpoint_path": str(latest_save_path) if latest_save_path.is_file() else None,
         "history": history,
     }
 
@@ -522,7 +705,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Stage-2 DeepLabV3+ on Pseudo-Masks")
     parser.add_argument("--data-dir", type=str, default="data/BCSS-WSSS", help="Dataset directory")
     parser.add_argument("--pm-dir", type=str, default=None, help="Pseudo-masks root directory")
-    parser.add_argument("--stage1-checkpoint", type=str, default="checkpoints/stage1_retrained_best.pth")
+    parser.add_argument(
+        "--stage1-checkpoint",
+        type=str,
+        default="checkpoints/stage1_checkpoint_trained_on_bcss.pth",
+        help="Stage-1 checkpoint path (default: verified author baseline)",
+    )
     parser.add_argument(
         "--stage1-norm-mode",
         type=str,
@@ -537,6 +725,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", type=str, default=None, help="Resume checkpoint path")
     parser.add_argument("--dry-run", action="store_true", help="Run 1-step dry run for testing")
     parser.add_argument("--use-uabl", action="store_true", help="Enable Uncertainty-Aware Optical Stain Boundary Loss")
+    parser.add_argument("--allow-random-init", action="store_true", help="Allow offline/random ResNet-101 init fallback")
     parser.add_argument("--device", type=str, default=None, help="Device ('cuda' or 'cpu')")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     return parser.parse_args()
@@ -558,6 +747,8 @@ def main() -> None:
         seed=args.seed,
         use_uabl=args.use_uabl,
         stage1_norm_mode=args.stage1_norm_mode,
+        allow_random_init_fallback=args.allow_random_init if args.allow_random_init else None,
+        allow_random_init=bool(args.allow_random_init),
     )
     print("Stage 2 Training Complete.")
     print(f"Best mIoU: {results['best_mIoU']:.4f}")
