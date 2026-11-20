@@ -57,22 +57,21 @@ Nhấn `Ctrl + B` rồi `D` để thoát `tmux` (máy local tắt đi ngủ bìn
 
 ---
 
-## 4. Web dashboard theo dõi (giao diện sáng, trắng xanh dương)
+## 4. Web dashboard theo dõi (giao diện sáng, trắng xanh dương, mở được trên điện thoại)
 
-Dashboard chỉ dùng thư viện chuẩn Python, bind `127.0.0.1:8765` (không mở port ra internet, truy cập qua SSH tunnel).
+Dashboard chỉ dùng thư viện chuẩn Python. Một lệnh trên VPS sẽ bật dashboard cùng Cloudflare quick tunnel và in ra link `https://...trycloudflare.com/?key=...` bấm được trên điện thoại:
 
-Trên VPS:
 ```bash
-tmux new -s dashboard
-cd ~/medical-wsss && python3 vps_colab_runner/dashboard.py --port 8765
+cd ~/medical-wsss && git pull --ff-only && bash vps_colab_runner/start_dashboard_public.sh
 ```
 
-Trên máy Windows (giữ cửa sổ này mở), rồi mở http://127.0.0.1:8765 :
-```powershell
-ssh -N -L 8765:127.0.0.1:8765 -i "$env:USERPROFILE\.ssh\vps_colab_2026-11-20.key" ubuntu@<vps-ip>
-```
+- Mã truy cập lưu ở `~/.colab_dash_token` trên VPS (không nằm trong git). Mở link có `?key=...` một lần là trình duyệt nhớ 30 ngày.
+- Link quick tunnel đổi mỗi lần chạy lại script. Cần link cố định thì phải dùng Cloudflare named tunnel (cần tên miền).
+- Không có `key` thì dashboard trả `401`, nên người lạ biết link cũng không xem hay bấm tắt GPU được.
 
-Hiển thị: số dư và GPU Colab đang chạy, trạng thái runner và đếm ngược watchdog, tải VPS, bảng checkpoint đã tải về (kích thước, thời điểm, SHA256), chỉ số và biểu đồ theo epoch, sự kiện chính, log đã lọc nhiễu. Nút **TẮT GPU NGAY** dừng runner và chạy `--stop-all`.
+Hiển thị: ô thông số chính (epoch hiện tại/tổng, chỉ số val tốt nhất, loss mới nhất, thời gian đã chạy, ước tính còn lại, GPU bật/tắt), cấu hình lần chạy (loss, LR, batch, pretrained, thiết bị), số dư Colab, đếm ngược watchdog, tải VPS, bảng checkpoint đã tải về (kích thước, thời điểm, SHA256), biểu đồ theo epoch, sự kiện chính, log đã lọc nhiễu. Nút **TẮT GPU NGAY** dừng runner và chạy `--stop-all`.
+
+Dùng cục bộ qua SSH tunnel (không cần Cloudflare): `python3 vps_colab_runner/dashboard.py --port 8765` rồi `ssh -N -L 8765:127.0.0.1:8765 ...`.
 
 ---
 

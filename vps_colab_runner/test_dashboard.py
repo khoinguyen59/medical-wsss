@@ -70,9 +70,61 @@ def test_status_endpoint_reports_checkpoint_and_meta(server) -> None:
     assert data["usage"]["active"] == "0"
 
 
+def test_token_auth_blocks_public_access_and_sets_cookie(server, monkeypatch) -> None:
+    monkeypatch.setenv("DASH_TOKEN", "s3cret-token")
+    # Public tunnel Host header is accepted only with the key
+    host = {"Host": "random-words.trycloudflare.com"}
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(urllib.request.Request(server + "/api/status", headers=host))
+    assert err.value.code == 401
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_args, **_kwargs):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    with pytest.raises(urllib.error.HTTPError) as redirect:
+        opener.open(urllib.request.Request(server + "/?key=s3cret-token", headers=host))
+    assert redirect.value.code == 302
+    cookie = redirect.value.headers["Set-Cookie"]
+    assert "dash_token=s3cret-token" in cookie and "HttpOnly" in cookie
+
+    ok = urllib.request.Request(server + "/api/status?session=nb1", headers={**host, "Cookie": "dash_token=s3cret-token"})
+    assert json.load(urllib.request.urlopen(ok))["session"] == "nb1"
+
+    wrong = urllib.request.Request(server + "/api/status", headers={**host, "Cookie": "dash_token=wrong"})
+    with pytest.raises(urllib.error.HTTPError) as err2:
+        urllib.request.urlopen(wrong)
+    assert err2.value.code == 401
+
+
+def test_params_and_progress_are_parsed() -> None:
+    log = (
+        "[READY] Compute Device: cuda (NVIDIA L4)\n"
+        "[PARITY] Loss=MultiLabelSoftMarginLoss (LOSS_TYPE=soft_margin) | norm=zero_one\n"
+        "[PARITY] Epochs=25 | LR=0.00014 | Steps/Epoch=731 | Total Steps=18,275\n"
+        "[DATALOADER] Train batches/epoch: 731 (BS=32, Samples=23,422, norm=zero_one)\n"
+        "[MODEL] Stage 1 ResNet38d Net_CAM: 105,087,296 params | Pretrained: domain_pretrained:luad (228/228 layers)\n"
+        "Epoch 03/25 [PDA=True, gamma=1.00]:   0%|\n"
+        "[EPOCH 01] Train Loss=0.2952 | Val mAP=0.89 GatedPM_mIoU=0.6511\n"
+        "[EPOCH 02] Train Loss=0.2503 | Val mAP=0.88 GatedPM_mIoU=0.6652\n"
+    )
+    lines = dashboard.clean_lines(log)
+    params, cur_total = dashboard.parse_params(log, lines)
+    labels = dict(params)
+    assert labels["Thiết bị"] == "cuda (NVIDIA L4)"
+    assert "LR=0.00014" in labels["Epoch / LR / Steps"]
+    assert labels["Hàm loss"].startswith("MultiLabelSoftMarginLoss")
+    assert cur_total == (3, 25)
+    prog = dashboard.progress(dashboard.parse_epochs(lines), cur_total, {}, False)
+    assert prog["best"]["name"] == "GatedPM_mIoU" and prog["best"]["epoch"] == 2
+    assert prog["done"] == 2 and prog["total"] == 25
+
+
 def test_index_serves_light_blue_html_and_stop_requires_header(server) -> None:
     html = urllib.request.urlopen(server + "/").read().decode("utf-8")
     assert "Colab VPS Monitor" in html and "#1565c0" in html and "TẮT GPU NGAY" in html
+    assert "Thông số chính của lần chạy" in html
 
     req = urllib.request.Request(server + "/api/stop", method="POST")
     with pytest.raises(urllib.error.HTTPError) as err:
@@ -82,7 +134,7 @@ def test_index_serves_light_blue_html_and_stop_requires_header(server) -> None:
     bad_host = urllib.request.Request(server + "/api/status", headers={"Host": "evil.example.com"})
     with pytest.raises(urllib.error.HTTPError) as err2:
         urllib.request.urlopen(bad_host)
-    assert err2.value.code == 403
+    assert err2.value.code == 401
 
 
 @pytest.mark.parametrize("name", ["dashboard.py", "dashboard.html"])

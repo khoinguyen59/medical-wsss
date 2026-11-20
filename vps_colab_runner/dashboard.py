@@ -6,6 +6,7 @@ Binds to 127.0.0.1 by default. Access it through an SSH tunnel, no public port n
 """
 
 import argparse
+import hmac
 import json
 import os
 import re
@@ -171,22 +172,59 @@ def system_stats():
     return stats
 
 
+def parse_params(log_text, lines):
+    """Extract the run's main configuration from notebook log lines."""
+    rules = [
+        ("Thiết bị", r"\[READY\] Compute Device: (.+)"), ("AMP", r"AMP Dtype: (\S+)"),
+        ("Dữ liệu train", r"Train batches/epoch: (\d+ \(.*?\))"), ("Val", r"Val batches/epoch: (\d+ \(.*?\))"),
+        ("Hàm loss", r"\[PARITY\] Loss=(.*)"), ("Epoch / LR / Steps", r"\[PARITY\] (Epochs=.*)"),
+        ("Pretrained", r"Pretrained: (.+)"), ("Mô hình", r"\[MODEL\] (Stage \d[^:]*|DeepLab[^:]*)"),
+    ]
+    params = []
+    for label, pat in rules:
+        for line in reversed(lines):
+            m = re.search(pat, line)
+            if m:
+                params.append([label, m.group(1).strip()])
+                break
+    cur = re.findall(r"Epoch\s+(\d+)/(\d+)", log_text)
+    return params, (int(cur[-1][0]), int(cur[-1][1])) if cur else (0, 0)
+
+
+def progress(epochs, cur_total, meta, running):
+    cur, total = cur_total
+    names = [k for e in epochs for k in e["metrics"]]
+    pick = next((k for k in names if "PM_mIoU" in k), None) or next((k for k in names if "mIoU" in k), None)
+    best = None
+    if pick:
+        vals = [(e["metrics"][pick], e["epoch"]) for e in epochs if e["metrics"].get(pick) is not None]
+        best = {"name": pick, "value": max(vals)[0], "epoch": max(vals)[1]} if vals else None
+    start = int(meta["start_epoch"]) if meta.get("start_epoch", "").isdigit() else 0
+    elapsed = int(time.time()) - start if start and running else None
+    done = len(epochs)
+    eta = int(elapsed / done * (total - done)) if elapsed and done and total > done else None
+    return {"epoch": cur, "total": total, "done": done, "best": best, "elapsed_s": elapsed, "eta_s": eta,
+            "last": epochs[-1] if epochs else None}
+
+
 def build_status(session=None):
     sessions = list_sessions()
     session = session if session in sessions else (sessions[0] if sessions else "")
-    log_text = tail_text(RUNS_DIR / session / "run.log") if session else ""
+    log_text = tail_text(RUNS_DIR / session / "run.log", 2_000_000) if session else ""
     lines = clean_lines(log_text)
     meta = read_meta(session) if session else {}
     deadline = int(meta["deadline_epoch"]) if meta.get("deadline_epoch", "").isdigit() else 0
     with LOCK:
         usage, sess_raw, ts, stop_msg = dict(STATE["usage"]), STATE["sessions"], STATE["ts"], STATE["stop_msg"]
     pids = runner_pids()
+    epochs = parse_epochs(lines)
+    params, cur_total = parse_params(log_text, lines)
     return {
         "now": time.strftime("%Y-%m-%d %H:%M:%S"), "colab_ts": int(ts), "usage": usage, "colab_sessions": sess_raw,
         "runner_running": bool(pids), "runner_pids": pids, "sessions": sessions, "session": session, "meta": meta,
         "remaining_s": max(0, deadline - int(time.time())) if deadline and pids else None,
         "checkpoints": checkpoints(session, log_text) if session else [],
-        "epochs": parse_epochs(lines),
+        "epochs": epochs, "params": params, "progress": progress(epochs, cur_total, meta, bool(pids)),
         "events": [x for x in lines if any(k in x for k in EVENT_KEYS)][-40:],
         "log": lines[-150:], "system": system_stats(), "stop_msg": stop_msg,
     }
@@ -213,24 +251,39 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def _host_ok(self):
-        """Reject unexpected Host headers (DNS-rebinding guard); port part is ignored."""
+        """Without a token, accept only loopback Host headers (DNS-rebinding guard)."""
         host = self.headers.get("Host") or ""
         host = host.split("]")[0] + "]" if host.startswith("[") else host.rsplit(":", 1)[0]
         return host in ALLOWED_HOSTS
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _cookie_ok(self):
+        token = os.environ.get("DASH_TOKEN", "")
+        jar = {k.strip(): v for k, _, v in (c.partition("=") for c in (self.headers.get("Cookie") or "").split(";"))}
+        return hmac.compare_digest(jar.get("dash_token", ""), token)
+
+    def _authorized(self):
+        return self._cookie_ok() if os.environ.get("DASH_TOKEN") else self._host_ok()
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8", headers=None):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
 
     def do_GET(self):
-        if not self._host_ok():
-            return self._send(403, '{"error":"bad host"}')
         url = urlparse(self.path)
+        token = os.environ.get("DASH_TOKEN", "")
+        key = parse_qs(url.query).get("key", [""])[0]
+        if token and key and hmac.compare_digest(key, token):
+            cookie = f"dash_token={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000"
+            return self._send(302, b"", headers={"Location": "/", "Set-Cookie": cookie})
+        if not self._authorized():
+            return self._send(401, "Unauthorized. Mở link kèm ?key=... để đăng nhập.", "text/plain; charset=utf-8")
         if url.path == "/api/status":
             sess = parse_qs(url.query).get("session", [None])[0]
             return self._send(200, json.dumps(build_status(sess)))
@@ -240,7 +293,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, '{"error":"not found"}')
 
     def do_POST(self):
-        if not self._host_ok() or self.headers.get("X-Requested-With") != "dashboard":
+        if not self._authorized() or self.headers.get("X-Requested-With") != "dashboard":
             return self._send(403, '{"error":"forbidden"}')
         if urlparse(self.path).path == "/api/stop":
             return self._send(200, json.dumps({"message": do_stop()}))
@@ -252,7 +305,12 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--colab-refresh", type=int, default=20, help="seconds between colab usage/sessions polls")
+    ap.add_argument("--token", default="", help="access key (or env DASH_TOKEN); REQUIRED when exposed publicly")
     args = ap.parse_args()
+    if args.token:
+        os.environ["DASH_TOKEN"] = args.token
+    if args.host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("DASH_TOKEN"):
+        raise SystemExit("Refusing to bind a non-loopback address without --token / DASH_TOKEN")
     threading.Thread(target=refresher, args=(args.colab_refresh,), daemon=True).start()
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Dashboard on http://{args.host}:{args.port} (SSH tunnel recommended)", flush=True)

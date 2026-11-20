@@ -11,10 +11,11 @@ RUNNER_DIR = PROJECT_ROOT / "vps_colab_runner"
 SETUP_SCRIPT = RUNNER_DIR / "setup_vps_colab.sh"
 RUNNER_SCRIPT = RUNNER_DIR / "run_colab_vps.sh"
 README_DOC = RUNNER_DIR / "README.md"
+PUBLIC_SCRIPT = RUNNER_DIR / "start_dashboard_public.sh"
 FORBIDDEN_DASHES = ("\u2014", "\u2013", "\u2015", "\u2212")
 
 
-@pytest.mark.parametrize("path", [SETUP_SCRIPT, RUNNER_SCRIPT, README_DOC])
+@pytest.mark.parametrize("path", [SETUP_SCRIPT, RUNNER_SCRIPT, README_DOC, PUBLIC_SCRIPT])
 def test_vps_files_exist_ascii_dashes_and_line_cap(path: Path) -> None:
     """All temporary VPS runner files must stay <= 400 lines, use LF on .sh, and obey Invariant-12."""
     assert path.is_file(), f"Missing expected file: {path}"
@@ -76,7 +77,11 @@ def test_bash_syntax_and_dry_run_in_wsl() -> None:
     if wsl is None:
         pytest.skip("WSL not available on this host")
 
-    for rel_script in ("vps_colab_runner/setup_vps_colab.sh", "vps_colab_runner/run_colab_vps.sh"):
+    for rel_script in (
+        "vps_colab_runner/setup_vps_colab.sh",
+        "vps_colab_runner/run_colab_vps.sh",
+        "vps_colab_runner/start_dashboard_public.sh",
+    ):
         res = subprocess.run(
             [wsl, "-d", "Ubuntu", "--", "bash", "-n", rel_script],
             cwd=str(PROJECT_ROOT),

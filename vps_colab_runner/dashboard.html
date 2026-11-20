@@ -34,6 +34,12 @@
   .row { display:flex; gap:14px; flex-wrap:wrap; } .row > .card { flex:1 1 420px; }
   canvas { width:100%; height:180px; background:#fff; }
   .muted { color:var(--muted); } .msg { margin-top:8px; color:var(--blue); font-size:12px; }
+  .card { overflow-x:auto; } .wide { display:block; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:14px; }
+  .tile { background:linear-gradient(180deg,#fff,var(--soft)); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .tile .v { font-size:24px; font-weight:700; color:var(--blue); } .tile .l { color:var(--muted); font-size:12px; }
+  .bar { height:8px; background:var(--soft); border-radius:99px; overflow:hidden; margin-top:6px; } .bar > i { display:block; height:100%; background:var(--blue2); width:0; }
+  @media (max-width:600px) { header { padding:10px 14px; } main { padding:12px 12px 30px; } .big { font-size:22px; } }
 </style>
 </head>
 <body>
@@ -44,6 +50,17 @@
   <button class="stop" id="stopBtn">TẮT GPU NGAY</button>
 </header>
 <main>
+  <div class="tiles">
+    <div class="tile"><div class="v" id="t_epoch">-</div><div class="l">Epoch hiện tại</div><div class="bar"><i id="t_bar"></i></div></div>
+    <div class="tile"><div class="v" id="t_best">-</div><div class="l" id="t_bestl">Chỉ số val tốt nhất</div></div>
+    <div class="tile"><div class="v" id="t_last">-</div><div class="l" id="t_lastl">Epoch mới nhất</div></div>
+    <div class="tile"><div class="v" id="t_elapsed">-</div><div class="l">Đã chạy</div></div>
+    <div class="tile"><div class="v" id="t_eta">-</div><div class="l">Ước tính còn lại</div></div>
+    <div class="tile"><div class="v" id="t_gpu">-</div><div class="l">GPU Colab đang bật</div></div>
+  </div>
+  <div class="card wide"><h2>Thông số chính của lần chạy</h2><div id="params" class="muted">Chưa có dữ liệu cấu hình.</div></div>
+  <div style="height:14px"></div>
+
   <div class="grid">
     <div class="card"><h2>Google Colab</h2><div class="big" id="balance">-</div><div class="muted">compute units còn lại</div>
       <div class="kv"><span>Tốc độ tiêu thụ</span><b id="rate">-</b></div>
@@ -130,6 +147,26 @@ function drawChart() {
 
 function setBadge(el, text, cls) { el.textContent = text; el.className = "badge " + cls; }
 
+function renderTop(d) {
+  const p = d.progress || {}, act = parseInt(d.usage.active || "0", 10);
+  $("t_epoch").textContent = p.total ? (p.epoch + " / " + p.total) : "-";
+  $("t_bar").style.width = p.total ? Math.min(100, (p.done / p.total) * 100) + "%" : "0";
+  $("t_best").textContent = p.best ? p.best.value.toFixed(4) : "-";
+  $("t_bestl").textContent = p.best ? p.best.name + " tốt nhất (epoch " + p.best.epoch + ")" : "Chỉ số val tốt nhất";
+  const last = p.last, keys = last ? Object.keys(last.metrics) : [];
+  const lk = keys.find(k => /Loss/.test(k)) || keys[0];
+  $("t_last").textContent = last && lk ? String(last.metrics[lk]) : "-";
+  $("t_lastl").textContent = last ? lk + " (epoch " + last.epoch + ")" : "Epoch mới nhất";
+  $("t_elapsed").textContent = p.elapsed_s == null ? "-" : fmtHMS(p.elapsed_s);
+  $("t_eta").textContent = p.eta_s == null ? "-" : fmtHMS(p.eta_s);
+  $("t_gpu").textContent = d.usage.active == null ? "-" : (act > 0 ? "BẬT" : "TẮT");
+  $("t_gpu").style.color = act > 0 ? "var(--bad)" : "var(--ok)";
+  const box = $("params"); box.replaceChildren();
+  if (!d.params.length) { box.textContent = "Chưa có dữ liệu cấu hình (notebook chưa in log)."; return; }
+  d.params.forEach(([k, v]) => { const row = document.createElement("div"); row.className = "kv";
+    const a = document.createElement("span"), b = document.createElement("b"); a.textContent = k; b.textContent = v; row.append(a, b); box.appendChild(row); });
+}
+
 async function refresh() {
   try {
     const d = await (await fetch("/api/status?session=" + encodeURIComponent(current))).json();
@@ -152,7 +189,7 @@ async function refresh() {
     $("load").textContent = (d.system.load || ["-"]).join(" / ");
     $("mem").textContent = d.system.mem || "-"; $("disk").textContent = d.system.disk || "-"; $("now").textContent = d.now;
     $("sub").textContent = "Cập nhật " + d.now + " | Colab poll " + (d.colab_ts ? fmtAge(Math.max(0, (Date.now()/1000|0) - d.colab_ts)) + " trước" : "chưa có");
-    renderCkpt(d.checkpoints); renderEpochs(d.epochs);
+    renderCkpt(d.checkpoints); renderEpochs(d.epochs); renderTop(d);
     const pre = (id, lines) => { const el = $(id), stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30; el.textContent = lines; if (stick) el.scrollTop = el.scrollHeight; };
     pre("events", d.events.join("\n")); pre("log", d.log.join("\n")); $("sessions").textContent = d.colab_sessions || "-";
     $("stopmsg").textContent = d.stop_msg || "";
