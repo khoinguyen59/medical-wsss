@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Temporary Colab-on-VPS monitoring dashboard (stdlib only, light blue/white theme).
 
-Binds to 127.0.0.1 by default. Access it through an SSH tunnel, no public port needed:
-    ssh -L 8765:127.0.0.1:8765 -i <key> ubuntu@<vps-ip>   then open http://127.0.0.1:8765
+Login with account + password (see dash_auth.py). Bots/scripts may use the X-API-Key header instead.
+Binds to 127.0.0.1 by default; expose it with a Cloudflare tunnel (start_dashboard_public.sh).
 """
 
 import argparse
-import hmac
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -18,6 +18,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+import dash_auth
 
 RUNNER_DIR = Path(__file__).resolve().parent
 RUNS_DIR = RUNNER_DIR / "runs"
@@ -246,23 +248,59 @@ def do_stop():
     return STATE["stop_msg"]
 
 
+def do_start(payload):
+    """Launch a resilient runner inside tmux. Raises ValueError with a user-facing reason."""
+    nb, gpu = str(payload.get("notebook", "")), str(payload.get("gpu", "L4"))
+    try:
+        minutes = int(payload.get("max_minutes") or (210 if nb == "nb1" else 240))
+    except (TypeError, ValueError):
+        raise ValueError("max_minutes không hợp lệ") from None
+    if nb not in ("nb1", "nb2") or gpu not in ("L4", "T4") or not 10 <= minutes <= 300:
+        raise ValueError("Tham số không hợp lệ (nb1|nb2, L4|T4, 10-300 phút)")
+    if runner_pids():
+        raise ValueError("Runner đang chạy, hãy tắt phiên hiện tại trước")
+    with LOCK:
+        active = str(STATE["usage"].get("active", "0"))
+    if active not in ("0", ""):
+        raise ValueError(f"Colab đang có {active} GPU hoạt động, không khởi chạy thêm")
+    if not shutil.which("tmux"):
+        raise ValueError("VPS chưa cài tmux")
+    name = f"colab_{nb}"
+    subprocess.run(["tmux", "kill-session", "-t", name], capture_output=True, check=False)
+    cmd = f"bash {shlex.quote(str(RUNNER_SH))} --notebook {nb} --gpu {gpu} --max-minutes {minutes}"
+    subprocess.run(["tmux", "new-session", "-d", "-s", name, cmd], cwd=RUNNER_DIR.parent, check=True)
+    return f"Đã khởi chạy {nb} ({gpu}, giới hạn {minutes} phút) trong tmux '{name}'."
+
+
+def read_form(handler, limit=4096):
+    length = min(int(handler.headers.get("Content-Length") or 0), limit)
+    return {k: v[0] for k, v in parse_qs(handler.rfile.read(length).decode("utf-8", "replace")).items()}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         return
 
     def _host_ok(self):
-        """Without a token, accept only loopback Host headers (DNS-rebinding guard)."""
+        """Auth disabled: accept only loopback Host headers (DNS-rebinding guard)."""
         host = self.headers.get("Host") or ""
         host = host.split("]")[0] + "]" if host.startswith("[") else host.rsplit(":", 1)[0]
         return host in ALLOWED_HOSTS
 
-    def _cookie_ok(self):
-        token = os.environ.get("DASH_TOKEN", "")
+    def _cookie(self, name):
         jar = {k.strip(): v for k, _, v in (c.partition("=") for c in (self.headers.get("Cookie") or "").split(";"))}
-        return hmac.compare_digest(jar.get("dash_token", ""), token)
+        return jar.get(name, "")
 
-    def _authorized(self):
-        return self._cookie_ok() if os.environ.get("DASH_TOKEN") else self._host_ok()
+    def _ip(self):
+        return self.headers.get("CF-Connecting-IP") or self.client_address[0]
+
+    def _auth_kind(self):
+        """Return 'session', 'apikey', 'open' (auth disabled, loopback) or '' when unauthorized."""
+        if not dash_auth.configured():
+            return "open" if self._host_ok() else ""
+        if dash_auth.session_valid(self._cookie("dash_session")):
+            return "session"
+        return "apikey" if dash_auth.api_key_ok(self.headers.get("X-API-Key")) else ""
 
     def _send(self, code, body, ctype="application/json; charset=utf-8", headers=None):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
@@ -275,15 +313,37 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _login_page(self, code=200, error=""):
+        html = (RUNNER_DIR / "login.html").read_text(encoding="utf-8")
+        note = f'<div class="err">{error}</div>' if error else ""
+        return self._send(code, html.replace("<!--ERR-->", note), "text/html; charset=utf-8")
+
+    def _do_login(self):
+        ip = self._ip()
+        if dash_auth.locked(ip):
+            return self._login_page(429, "Sai quá nhiều lần. Thử lại sau 10 phút.")
+        form = read_form(self)
+        if not dash_auth.verify_login(form.get("username", ""), form.get("password", "")):
+            dash_auth.record_fail(ip)
+            return self._login_page(401, "Sai tài khoản hoặc mật khẩu.")
+        dash_auth.clear_fails(ip)
+        secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+        cookie = f"dash_session={dash_auth.new_session()}; Path=/; HttpOnly; SameSite=Lax; Max-Age={dash_auth.SESSION_TTL}{secure}"
+        return self._send(302, b"", headers={"Location": "/", "Set-Cookie": cookie})
+
     def do_GET(self):
         url = urlparse(self.path)
-        token = os.environ.get("DASH_TOKEN", "")
-        key = parse_qs(url.query).get("key", [""])[0]
-        if token and key and hmac.compare_digest(key, token):
-            cookie = f"dash_token={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000"
-            return self._send(302, b"", headers={"Location": "/", "Set-Cookie": cookie})
-        if not self._authorized():
-            return self._send(401, "Unauthorized. Mở link kèm ?key=... để đăng nhập.", "text/plain; charset=utf-8")
+        if url.path == "/login" and dash_auth.configured():
+            return self._login_page()
+        if url.path == "/logout":
+            dash_auth.drop_session(self._cookie("dash_session"))
+            return self._send(302, b"", headers={"Location": "/login", "Set-Cookie": "dash_session=; Path=/; Max-Age=0"})
+        if not self._auth_kind():
+            if not dash_auth.configured():
+                return self._send(403, '{"error":"bad host"}')
+            if url.path.startswith("/api/"):
+                return self._send(401, '{"error":"unauthorized"}')
+            return self._send(302, b"", headers={"Location": "/login"})
         if url.path == "/api/status":
             sess = parse_qs(url.query).get("session", [None])[0]
             return self._send(200, json.dumps(build_status(sess)))
@@ -293,10 +353,22 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, '{"error":"not found"}')
 
     def do_POST(self):
-        if not self._authorized() or self.headers.get("X-Requested-With") != "dashboard":
+        path = urlparse(self.path).path
+        if path == "/login" and dash_auth.configured():
+            return self._do_login()
+        kind = self._auth_kind()
+        if not kind:
+            return self._send(401, '{"error":"unauthorized"}')
+        if kind != "apikey" and self.headers.get("X-Requested-With") != "dashboard":
             return self._send(403, '{"error":"forbidden"}')
-        if urlparse(self.path).path == "/api/stop":
+        if path == "/api/stop":
             return self._send(200, json.dumps({"message": do_stop()}))
+        if path == "/api/start":
+            try:
+                body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 2048)) or b"{}")
+                return self._send(200, json.dumps({"message": do_start(body)}))
+            except (ValueError, subprocess.SubprocessError) as exc:
+                return self._send(400, json.dumps({"error": str(exc)}))
         return self._send(404, '{"error":"not found"}')
 
 
@@ -305,15 +377,14 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--colab-refresh", type=int, default=20, help="seconds between colab usage/sessions polls")
-    ap.add_argument("--token", default="", help="access key (or env DASH_TOKEN); REQUIRED when exposed publicly")
     args = ap.parse_args()
-    if args.token:
-        os.environ["DASH_TOKEN"] = args.token
-    if args.host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("DASH_TOKEN"):
-        raise SystemExit("Refusing to bind a non-loopback address without --token / DASH_TOKEN")
+    dash_auth.load()
+    if args.host not in ("127.0.0.1", "localhost", "::1") and not dash_auth.configured():
+        raise SystemExit("Refusing to bind a non-loopback address without credentials (python3 dash_auth.py --init)")
     threading.Thread(target=refresher, args=(args.colab_refresh,), daemon=True).start()
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Dashboard on http://{args.host}:{args.port} (SSH tunnel recommended)", flush=True)
+    mode = "login required" if dash_auth.configured() else "loopback only, no login"
+    print(f"Dashboard on http://{args.host}:{args.port} ({mode})", flush=True)
     srv.serve_forever()
 
 

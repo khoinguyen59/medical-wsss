@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dash_auth  # noqa: E402
 import dashboard  # noqa: E402
 
 FORBIDDEN_DASHES = ("\u2014", "\u2013", "\u2015", "\u2212")
@@ -51,6 +52,7 @@ def server(tmp_path, monkeypatch):
     (run / ".state" / "attempt").write_text("2")
     monkeypatch.setattr(dashboard, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(dashboard, "runner_pids", lambda: [])
+    dash_auth.configure(None)
     dashboard.STATE.update(usage={"balance": "1 compute units", "rate": "0.00/hr", "active": "0"}, sessions="none", ts=1.0)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), dashboard.Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -70,32 +72,86 @@ def test_status_endpoint_reports_checkpoint_and_meta(server) -> None:
     assert data["usage"]["active"] == "0"
 
 
-def test_token_auth_blocks_public_access_and_sets_cookie(server, monkeypatch) -> None:
-    monkeypatch.setenv("DASH_TOKEN", "s3cret-token")
-    # Public tunnel Host header is accepted only with the key
-    host = {"Host": "random-words.trycloudflare.com"}
-    with pytest.raises(urllib.error.HTTPError) as err:
-        urllib.request.urlopen(urllib.request.Request(server + "/api/status", headers=host))
-    assert err.value.code == 401
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
 
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *_args, **_kwargs):
-            return None
 
-    opener = urllib.request.build_opener(NoRedirect)
+def _open(url, headers=None, data=None, method=None):
+    req = urllib.request.Request(url, headers=headers or {}, data=data, method=method)
+    return urllib.request.build_opener(_NoRedirect).open(req)
+
+
+def _code(url, **kw):
+    try:
+        return _open(url, **kw).status
+    except urllib.error.HTTPError as err:
+        return err.code
+
+
+@pytest.fixture()
+def secured(server):
+    dash_auth.configure("colab", "p@ss-Word1", api_key="api-key-123")
+    yield server
+    dash_auth.configure(None)
+
+
+def test_login_flow_session_cookie_and_logout(secured) -> None:
+    host = {"Host": "random-words.trycloudflare.com", "X-Forwarded-Proto": "https"}
+    assert _code(secured + "/api/status", headers=host) == 401
+    assert _code(secured + "/", headers=host) == 302  # redirect to /login
+    assert "Đăng nhập" in _open(secured + "/login", headers=host).read().decode("utf-8")
+
+    form = b"username=colab&password=wrong"
+    assert _code(secured + "/login", headers=host, data=form, method="POST") == 401
+
+    good = b"username=colab&password=p%40ss-Word1"
     with pytest.raises(urllib.error.HTTPError) as redirect:
-        opener.open(urllib.request.Request(server + "/?key=s3cret-token", headers=host))
+        _open(secured + "/login", headers=host, data=good, method="POST")
     assert redirect.value.code == 302
     cookie = redirect.value.headers["Set-Cookie"]
-    assert "dash_token=s3cret-token" in cookie and "HttpOnly" in cookie
+    assert "dash_session=" in cookie and "HttpOnly" in cookie and "Secure" in cookie
+    sess = cookie.split(";")[0]
 
-    ok = urllib.request.Request(server + "/api/status?session=nb1", headers={**host, "Cookie": "dash_token=s3cret-token"})
-    assert json.load(urllib.request.urlopen(ok))["session"] == "nb1"
+    data = json.load(_open(secured + "/api/status?session=nb1", headers={**host, "Cookie": sess}))
+    assert data["session"] == "nb1"
+    assert _code(secured + "/api/stop", headers={**host, "Cookie": sess}, data=b"", method="POST") == 403  # CSRF header
+    assert _code(secured + "/logout", headers={**host, "Cookie": sess}) == 302
+    assert _code(secured + "/api/status", headers={**host, "Cookie": sess}) == 401
 
-    wrong = urllib.request.Request(server + "/api/status", headers={**host, "Cookie": "dash_token=wrong"})
-    with pytest.raises(urllib.error.HTTPError) as err2:
-        urllib.request.urlopen(wrong)
-    assert err2.value.code == 401
+
+def test_api_key_and_login_lockout(secured) -> None:
+    assert json.load(_open(secured + "/api/status", headers={"X-API-Key": "api-key-123"}))["usage"]["active"] == "0"
+    assert _code(secured + "/api/status", headers={"X-API-Key": "nope"}) == 401
+
+    bad = b"username=colab&password=bad"
+    codes = [_code(secured + "/login", headers={"CF-Connecting-IP": "9.9.9.9"}, data=bad, method="POST") for _ in range(7)]
+    assert codes[:5] == [401] * 5 and codes[5:] == [429, 429]
+
+
+def test_start_validates_input_and_launches_tmux(secured, monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(dashboard.subprocess, "run", lambda *a, **k: calls.append(a[0]))
+    monkeypatch.setattr(dashboard.shutil, "which", lambda _name: "/usr/bin/tmux")
+    hdr = {"X-API-Key": "api-key-123", "Content-Type": "application/json"}
+
+    def start(body):
+        return _code(secured + "/api/start", headers=hdr, data=json.dumps(body).encode(), method="POST")
+
+    assert start({"notebook": "nb9"}) == 400
+    assert start({"notebook": "nb1", "gpu": "H100"}) == 400
+    assert start({"notebook": "nb1", "max_minutes": 9999}) == 400
+    assert calls == []
+    assert start({"notebook": "nb1", "gpu": "L4", "max_minutes": 120}) == 200
+    assert calls[-1][:5] == ["tmux", "new-session", "-d", "-s", "colab_nb1"]
+    assert "--max-minutes 120" in calls[-1][5]
+
+    monkeypatch.setattr(dashboard, "runner_pids", lambda: [1234])
+    assert start({"notebook": "nb2"}) == 400  # runner already running
+    monkeypatch.setattr(dashboard, "runner_pids", lambda: [])
+    dashboard.STATE["usage"]["active"] = "1"
+    assert start({"notebook": "nb2"}) == 400  # GPU already active
+    dashboard.STATE["usage"]["active"] = "0"
 
 
 def test_params_and_progress_are_parsed() -> None:
@@ -134,10 +190,10 @@ def test_index_serves_light_blue_html_and_stop_requires_header(server) -> None:
     bad_host = urllib.request.Request(server + "/api/status", headers={"Host": "evil.example.com"})
     with pytest.raises(urllib.error.HTTPError) as err2:
         urllib.request.urlopen(bad_host)
-    assert err2.value.code == 401
+    assert err2.value.code == 403
 
 
-@pytest.mark.parametrize("name", ["dashboard.py", "dashboard.html"])
+@pytest.mark.parametrize("name", ["dashboard.py", "dashboard.html", "dash_auth.py", "login.html"])
 def test_dashboard_files_line_cap_and_ascii_dashes(name) -> None:
     path = Path(__file__).resolve().parent / name
     text = path.read_text(encoding="utf-8")

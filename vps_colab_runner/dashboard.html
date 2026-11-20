@@ -48,6 +48,7 @@
   <div class="spacer"></div>
   <label class="muted">Phiên chạy&nbsp;<select id="session"></select></label>
   <button class="stop" id="stopBtn">TẮT GPU NGAY</button>
+  <a href="/logout" class="muted" style="font-size:12px">Đăng xuất</a>
 </header>
 <main>
   <div class="tiles">
@@ -59,6 +60,15 @@
     <div class="tile"><div class="v" id="t_gpu">-</div><div class="l">GPU Colab đang bật</div></div>
   </div>
   <div class="card wide"><h2>Thông số chính của lần chạy</h2><div id="params" class="muted">Chưa có dữ liệu cấu hình.</div></div>
+  <div style="height:14px"></div>
+  <div class="card wide"><h2>Khởi chạy phiên mới</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <select id="startNb"><option value="nb1">Notebook 1 (Stage 1)</option><option value="nb2">Notebook 2 (Stage 2)</option></select>
+      <select id="startGpu"><option>L4</option><option>T4</option></select>
+      <label class="muted">Giới hạn&nbsp;<input id="startMin" type="number" min="10" max="300" value="210" style="width:80px;font:inherit;padding:6px;border:1px solid var(--line);border-radius:8px"> phút</label>
+      <button id="startBtn" style="background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600;cursor:pointer">Bắt đầu chạy</button>
+    </div>
+    <div class="muted" style="margin-top:6px;font-size:12px">Chỉ chạy được khi không có GPU nào đang bật. Tự tắt GPU khi hết giới hạn thời gian.</div></div>
   <div style="height:14px"></div>
 
   <div class="grid">
@@ -203,6 +213,16 @@ $("stopBtn").addEventListener("click", async () => {
   $("stopBtn").disabled = true; $("stopBtn").textContent = "Đang tắt...";
   try { const r = await (await fetch("/api/stop", { method: "POST", headers: { "X-Requested-With": "dashboard" } })).json(); $("stopmsg").textContent = r.message || r.error; }
   finally { $("stopBtn").disabled = false; $("stopBtn").textContent = "TẮT GPU NGAY"; refresh(); }
+});
+$("startNb").addEventListener("change", e => { $("startMin").value = e.target.value === "nb1" ? 210 : 240; });
+$("startBtn").addEventListener("click", async () => {
+  const body = { notebook: $("startNb").value, gpu: $("startGpu").value, max_minutes: parseInt($("startMin").value, 10) };
+  if (!confirm("Khởi chạy " + body.notebook + " trên GPU " + body.gpu + " (tối đa " + body.max_minutes + " phút)?\nViệc này tiêu tốn compute units.")) return;
+  $("startBtn").disabled = true;
+  try {
+    const r = await fetch("/api/start", { method: "POST", headers: { "X-Requested-With": "dashboard", "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json(); $("stopmsg").textContent = j.message || j.error;
+  } finally { $("startBtn").disabled = false; refresh(); }
 });
 refresh(); setInterval(refresh, 5000);
 </script>

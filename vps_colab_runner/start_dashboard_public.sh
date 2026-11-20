@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the monitoring dashboard + a public Cloudflare quick tunnel (https://*.trycloudflare.com).
-# The dashboard is protected by an access key stored in ~/.colab_dash_token (never in git).
+# The dashboard is protected by account + password (PBKDF2 hash in ~/.colab_dash_auth.json, never in git).
 # Re-running this script restarts both and prints a fresh public link (quick tunnel URLs change).
 set -euo pipefail
 
@@ -8,7 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${DASH_PORT:-8765}"
 BIN_DIR="$HOME/.local/bin"
 CF="$BIN_DIR/cloudflared"
-TOKEN_FILE="$HOME/.colab_dash_token"
 CF_LOG="$HOME/cloudflared.log"
 
 mkdir -p "$BIN_DIR"
@@ -23,15 +22,11 @@ if [ ! -x "$CF" ]; then
   chmod +x "$CF"
 fi
 
-if [ ! -s "$TOKEN_FILE" ]; then
-  python3 -c "import secrets; print(secrets.token_urlsafe(18))" > "$TOKEN_FILE"
-  chmod 600 "$TOKEN_FILE"
-fi
-TOKEN="$(cat "$TOKEN_FILE")"
+CRED_INFO="$(python3 "$SCRIPT_DIR/dash_auth.py" --init)"
 
 tmux kill-session -t dashboard 2>/dev/null || true
 tmux kill-session -t tunnel 2>/dev/null || true
-tmux new-session -d -s dashboard "DASH_TOKEN='$TOKEN' python3 '$SCRIPT_DIR/dashboard.py' --port $PORT"
+tmux new-session -d -s dashboard "python3 '$SCRIPT_DIR/dashboard.py' --port $PORT"
 : > "$CF_LOG"
 tmux new-session -d -s tunnel "'$CF' tunnel --no-autoupdate --url http://127.0.0.1:$PORT > '$CF_LOG' 2>&1"
 
@@ -45,4 +40,5 @@ if [ -z "$URL" ]; then
   echo "Tunnel URL not found yet. Check: tail -n 30 $CF_LOG" >&2
   exit 1
 fi
-echo "PUBLIC_URL=$URL/?key=$TOKEN"
+echo "PUBLIC_URL=$URL/"
+echo "$CRED_INFO"

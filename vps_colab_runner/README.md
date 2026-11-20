@@ -65,13 +65,15 @@ Dashboard chỉ dùng thư viện chuẩn Python. Một lệnh trên VPS sẽ b�
 cd ~/medical-wsss && git pull --ff-only && bash vps_colab_runner/start_dashboard_public.sh
 ```
 
-- Mã truy cập lưu ở `~/.colab_dash_token` trên VPS (không nằm trong git). Mở link có `?key=...` một lần là trình duyệt nhớ 30 ngày.
+- Lần chạy đầu script tạo tài khoản `colab` và in **một lần** mật khẩu ngẫu nhiên cùng `DASH_API_KEY`. Mật khẩu chỉ lưu dạng hash PBKDF2 trong `~/.colab_dash_auth.json` (quyền 600, không nằm trong git). Đổi mật khẩu: `python3 vps_colab_runner/dash_auth.py --init --reset-password`.
+- Mở link, đăng nhập bằng tài khoản + mật khẩu, trình duyệt nhớ phiên 30 ngày. Sai 5 lần thì khóa IP 10 phút.
 - Link quick tunnel đổi mỗi lần chạy lại script. Cần link cố định thì phải dùng Cloudflare named tunnel (cần tên miền).
-- Không có `key` thì dashboard trả `401`, nên người lạ biết link cũng không xem hay bấm tắt GPU được.
+- Chưa đăng nhập thì mọi trang và API đều bị chặn (`302` về trang đăng nhập hoặc `401`).
+- `DASH_API_KEY` dành cho bot Telegram (header `X-API-Key`), xem mục 6.
 
-Hiển thị: ô thông số chính (epoch hiện tại/tổng, chỉ số val tốt nhất, loss mới nhất, thời gian đã chạy, ước tính còn lại, GPU bật/tắt), cấu hình lần chạy (loss, LR, batch, pretrained, thiết bị), số dư Colab, đếm ngược watchdog, tải VPS, bảng checkpoint đã tải về (kích thước, thời điểm, SHA256), biểu đồ theo epoch, sự kiện chính, log đã lọc nhiễu. Nút **TẮT GPU NGAY** dừng runner và chạy `--stop-all`.
+Hiển thị: ô thông số chính (epoch hiện tại/tổng, chỉ số val tốt nhất, loss mới nhất, thời gian đã chạy, ước tính còn lại, GPU bật/tắt), cấu hình lần chạy (loss, LR, batch, pretrained, thiết bị), số dư Colab, đếm ngược watchdog, tải VPS, bảng checkpoint đã tải về (kích thước, thời điểm, SHA256), biểu đồ theo epoch, sự kiện chính, log đã lọc nhiễu. Nút **TẮT GPU NGAY** dừng runner và chạy `--stop-all`. Mục **Khởi chạy phiên mới** chạy NB1/NB2 trong tmux (chỉ khi không có GPU nào đang bật, giới hạn 10-300 phút).
 
-Dùng cục bộ qua SSH tunnel (không cần Cloudflare): `python3 vps_colab_runner/dashboard.py --port 8765` rồi `ssh -N -L 8765:127.0.0.1:8765 ...`.
+Dùng cục bộ không cần Cloudflare: `python3 vps_colab_runner/dashboard.py --port 8765` rồi `ssh -N -L 8765:127.0.0.1:8765 ...` (nếu chưa tạo tài khoản thì chỉ nhận truy cập loopback, không cần đăng nhập).
 
 ---
 
@@ -88,3 +90,17 @@ Dùng cục bộ qua SSH tunnel (không cần Cloudflare): `python3 vps_colab_ru
   ```bash
   git rm -r vps_colab_runner && git commit -m "chore: remove temporary vps_colab_runner"
   ```
+
+---
+
+## 6. Xem trên bot Telegram (SELL_BOT)
+
+Bot kéo dữ liệu qua `GET /api/status` và điều khiển qua `POST /api/stop`, `POST /api/start` với header `X-API-Key: <DASH_API_KEY>`. Cấu hình trong `.env` của SELL_BOT:
+
+```
+COLABVPS_URL=https://<link-cloudflare-hien-tai>
+COLABVPS_API_KEY=<DASH_API_KEY>
+COLABVPS_ALERTS=true
+```
+
+Lệnh admin: `/train` (trạng thái, nút Làm mới, Log, Checkpoint, TẮT GPU, Chạy NB1/NB2, bật/tắt cảnh báo), `/trainlog`, `/trainurl <link>` (đổi link khi Cloudflare đổi, không cần sửa `.env`). Cảnh báo tự động gửi tới `ADMIN_ID`: kết thúc epoch, lập kỷ lục, runner dừng (NaN, hồi quy sớm, hết watchdog), GPU bật nhưng runner không chạy hơn 10 phút, watchdog còn dưới 10 phút, mất kết nối dashboard.
