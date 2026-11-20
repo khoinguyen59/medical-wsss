@@ -473,7 +473,13 @@ ResBlockBotStage1 = ResBlockBot
 class WSSSTissueStage1NetCAM(nn.Module):
     """Exact Stage-1 ResNet38d + Net_CAM architecture for BCSS-WSSS (105,087,296 parameters)."""
 
-    def __init__(self, n_class: Optional[int] = None, num_classes: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        n_class: Optional[int] = None,
+        num_classes: Optional[int] = None,
+        freeze_bn: bool = True,
+        freeze_early_stages: bool = True,
+    ) -> None:
         super().__init__()
         if n_class is None:
             if num_classes is not None:
@@ -482,6 +488,8 @@ class WSSSTissueStage1NetCAM(nn.Module):
                 n_class = 4
         self.n_class = n_class
         self.num_classes = n_class
+        self.freeze_bn = freeze_bn
+        self.freeze_early_stages = freeze_early_stages
 
         self.conv1a = nn.Conv2d(3, 64, 3, padding=1, bias=False)
 
@@ -513,6 +521,25 @@ class WSSSTissueStage1NetCAM(nn.Module):
         self.fc8 = nn.Conv2d(4096, n_class, 1, bias=False)
 
         nn.init.xavier_uniform_(self.fc8.weight)
+        self.not_training = [self.conv1a, self.b2, self.b2_1, self.b2_2]
+
+    def train(self, mode: bool = True) -> "WSSSTissueStage1NetCAM":
+        super().train(mode)
+        if mode:
+            if self.freeze_early_stages:
+                for layer in self.not_training:
+                    layer.eval()
+                    for param in layer.parameters():
+                        param.requires_grad = False
+            if self.freeze_bn:
+                for layer in self.modules():
+                    if isinstance(layer, nn.BatchNorm2d):
+                        layer.eval()
+                        if layer.weight is not None:
+                            layer.weight.requires_grad = False
+                        if layer.bias is not None:
+                            layer.bias.requires_grad = False
+        return self
 
     def forward_backbone(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1a(x)

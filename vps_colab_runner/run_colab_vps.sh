@@ -235,6 +235,7 @@ trigger_stop_exec() {
 }
 
 start_watcher() {
+  local start_line="${1:-1}"
   (
     local last_sync now
     last_sync="$(date +%s)"
@@ -247,12 +248,12 @@ start_watcher() {
         exit 0
       fi
       if [ -f "$RUN_LOG" ]; then
-        if grep -qE 'Loss: nan|Non-finite epoch loss|Train Loss=nan' "$RUN_LOG"; then
+        if tail -n +"$start_line" "$RUN_LOG" | grep -E 'Loss: nan|Non-finite epoch loss|Train Loss=nan' >/dev/null; then
           log "FAIL-FAST ALARM: Non-finite/NaN loss detected in run.log! Stopping Colab VM."
           trigger_stop_exec "NAN_ALARM"
           exit 0
         fi
-        if [ "$STOP_ON_ALARM" -eq 1 ] && grep -q '\[EARLY REGRESSION ALARM\]' "$RUN_LOG"; then
+        if [ "$STOP_ON_ALARM" -eq 1 ] && tail -n +"$start_line" "$RUN_LOG" | grep '\[EARLY REGRESSION ALARM\]' >/dev/null; then
           log "FAIL-FAST ALARM: [EARLY REGRESSION ALARM] triggered (Rule 17). Saving best ckpt and stopping VM."
           trigger_stop_exec "EARLY_REGRESSION_ALARM"
           exit 0
@@ -313,8 +314,9 @@ while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
     upload_checkpoint_for_resume "$CKPT_LOCAL_DIR/$CKPT_BEST_NAME" "/content/checkpoints/$CKPT_BEST_NAME"
   fi
 
-  start_watcher
   touch "$RUN_LOG"
+  LOG_START_LINE="$(( $(wc -l < "$RUN_LOG" 2>/dev/null || echo 0) + 1 ))"
+  start_watcher "$LOG_START_LINE"
   tail -n 0 -f "$RUN_LOG" &
   TAIL_PID="$!"
   set +e
