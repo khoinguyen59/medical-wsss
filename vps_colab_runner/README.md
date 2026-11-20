@@ -57,7 +57,26 @@ Nhấn `Ctrl + B` rồi `D` để thoát `tmux` (máy local tắt đi ngủ bìn
 
 ---
 
-## 4. Theo dõi, Dừng khẩn cấp, Kéo kết quả & Xóa sạch sau khi dùng xong
+## 4. Web dashboard theo dõi (giao diện sáng, trắng xanh dương)
+
+Dashboard chỉ dùng thư viện chuẩn Python, bind `127.0.0.1:8765` (không mở port ra internet, truy cập qua SSH tunnel).
+
+Trên VPS:
+```bash
+tmux new -s dashboard
+cd ~/medical-wsss && python3 vps_colab_runner/dashboard.py --port 8765
+```
+
+Trên máy Windows (giữ cửa sổ này mở), rồi mở http://127.0.0.1:8765 :
+```powershell
+ssh -N -L 8765:127.0.0.1:8765 -i "$env:USERPROFILE\.ssh\vps_colab_2026-11-20.key" ubuntu@<vps-ip>
+```
+
+Hiển thị: số dư và GPU Colab đang chạy, trạng thái runner và đếm ngược watchdog, tải VPS, bảng checkpoint đã tải về (kích thước, thời điểm, SHA256), chỉ số và biểu đồ theo epoch, sự kiện chính, log đã lọc nhiễu. Nút **TẮT GPU NGAY** dừng runner và chạy `--stop-all`.
+
+---
+
+## 5. Theo dõi, Dừng khẩn cấp, Kéo kết quả & Xóa sạch sau khi dùng xong
 
 - **Xem log trực tiếp:** `tail -f ~/medical-wsss/vps_colab_runner/runs/nb1/run.log`
 - **Kiểm tra trạng thái & số dư:** `bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --status`

@@ -154,6 +154,8 @@ rm -f "$STATE_DIR/stop_reason" "$STATE_DIR/exec.pid"
 
 START_EPOCH="$(date +%s)"
 DEADLINE_EPOCH="$((START_EPOCH + MAX_RUNTIME_MIN * 60))"
+printf 'START_EPOCH=%s\nDEADLINE_EPOCH=%s\nMAX_MINUTES=%s\nNOTEBOOK=%s\nGPU=%s\nSESSION=%s\nMAX_ATTEMPTS=%s\n' \
+  "$START_EPOCH" "$DEADLINE_EPOCH" "$MAX_RUNTIME_MIN" "$NOTEBOOK_FILE" "$GPU_TYPE" "$SESSION_NAME" "$((MAX_RETRIES + 1))" > "$STATE_DIR/meta.env"
 WATCHER_PID=""
 EXEC_PID=""
 TAIL_PID=""
@@ -300,6 +302,7 @@ while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
     break
   fi
 
+  printf '%s' "$ATTEMPT" > "$STATE_DIR/attempt"
   log "=== Attempt $ATTEMPT/$MAX_ATTEMPTS: Provisioning Colab session '$SESSION_NAME' ($GPU_TYPE) ==="
   colab_cmd stop -s "$SESSION_NAME" >/dev/null 2>&1 || true
   colab_cmd new -s "$SESSION_NAME" --gpu "$GPU_TYPE"
