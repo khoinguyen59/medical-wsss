@@ -104,7 +104,10 @@ class ProgressiveDropoutAttention(nn.Module):
         d_feat = feature_map.shape[1]
         d_weight = weight.shape[1]
         if d_feat != d_weight:
-            weight = weight[:, :d_feat, :, :]
+            raise ValueError(
+                f"Channel mismatch between feature_map ({d_feat}) and classifier weight ({d_weight}). "
+                "Do not slice unrelated classifier weights onto intermediate feature maps; use Grad-CAM instead."
+            )
 
         cam = F.conv2d(feature_map, weight)
         return F.relu(cam)

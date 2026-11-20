@@ -294,12 +294,14 @@ def test_train_stage1_dry_run(mock_dataset_dir: Path, tmp_path: Path):
     saved_path = Path(results["checkpoint_path"])
     assert saved_path.exists(), f"Checkpoint was not created at {saved_path}"
 
-    # Verify checkpoint contents
-    ckpt = torch.load(saved_path, map_location="cpu")
+    # Verify compact inference-only best checkpoint contents and zero_one paper-parity default
+    ckpt = torch.load(saved_path, map_location="cpu", weights_only=False)
     assert "state_dict" in ckpt
     assert "macro_f1" in ckpt
-    assert ckpt.get("input_norm") == "imagenet"
-    assert infer_stage1_norm_mode(ckpt, saved_path, "auto") == "imagenet"
+    assert "optimizer" not in ckpt, "stage1_retrained_best.pth must be compact (no optimizer bloat)"
+    assert "scheduler" not in ckpt, "stage1_retrained_best.pth must be compact (no scheduler bloat)"
+    assert ckpt.get("input_norm") == "zero_one"
+    assert infer_stage1_norm_mode(ckpt, saved_path, "auto") == "zero_one"
 
 
 def test_generate_pseudo_masks_dry_run(mock_dataset_dir: Path, tmp_path: Path):
@@ -354,6 +356,10 @@ def test_train_stage2_dry_run(mock_dataset_dir: Path, tmp_path: Path):
     assert "checkpoint_path" in results
     saved_path = Path(results["checkpoint_path"])
     assert saved_path.exists(), f"Stage 2 checkpoint was not created at {saved_path}"
+    ckpt_s2 = torch.load(saved_path, map_location="cpu", weights_only=False)
+    assert "state_dict" in ckpt_s2
+    assert "optimizer" not in ckpt_s2, "stage2_retrained_best.pth must be compact (no optimizer bloat)"
+    assert "scheduler" not in ckpt_s2, "stage2_retrained_best.pth must be compact (no scheduler bloat)"
 
 
 def test_governance_invariants_training_files():
@@ -596,6 +602,570 @@ def test_generate_pseudo_masks_stage1_norm_routing(
             device_str="cpu",
             stage1_norm_mode="invalid",
         )
+
+
+def test_stage1_val_mask_label_derivation_and_zero_one_norm(tmp_path: Path):
+    """Verify BCSSStage1Dataset & BCSSEvalDataset derive true multi-hot labels from mode-P masks when filename lacks brackets."""
+    val_img_dir = tmp_path / "val" / "img"
+    val_mask_dir = tmp_path / "val" / "mask"
+    val_img_dir.mkdir(parents=True)
+    val_mask_dir.mkdir(parents=True)
+
+    # Filename without [a b c d] brackets (matches real data/BCSS-WSSS/val/img/*.png)
+    fname = "TCGA-EW-A1PB-DX1_xmin57214_ymin25940_MPP-0.2500+0.png"
+    Image.fromarray(np.full((224, 224, 3), 160, dtype=np.uint8)).save(val_img_dir / fname)
+
+    # Mask containing strictly STR (1), NEC (3), and BACK (4) - NO TUM (0) or LYM (2)
+    mask_arr = np.full((224, 224), 4, dtype=np.uint8)
+    mask_arr[:80, :80] = 1
+    mask_arr[100:160, 100:160] = 3
+    m_img = Image.fromarray(mask_arr, mode="P")
+    m_img.putpalette(BCSS_PALETTE)
+    m_img.save(val_mask_dir / fname)
+
+    ds_s1 = BCSSStage1Dataset(
+        root_dir=val_img_dir,
+        mask_dir=val_mask_dir,
+        is_train=False,
+        return_mask=True,
+        input_norm="zero_one",
+    )
+    img_t, lbl_t, mask_t, _ = ds_s1[0]
+    assert torch.equal(lbl_t, torch.tensor([0.0, 1.0, 0.0, 1.0], dtype=torch.float32)), (
+        f"Expected mask-derived [0, 1, 0, 1], got {lbl_t.tolist()}"
+    )
+    assert float(img_t.min()) >= 0.0 and float(img_t.max()) <= 1.0
+    assert set(torch.unique(mask_t).tolist()) == {1, 3, 4}
+
+    ds_eval = BCSSEvalDataset(img_dir=val_img_dir, mask_dir=val_mask_dir)
+    _, eval_mask, eval_cls, _ = ds_eval[0]
+    assert torch.equal(eval_cls, torch.tensor([0.0, 1.0, 0.0, 1.0], dtype=torch.float32))
+    assert set(torch.unique(eval_mask).tolist()) == {1, 3, 4}
+
+
+def test_stage1_multilabel_validation_metrics_and_edge_cases():
+    """Verify threshold-invariant mAP, Macro-AUROC, Best-F1 (resistant to threshold shift), and degenerate edge cases."""
+    from src.training.train_stage1 import compute_multilabel_validation_metrics
+
+    y_true = np.array([
+        [1, 0, 1, 0],
+        [1, 1, 0, 0],
+        [0, 1, 0, 1],
+        [0, 0, 1, 1],
+    ], dtype=np.float32)
+
+    # Shifted probabilities: all positives at 0.35, all negatives at 0.10 (@0.5 F1 would be 0.0)
+    y_prob_shifted = np.where(y_true > 0.5, 0.35, 0.10).astype(np.float32)
+    m = compute_multilabel_validation_metrics(y_true, y_prob_shifted)
+    assert m["val_macro_f1"] == 0.0
+    assert m["val_mAP"] == pytest.approx(1.0, abs=1e-6)
+    assert m["val_auroc"] == pytest.approx(1.0, abs=1e-6)
+    assert m["val_best_f1"] == pytest.approx(1.0, abs=1e-6)
+
+    # Edge case: empty arrays and single-class-all-zero / all-one
+    m_empty = compute_multilabel_validation_metrics(
+        np.zeros((0, 4), dtype=np.float32),
+        np.zeros((0, 4), dtype=np.float32),
+    )
+    assert m_empty["val_mAP"] == 0.0 and m_empty["val_auroc"] == 0.0
+
+    y_deg = np.array([[0, 1, 1, 0], [0, 1, 0, 0]], dtype=np.float32)
+    p_deg = np.array([[0.2, 0.9, 0.8, 0.1], [0.1, 0.7, 0.2, 0.3]], dtype=np.float32)
+    m_deg = compute_multilabel_validation_metrics(y_deg, p_deg)
+    assert np.isfinite(m_deg["val_mAP"]) and np.isfinite(m_deg["val_auroc"]) and np.isfinite(m_deg["val_best_f1"])
+
+
+def test_stage1_pretrained_loader_blocks_silent_random_init_and_loads_pth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify load_pretrained_resnet38d_weights blocks silent random init and resets fc8 when loading backbone .pth."""
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.train_stage1 import load_pretrained_resnet38d_weights
+
+    model = WSSSTissueStage1NetCAM(n_class=4)
+
+    # 1. Explicit missing path raises FileNotFoundError when allow_random_init=False
+    with pytest.raises(FileNotFoundError):
+        load_pretrained_resnet38d_weights(model, pretrained_path=tmp_path / "missing.pth", allow_random_init=False)
+
+    # 2. No local pretrained file raises RuntimeError when allow_random_init=False
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(RuntimeError, match="Refusing silent training from random weights"):
+        load_pretrained_resnet38d_weights(model, pretrained_path=None, allow_random_init=False, cache_dir=tmp_path)
+
+    # 3. Valid .pth backbone loads >100 layers while keeping fc8 reset
+    src_model = WSSSTissueStage1NetCAM(n_class=4)
+    with torch.no_grad():
+        src_model.conv1a.weight.fill_(0.1234)
+        src_model.fc8.weight.fill_(9.9999)
+    ckpt_file = tmp_path / "resnet38d_mock_pretrained.pth"
+    torch.save({"state_dict": {f"module.{k}": v for k, v in src_model.state_dict().items()}}, ckpt_file)
+
+    orig_fc8 = model.fc8.weight.detach().clone()
+    info = load_pretrained_resnet38d_weights(
+        model,
+        pretrained_path=ckpt_file,
+        allow_random_init=False,
+        reset_classifier_head=True,
+    )
+    assert info["loaded_layers"] >= 100
+    assert torch.allclose(model.conv1a.weight, torch.full_like(model.conv1a.weight, 0.1234))
+    assert torch.equal(model.fc8.weight, orig_fc8), "fc8 classifier head must stay reset on backbone transfer"
+
+    # 4. Partial/under-loaded checkpoint raises RuntimeError unless allow_random_init=True
+    tiny_ckpt = tmp_path / "tiny_bad.pth"
+    torch.save({"conv1a.weight": torch.zeros(64, 3, 3, 3)}, tiny_ckpt)
+    with pytest.raises(RuntimeError, match="Loaded only 1/"):
+        load_pretrained_resnet38d_weights(model, pretrained_path=tiny_ckpt, allow_random_init=False)
+    with pytest.warns(UserWarning, match="Loaded only 1/"):
+        warn_info = load_pretrained_resnet38d_weights(model, pretrained_path=tiny_ckpt, allow_random_init=True)
+    assert warn_info["loaded_layers"] == 1
+
+
+def test_stage1_dry_run_soft_margin_zero_one_and_val_gated_pm_miou(mock_dataset_dir: Path, tmp_path: Path):
+    """Verify train_stage1_pipeline saves input_norm='zero_one', loss_type='soft_margin', and selects best ckpt by val_gated_pm_miou."""
+    # Add two validation patches whose patient ID belongs to the official val split (disjoint from train)
+    splits = load_bcss_patient_splits()
+    val_pid = splits["val"][0]
+    val_img_dir = mock_dataset_dir / "val" / "img"
+    val_mask_dir = mock_dataset_dir / "val" / "mask"
+    for idx in range(2):
+        fname = f"{val_pid}-DX1_xmin100_ymin{idx * 224}_MPP-0.2500+{idx}.png"
+        Image.fromarray(np.random.randint(100, 210, (224, 224, 3), dtype=np.uint8)).save(val_img_dir / fname)
+        mask_arr = np.full((224, 224), 4, dtype=np.uint8)
+        mask_arr[:112, :] = idx  # Class 0 (TUM) on idx=0, Class 1 (STR) on idx=1
+        mask_arr[112:180, :] = (idx + 2) % 4  # Class 2 (LYM) or 3 (NEC)
+        m_img = Image.fromarray(mask_arr, mode="P")
+        m_img.putpalette(BCSS_PALETTE)
+        m_img.save(val_mask_dir / fname)
+
+    ckpt_dir = tmp_path / "ckpt_s1_zero_one"
+    res = train_stage1_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_dir=ckpt_dir,
+        epochs=1,
+        batch_size=2,
+        lr=1.4e-4,
+        loss_type="soft_margin",
+        input_norm="zero_one",
+        dry_run=True,
+        device_str="cpu",
+    )
+    assert res["input_norm"] == "zero_one"
+    assert res["loss_type"] == "soft_margin"
+    assert res["best_val_metric"] == "val_gated_pm_miou"
+    assert "val_mAP" in res["history"][0]
+    assert "val_auroc" in res["history"][0]
+    assert "val_best_f1" in res["history"][0]
+    assert "val_gated_pm_miou" in res["history"][0]
+    assert 0.0 <= res["history"][0]["val_gated_pm_miou"] <= 1.0
+
+    ckpt = torch.load(res["checkpoint_path"], map_location="cpu", weights_only=False)
+    assert ckpt["input_norm"] == "zero_one"
+    assert ckpt["best_val_metric"] == "val_gated_pm_miou"
+    assert infer_stage1_norm_mode(ckpt, res["checkpoint_path"], "auto") == "zero_one"
+
+
+def test_stage2_imagenet_guard_and_gt4_exclusion(monkeypatch: pytest.MonkeyPatch):
+    """Verify load_imagenet_pretrained_resnet101 blocks silent 0-layer fallback and Stage2Trainer.evaluate excludes gt==4."""
+    from torch.utils.data import DataLoader, Dataset
+
+    from src.models.wsss_inference_methods import DeepLabV3Plus
+    from src.training.train_stage2 import Stage2Trainer, load_imagenet_pretrained_resnet101
+
+    model = DeepLabV3Plus(num_classes=5, output_stride=16)
+
+    # 1. Simulate offline torchvision download failure -> RuntimeError by default, warning with fallback=True
+    import torchvision.models as tv_models
+
+    def _boom(*args, **kwargs):
+        raise OSError("Simulated offline environment")
+
+    monkeypatch.setattr(tv_models, "resnet101", _boom)
+    with pytest.raises(RuntimeError, match="Failed to load ImageNet ResNet-101"):
+        load_imagenet_pretrained_resnet101(model, allow_random_init_fallback=False)
+    with pytest.warns(UserWarning, match="ImageNet weights not loaded"):
+        loaded = load_imagenet_pretrained_resnet101(model, allow_random_init_fallback=True)
+    assert loaded == 0
+
+    # 2. Verify Stage2Trainer.evaluate strictly excludes gt==4 (repos/WSSS-Tissue/3_train_stage2.py)
+    gt_mask = torch.full((16, 16), 4, dtype=torch.long)
+    gt_mask[0:4, :] = 0  # TUM
+    gt_mask[4:8, :] = 1  # STR
+    gt_mask[8:12, :] = 2  # LYM
+    gt_mask[12:14, :] = 3  # NEC
+    # Rows 14:16 remain class 4 (outside-ROI background)
+
+    class _ExactOnFgButTUMOnBgModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.dummy = nn.Parameter(torch.zeros(1))
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            b, _, h, w = x.shape
+            logits = torch.full((b, 5, h, w), -5.0, device=x.device)
+            logits[:, 0, 0:4, :] = 5.0
+            logits[:, 1, 4:8, :] = 5.0
+            logits[:, 2, 8:12, :] = 5.0
+            logits[:, 3, 12:14, :] = 5.0
+            # Deliberately predict TUM (0) on outside-ROI background rows 14:16
+            logits[:, 0, 14:16, :] = 5.0
+            return logits
+
+    class _SingleEvalDS(Dataset):
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, idx: int):
+            return torch.zeros((3, 16, 16)), gt_mask, torch.ones(4), "sample"
+
+    stub = _ExactOnFgButTUMOnBgModel()
+    trainer = Stage2Trainer(
+        model=stub,  # type: ignore[arg-type]
+        optimizer=torch.optim.SGD(stub.parameters(), lr=1e-3),
+        stage1_model=None,
+        device=torch.device("cpu"),
+        enable_amp=False,
+    )
+    metrics = trainer.evaluate(DataLoader(_SingleEvalDS(), batch_size=1), use_cgm=False)
+    assert metrics["mIoU"] == pytest.approx(1.0, abs=1e-6), (
+        f"Outside-ROI gt==4 must be excluded from 4-class mIoU (expected 1.0, got {metrics['mIoU']})"
+    )
+    assert metrics["mDice"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_gated_cam_zero_tie_never_leaks_absent_tumor():
+    """Verify zero-CAM tie breaking never hallucinates absent Class 0 (TUM) in Stage1Trainer.evaluate or assemble_pseudo_mask."""
+    from torch.utils.data import DataLoader, Dataset
+
+    from src.training.train_stage1 import Stage1Trainer
+
+    # 1. assemble_pseudo_mask with background_threshold=0.0 and active_labels=[0, 1, 0, 0]
+    # All-zero CAMs on an all-STR tissue patch must predict Class 1 (STR), NEVER absent Class 0 (TUM)
+    zero_cams = torch.zeros((1, 4, 32, 32), dtype=torch.float32)
+    tissue_img = np.full((1, 32, 32, 3), 120, dtype=np.uint8)
+    tissue_img[..., 0] = 180  # Non-glass H&E-like saturation
+    active_lbl = torch.tensor([[0.0, 1.0, 0.0, 0.0]], dtype=torch.float32)
+    pm = assemble_pseudo_mask(zero_cams, tissue_img, background_threshold=0.0, active_labels=active_lbl)
+    assert int((pm == 0).sum()) == 0, "Absent Class 0 (TUM) leaked on zero-CAM tie in assemble_pseudo_mask"
+    assert np.all(pm == 1), f"Expected all tissue pixels assigned to sole active class 1 (STR), got {np.unique(pm)}"
+
+    # 2. Stage1Trainer.evaluate on a non-TUM patch where ReLU CAM is 0 everywhere
+    class _ZeroCAMStage1Stub(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fc8 = nn.Conv2d(4, 4, kernel_size=1, bias=False)
+            with torch.no_grad():
+                self.fc8.weight.fill_(-1.0)  # Negative weights -> F.relu(conv2d) == 0 everywhere
+            self.pool = nn.AdaptiveAvgPool2d((1, 1))
+            self.dropout7 = nn.Identity()
+
+        def forward_backbone(self, x: torch.Tensor) -> torch.Tensor:
+            return torch.ones((x.size(0), 4, 4, 4), device=x.device)
+
+    class _SingleValDS(Dataset):
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, idx: int):
+            img = torch.zeros((3, 16, 16))
+            lbl = torch.tensor([0.0, 1.0, 0.0, 0.0], dtype=torch.float32)  # Only STR present
+            gt = torch.ones((16, 16), dtype=torch.long)  # All STR
+            return img, lbl, gt, "non_tum_patch"
+
+    stub = _ZeroCAMStage1Stub()
+    trainer = Stage1Trainer(
+        model=stub,  # type: ignore[arg-type]
+        optimizer=torch.optim.SGD(stub.parameters(), lr=1e-3),
+        criterion=nn.MultiLabelSoftMarginLoss(),
+        device=torch.device("cpu"),
+        enable_amp=False,
+    )
+    res = trainer.evaluate(DataLoader(_SingleValDS(), batch_size=1))
+    assert res["val_pm_iou_tum"] == 0.0
+    assert res["val_pm_iou_str"] == pytest.approx(1.0, abs=1e-6), (
+        f"Zero-CAM tie leaked absent Class 0 instead of sole active Class 1 (got val_pm_iou_str={res['val_pm_iou_str']})"
+    )
+
+
+def test_sg_dap_chunked_batch_matches_single_sample_exactly():
+    """Verify per-sample chunked StainGuidedAffinityRefiner produces identical results to B=1 execution."""
+    from src.models.sg_dap import StainGuidedAffinityRefiner
+
+    torch.manual_seed(7)
+    refiner = StainGuidedAffinityRefiner(kernel_size=5, num_iters=4).eval()
+    rgb = torch.rand(3, 3, 24, 24)
+    deep = torch.randn(3, 32, 6, 6)
+    cam = torch.rand(3, 4, 24, 24)
+
+    with torch.no_grad():
+        batch_probs, batch_masks = refiner(rgb, deep, cam, return_ignore_mask=True)
+        for i in range(3):
+            single_probs, single_masks = refiner(
+                rgb[i : i + 1], deep[i : i + 1], cam[i : i + 1], return_ignore_mask=True
+            )
+            assert torch.allclose(batch_probs[i : i + 1], single_probs, atol=1e-6)
+            assert torch.equal(batch_masks[i : i + 1], single_masks)
+
+
+def test_multilayer_cam_extractor_uses_gradcam_for_b5_2_and_b4_5():
+    """Verify MultiLayerCAMExtractor uses authentic Grad-CAM for b5_2/b4_5 (not fc8 slicing) and clears grads."""
+    from src.models.pda_generator import ProgressiveDropoutAttention
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.generate_pseudo_masks import MultiLayerCAMExtractor
+
+    torch.manual_seed(42)
+    model = WSSSTissueStage1NetCAM(n_class=4).eval()
+    extractor = MultiLayerCAMExtractor(model, device=torch.device("cpu"))
+
+    images = torch.rand(2, 3, 64, 64)
+    labels = torch.tensor([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 0.0]], dtype=torch.float32)
+
+    # 1. Works cleanly even if caller wraps in torch.no_grad() and produces valid [0, 1] gated CAMs
+    with torch.no_grad():
+        cams_1 = extractor.extract_cams(images, labels)
+
+    for layer_key in ("bn7", "b5_2", "b4_5"):
+        cam = cams_1[layer_key]
+        assert cam.shape == (2, 4, 64, 64)
+        assert torch.isfinite(cam).all()
+        assert float(cam.min()) >= 0.0 and float(cam.max()) <= 1.0 + 1e-5
+        assert not cam.requires_grad
+        # Absent classes must be strictly zero
+        assert float(cam[0, 1].abs().sum()) == 0.0
+        assert float(cam[0, 3].abs().sum()) == 0.0
+        assert float(cam[1, 0].abs().sum()) == 0.0
+        assert float(cam[1, 2].abs().sum()) == 0.0
+        assert float(cam[1, 3].abs().sum()) == 0.0
+
+    # 2. All model parameter grads must remain clean (None) and stored features detached
+    assert all(p.grad is None for p in model.parameters())
+    for lk in ("bn7", "b5_2", "b4_5"):
+        assert not extractor.features[lk].requires_grad
+
+    # 3. Modifying deeper b7 weights MUST change b5_2 and b4_5 Grad-CAMs (proves genuine backward gradient flow;
+    # the old invalid fc8[:, :D] slicing ignored b6/b7 completely!)
+    with torch.no_grad():
+        model.b7.conv_branch2b2.weight.mul_(-1.0)
+    cams_2 = extractor.extract_cams(images, labels)
+    assert not torch.allclose(cams_1["b5_2"][0, 0], cams_2["b5_2"][0, 0], atol=1e-5), (
+        "b5_2 CAM did not respond to deeper b7 weight change; Grad-CAM gradient flow broken!"
+    )
+    assert not torch.allclose(cams_1["b4_5"][0, 0], cams_2["b4_5"][0, 0], atol=1e-5), (
+        "b4_5 CAM did not respond to deeper b7 weight change; Grad-CAM gradient flow broken!"
+    )
+
+    # 3b. Batch independence (B=2 matches per-sample B=1) & frozen-parameter compatibility
+    cams_s0 = extractor.extract_cams(images[0:1], labels[0:1])
+    cams_s1 = extractor.extract_cams(images[1:2], labels[1:2])
+    for lk in ("bn7", "b5_2", "b4_5"):
+        assert torch.allclose(cams_2[lk][0:1], cams_s0[lk], atol=1e-5)
+        assert torch.allclose(cams_2[lk][1:2], cams_s1[lk], atol=1e-5)
+    for p in model.parameters():
+        p.requires_grad_(False)
+    cams_frozen = extractor.extract_cams(images, labels)
+    for lk in ("bn7", "b5_2", "b4_5"):
+        assert torch.allclose(cams_2[lk], cams_frozen[lk], atol=1e-5)
+    cams_all_zero = extractor.extract_cams(images, torch.zeros_like(labels))
+    for lk in ("bn7", "b5_2", "b4_5"):
+        assert torch.isfinite(cams_all_zero[lk]).all() and float(cams_all_zero[lk].abs().max()) == 0.0
+
+    extractor.remove_hooks()
+    assert len(extractor.features) == 0, "remove_hooks() must clear cached intermediate feature tensors"
+
+    # 4. ProgressiveDropoutAttention must reject mismatched feature/weight channel counts
+    pda = ProgressiveDropoutAttention(num_steps=2)
+    with pytest.raises(ValueError, match="Channel mismatch"):
+        pda(torch.randn(1, 512, 8, 8), torch.randn(4, 4096, 1, 1))
+
+
+def test_sg_dap_active_labels_eliminates_absent_class_leak():
+    """Verify StainGuidedAffinityRefiner with active_labels leaks 0% absent-class pixels under both ignore modes."""
+    from src.models.sg_dap import StainGuidedAffinityRefiner
+
+    torch.manual_seed(11)
+    refiner = StainGuidedAffinityRefiner(kernel_size=5, num_iters=4).eval()
+    rgb = torch.rand(2, 3, 24, 24).clamp(0.05, 0.95)
+    deep = torch.randn(2, 32, 6, 6)
+
+    # Sample 0: only STR (1) active; Sample 1: STR (1) and NEC (3) active
+    active_labels = torch.tensor([[0.0, 1.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0]], dtype=torch.float32)
+
+    # Case A: All-zero CAMs (triggers uniform_prior fallback)
+    zero_cam = torch.zeros(2, 4, 24, 24, dtype=torch.float32)
+    # Case B: Noisy CAM with strong spurious activation on absent Class 0 (TUM) and Class 2 (LYM)
+    noisy_cam = torch.zeros(2, 4, 24, 24, dtype=torch.float32)
+    noisy_cam[:, 0, :, :] = 5.0
+    noisy_cam[:, 2, :, :] = 3.0
+    noisy_cam[0, 1, :12, :] = 0.8
+    noisy_cam[1, 1, :, :12] = 0.9
+    noisy_cam[1, 3, :, 12:] = 0.9
+
+    for cam_in in (zero_cam, noisy_cam):
+        for return_ign in (False, True):
+            with torch.no_grad():
+                probs, mask = refiner(
+                    rgb, deep, cam_in, return_ignore_mask=return_ign, active_labels=active_labels
+                )
+            # Probability simplex conserved everywhere
+            assert torch.allclose(probs.sum(dim=1), torch.ones(2, 24, 24), atol=1e-5)
+            # Absent channels strictly 0.0
+            assert float(probs[0, [0, 2, 3]].abs().max()) == 0.0
+            assert float(probs[1, [0, 2]].abs().max()) == 0.0
+            # Zero absent-class pixels in discrete mask
+            valid_0 = set(torch.unique(mask[0]).tolist()) - ({255} if return_ign else set())
+            valid_1 = set(torch.unique(mask[1]).tolist()) - ({255} if return_ign else set())
+            assert valid_0.issubset({1}), f"Absent class leaked in sample 0 (return_ignore={return_ign}): {valid_0}"
+            assert valid_1.issubset({1, 3}), f"Absent class leaked in sample 1 (return_ignore={return_ign}): {valid_1}"
+            # Single-active-class sample 0 must be 100% Class 1 even under return_ignore_mask=True
+            assert torch.all(mask[0] == 1)
+
+    # Edge case: all-zero active_labels must gracefully avoid NaN/div-by-zero
+    all_zero_lbl = torch.zeros(2, 4, dtype=torch.float32)
+    with torch.no_grad():
+        probs_z, mask_z = refiner(rgb, deep, zero_cam, return_ignore_mask=False, active_labels=all_zero_lbl)
+    assert torch.isfinite(probs_z).all()
+    assert torch.allclose(probs_z.sum(dim=1), torch.ones(2, 24, 24), atol=1e-5)
+    assert mask_z.shape == (2, 24, 24)
+
+
+def test_stage1_checkpoint_load_parity_strict_validation(mock_dataset_dir: Path, tmp_path: Path):
+    """Verify strict Stage-1 checkpoint validation (prefix stripping, >=100 layers, missing/corrupt errors)."""
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.train_stage2 import load_stage1_checkpoint_into_model
+
+    # 1. Missing checkpoint path raises FileNotFoundError in both pipelines
+    missing_ckpt = tmp_path / "does_not_exist.pth"
+    with pytest.raises(FileNotFoundError):
+        generate_pseudo_masks_pipeline(
+            data_dir=mock_dataset_dir,
+            checkpoint_path=missing_ckpt,
+            output_dir=tmp_path / "pm_missing",
+            dry_run=True,
+            device_str="cpu",
+        )
+    with pytest.raises(FileNotFoundError):
+        generate_pseudo_masks_pipeline(
+            data_dir=mock_dataset_dir,
+            checkpoint_path=None,
+            output_dir=tmp_path / "pm_none",
+            dry_run=False,
+            device_str="cpu",
+        )
+    with pytest.raises(FileNotFoundError):
+        train_stage2_pipeline(
+            data_dir=mock_dataset_dir,
+            pm_dir=mock_dataset_dir / "train_PM",
+            stage1_checkpoint=missing_ckpt,
+            checkpoint_dir=tmp_path / "ckpt_missing",
+            dry_run=True,
+            device_str="cpu",
+        )
+
+    # 2. Corrupt checkpoint file raises RuntimeError by default, warns when allow_random_init=True
+    corrupt_ckpt = tmp_path / "corrupt_stage1.pth"
+    corrupt_ckpt.write_bytes(b"not a valid torch checkpoint payload")
+    with pytest.raises(RuntimeError, match="Failed to load corrupt Stage-1 checkpoint"):
+        load_stage1_checkpoint_into_model(WSSSTissueStage1NetCAM(n_class=4), corrupt_ckpt)
+    with pytest.warns(UserWarning, match="Failed to load corrupt Stage-1 checkpoint"):
+        norm_c, matched_c = load_stage1_checkpoint_into_model(
+            WSSSTissueStage1NetCAM(n_class=4), corrupt_ckpt, allow_random_init=True
+        )
+    assert norm_c == "zero_one" and matched_c == 0
+    with pytest.warns(UserWarning, match="Stage-1 checkpoint not found"):
+        norm_m, matched_m = load_stage1_checkpoint_into_model(
+            WSSSTissueStage1NetCAM(n_class=4), missing_ckpt, allow_random_init=True
+        )
+    assert norm_m == "zero_one" and matched_m == 0
+
+    # 3. Under-loaded checkpoint (<100 matched layers) raises RuntimeError by default, warns when allow_random_init=True
+    tiny_ckpt = tmp_path / "tiny_stage1.pth"
+    torch.save({"module.conv1a.weight": torch.zeros(64, 3, 3, 3)}, tiny_ckpt)
+    with pytest.raises(RuntimeError, match="Loaded only 1/"):
+        load_stage1_checkpoint_into_model(WSSSTissueStage1NetCAM(n_class=4), tiny_ckpt)
+    with pytest.warns(UserWarning, match="Loaded only 1/"):
+        _, matched_t = load_stage1_checkpoint_into_model(
+            WSSSTissueStage1NetCAM(n_class=4), tiny_ckpt, allow_random_init=True
+        )
+    assert matched_t == 1
+
+    # 4. Valid module./model.-prefixed checkpoint loads >=100 layers cleanly
+    src_m = WSSSTissueStage1NetCAM(n_class=4)
+    with torch.no_grad():
+        src_m.conv1a.weight.fill_(0.321)
+    prefixed_ckpt = tmp_path / "prefixed_stage1.pth"
+    torch.save(
+        {"state_dict": {f"module.model.{k}": v for k, v in src_m.state_dict().items()}},
+        prefixed_ckpt,
+    )
+    dst_m = WSSSTissueStage1NetCAM(n_class=4)
+    norm_mode, matched = load_stage1_checkpoint_into_model(dst_m, prefixed_ckpt)
+    assert matched >= 100
+    assert norm_mode == "zero_one"
+    assert torch.allclose(dst_m.conv1a.weight, torch.full_like(dst_m.conv1a.weight, 0.321))
+
+    # 5. Author checkpoint filename defaults to zero_one under 'auto', but honors explicit 'imagenet' override
+    author_named_ckpt = tmp_path / "stage1_checkpoint_trained_on_bcss.pth"
+    torch.save(src_m.state_dict(), author_named_ckpt)
+    norm_auto, matched_auto = load_stage1_checkpoint_into_model(dst_m, author_named_ckpt, stage1_norm_mode="auto")
+    assert norm_auto == "zero_one" and matched_auto >= 100
+    norm_explicit, matched_exp = load_stage1_checkpoint_into_model(
+        dst_m, author_named_ckpt, stage1_norm_mode="imagenet"
+    )
+    assert norm_explicit == "imagenet" and matched_exp >= 100
+
+    # 6. End-to-end generate_pseudo_masks_pipeline(..., use_sg_dap=True) leaks 0 absent-class pixels across all 3 layers
+    sg_data = tmp_path / "sg_dap_ds"
+    (sg_data / "train").mkdir(parents=True)
+    patch_name = "TCGA-A1-A0SK_0_0_[0 1 0 0].png"  # Only STR (1) active
+    tissue = np.full((64, 64, 3), 120, dtype=np.uint8)
+    tissue[..., 0] = 190
+    Image.fromarray(tissue).save(sg_data / "train" / patch_name)
+    sg_out = tmp_path / "sg_dap_pm"
+    sg_res = generate_pseudo_masks_pipeline(
+        data_dir=sg_data,
+        checkpoint_path=author_named_ckpt,
+        output_dir=sg_out,
+        batch_size=1,
+        dry_run=True,
+        device_str="cpu",
+        use_sg_dap=True,
+    )
+    assert sg_res["processed_count"] == 1
+    for sub in ("PM_bn7", "PM_b5_2", "PM_b4_5"):
+        arr = np.array(Image.open(sg_out / sub / patch_name))
+        assert set(np.unique(arr).tolist()).issubset({1, 4, 255}), (
+            f"Absent class leaked in {sub}: {np.unique(arr).tolist()}"
+        )
+
+
+def test_stage2_dataset_resizes_non_224_masks_nearest(tmp_path: Path):
+    """Verify BCSSStage2MultiMaskDataset resizes non-224x224 images and masks with NEAREST preserving discrete IDs."""
+    img_dir = tmp_path / "train"
+    pm_root = tmp_path / "train_PM"
+    img_dir.mkdir(parents=True)
+    fname = "TCGA-A1-A0SK_100_200_[1 1 0 1].png"
+
+    # Non-224x224 rectangular patch (160x192)
+    Image.fromarray(np.random.randint(80, 200, (192, 160, 3), dtype=np.uint8)).save(img_dir / fname)
+    for layer in ("PM_bn7", "PM_b5_2", "PM_b4_5"):
+        ldir = pm_root / layer
+        ldir.mkdir(parents=True, exist_ok=True)
+        m_arr = np.full((192, 160), 4, dtype=np.uint8)
+        m_arr[:60, :80] = 0
+        m_arr[60:120, :80] = 1
+        m_arr[120:160, 80:] = 3
+        m_arr[160:, :] = 255  # ignore_index
+        save_palette_mask(m_arr, ldir / fname)
+
+    ds = BCSSStage2MultiMaskDataset(img_dir=img_dir, pm_root_dir=pm_root, is_train=True)
+    sample = ds[0]
+    assert sample["image"].shape == (3, 224, 224)
+    for key in ("label", "label_a", "label_b"):
+        assert sample[key].shape == (224, 224)
+        uniq = set(torch.unique(sample[key]).tolist())
+        assert uniq.issubset({0, 1, 3, 4, 255}), f"Unexpected interpolated mask values in {key}: {uniq}"
+        assert 255 in uniq, f"ignore_index=255 lost during NEAREST resize in {key}"
+
+
 
 
 

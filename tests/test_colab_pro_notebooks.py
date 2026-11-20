@@ -586,6 +586,121 @@ def test_generator_clean_cells_have_safe_paletted_mask_loading():
         )
 
 
+def test_notebook_01_rule17_pretrained_validation_loop_and_parity():
+    """Verify Notebook 01 (Base, T4, L4) enforces Rule 17 pretrained init, independent val loop, and loss/LR parity."""
+    for key in ("stage1", "stage1_t4", "stage1_l4"):
+        content = NOTEBOOKS[key].read_text(encoding="utf-8")
+        assert "load_pretrained_resnet38d_weights" in content, f"{key} missing pretrained ResNet-38d loader"
+        assert "ALLOW_RANDOM_INIT = DRY_RUN" in content, f"{key} missing anti-silent-random-init guard"
+        assert "LOSS_TYPE = 'soft_margin'" in content, f"{key} missing paper-parity soft_margin loss default"
+        assert "STAGE1_INPUT_NORM" in content and "'input_norm': STAGE1_INPUT_NORM" in content, (
+            f"{key} missing explicit input_norm persistence in checkpoint"
+        )
+        assert "BCSSStage1ValDataset" in content and "evaluate_stage1_validation" in content, (
+            f"{key} missing independent validation loop"
+        )
+        for metric_key in ("val_mAP", "val_auroc", "val_best_f1", "val_gated_pm_miou"):
+            assert metric_key in content, f"{key} missing validation metric {metric_key}"
+        assert "if epoch_acc >= best_acc:" not in content, (
+            f"{key} must NOT select best checkpoint by train accuracy!"
+        )
+
+    t4_s1 = NOTEBOOKS["stage1_t4"].read_text(encoding="utf-8")
+    l4_s1 = NOTEBOOKS["stage1_l4"].read_text(encoding="utf-8")
+    assert "MAX_EPOCHS = 3 if DRY_RUN else 20" in t4_s1 and "LEARNING_RATE = 1e-4" in t4_s1
+    assert "MAX_EPOCHS = 3 if DRY_RUN else 25" in l4_s1 and "LEARNING_RATE = 1.4e-4" in l4_s1
+
+
+def test_notebook_02_six_audit_fixes_parity():
+    """Verify Notebook 02 (Base, T4, L4, root T4) includes all 6 audited scientific fixes."""
+    for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
+        content = NOTEBOOKS[key].read_text(encoding="utf-8")
+        # (a) Explicit Stage-1 checkpoint policy + SG-DAP + quick val pseudo-mask sanity check
+        assert "STAGE1_CKPT_SOURCE = 'author_baseline'" in content, f"{key} missing explicit Stage-1 selection policy"
+        assert "USE_SG_DAP = True" in content, f"{key} missing verified USE_SG_DAP=True default"
+        assert "[PM SANITY CHECK" in content, f"{key} missing pre-generation validation PM sanity check"
+        # (b) Outside-ROI gt==4 exclusion in _quick_val_miou and Cell 16
+        assert "pred_v[gt_arr == 4] = 4" in content, f"{key} missing gt==4 exclusion in _quick_val_miou"
+        assert "pred_raw_roi[gt_arr == 4] = 4" in content, f"{key} missing gt==4 exclusion in Cell 16"
+        # (c) Unbiased batched validation (no sorted(...)[:120] or [:200])
+        assert "BCSSStage2ValDataset" in content and "_sample_patient_stratified_s2" in content, (
+            f"{key} missing batched/stratified validation dataset"
+        )
+        assert "[: (24 if DRY_RUN else 120)]" not in content, f"{key} still contains biased [:120] slicing"
+        assert "min(200, len(val_files))" not in content, f"{key} still contains biased [:200] slicing"
+        # (d) Synchronized Data Augmentation in BCSSStage2Dataset
+        assert "FLIP_LEFT_RIGHT" in content and "FLIP_TOP_BOTTOM" in content and "GaussianBlur" in content, (
+            f"{key} missing synchronized HFlip/VFlip/GaussianBlur augmentation"
+        )
+        # (e) CGM evaluation in Cell 16
+        assert "[VAL +CGM]" in content and "val_cgm_miou_4cls" in content and "cgm_delta_miou" in content, (
+            f"{key} missing Stage-2 + CGM comparison in Cell 16"
+        )
+        # (f) Anti-silent-fallback ResNet-101 loading + paper-parity MLPS weights
+        assert "allow_random_init_fallback=DRY_RUN" in content, f"{key} missing ResNet-101 anti-silent-fallback guard"
+        assert "MLPSLoss(w_main=0.6, w_aux1=0.2, w_aux2=0.2)" in content, f"{key} missing paper-parity MLPS weights"
+        # Review-pass robustness fixes: no silent Stage-1 load swallow, compact best ckpt, updated best_miou before latest save
+        assert "len(_s1_matched) < 100" in content, f"{key} missing Stage-1 matched layer count check in Cell 6"
+        assert "active_labels=label_batch" in content, f"{key} missing active_labels zero-tie protection in Cell 8"
+        assert "improved_s2 =" in content and "best_state_s2 =" in content, (
+            f"{key} missing pre-save best_miou update and compact best checkpoint save"
+        )
+        assert "active_fg_ious =" in content, f"{key} missing active-class macro filtering in Cell 16"
+
+
+def test_notebook_01_zero_tie_and_compact_best_checkpoint():
+    """Verify Notebook 01 masks inactive CAM channels before argmax and saves compact best checkpoints."""
+    for key in ("stage1", "stage1_t4", "stage1_l4"):
+        content = NOTEBOOKS[key].read_text(encoding="utf-8")
+        assert "cam_masked = torch.where(gate > 0.5, cam_norm, torch.full_like(cam_norm, -1.0))" in content, (
+            f"{key} missing zero-tie absent-class masking in evaluate_stage1_validation"
+        )
+        assert "best_state = {k: v for k, v in latest_state.items() if k not in ('optimizer', 'scheduler')}" in content, (
+            f"{key} missing compact inference-only best checkpoint stripping optimizer/scheduler"
+        )
+
+
+def test_notebook_02_gradcam_sgdap_guards_and_prose_parity():
+    """Verify Notebook 02 (Base, T4, L4, root T4) fixes prose, DRY_RUN split order, Grad-CAM/SG-DAP, and Cell 14 guards."""
+    for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
+        nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
+        c0 = "".join(nb_data["cells"][0]["source"])
+        c2 = "".join(nb_data["cells"][2]["source"])
+        c8 = "".join(nb_data["cells"][8]["source"])
+        c12 = "".join(nb_data["cells"][12]["source"])
+        c14 = "".join(nb_data["cells"][14]["source"])
+
+        # 1. Accurate prose (no misleading 'from scratch'; Cell 2 reflects author_baseline)
+        assert "from scratch" not in c0.lower(), f"{key} Cell 0 still mentions 'from scratch'"
+        assert "author_baseline" in c0 and "stage1_checkpoint_trained_on_bcss.pth" in c0
+        assert "ImageNet-pretrained ResNet-101" in c0
+        assert "stage1_checkpoint_trained_on_bcss.pth" in c2 and "author_baseline" in c2
+        assert "from scratch" not in c12.lower(), f"{key} Cell 12 still mentions 'from scratch'"
+        assert "ImageNet-pretrained ResNet-101" in c12
+
+        # 2. Cell 8: train_split_pids filter occurs BEFORE LIMIT_PM slicing
+        idx_split = c8.index("train_split_pids = set(")
+        idx_limit = c8.index("LIMIT_PM = 100 if DRY_RUN else None")
+        assert idx_split < idx_limit, f"{key} Cell 8 must filter train_split_pids BEFORE [:LIMIT_PM]"
+
+        # 3. Cell 8: extract_cams is NOT inside torch.no_grad(); SG-DAP receives active_labels; logs all 3 layers
+        assert "active_labels=_lb" in c8, f"{key} Cell 8 sanity check missing active_labels=_lb in sg_dap_refiner"
+        assert "active_labels=label_batch" in c8, f"{key} Cell 8 main loop missing active_labels=label_batch"
+        assert "('bn7', 'b5_2', 'b4_5')" in c8, f"{key} Cell 8 sanity check must evaluate all 3 layers"
+        # Ensure extract_cams appears before `with torch.no_grad():` in both loops
+        for marker in ("_cd = extractor.extract_cams(", "cams_dict = extractor.extract_cams("):
+            assert marker in c8
+            line_for_marker = next(ln for ln in c8.splitlines() if marker in ln)
+            indent_len = len(line_for_marker) - len(line_for_marker.lstrip())
+            assert indent_len <= 12, f"{key} Cell 8 {marker} unexpectedly over-indented (possibly inside no_grad)"
+
+        # 4. Cell 14: anti-blind-training s2_val_loader guard and all-NaN total_batches==0 guard
+        assert "if not DRY_RUN and (s2_val_loader is None" in c14, f"{key} Cell 14 missing s2_val_loader guard"
+        assert "if total_batches == 0" in c14, f"{key} Cell 14 missing total_batches == 0 all-NaN guard"
+
+
+
+
 
 
 
