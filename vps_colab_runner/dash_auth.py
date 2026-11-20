@@ -103,12 +103,18 @@ def clear_fails(ip):
     _FAILS.pop(ip, None)
 
 
-def init_credentials(user="colab", reset=False):
-    """Create the credential file if missing (or reset). Returns (user, plaintext_password_or_None, api_key)."""
-    if AUTH_FILE.exists() and not reset:
-        data = json.loads(AUTH_FILE.read_text(encoding="utf-8"))
-        return data["user"], None, data.get("api_key", "")
-    password, api_key = secrets.token_urlsafe(12), secrets.token_urlsafe(24)
+def init_credentials(user="colab", reset=False, password=None):
+    """Create the credential file if missing (or reset). Returns (user, plaintext_password_or_None, api_key).
+
+    A reset keeps the existing API key (so the Telegram bot config stays valid) and only changes the password.
+    """
+    old = {}
+    if AUTH_FILE.exists():
+        old = json.loads(AUTH_FILE.read_text(encoding="utf-8"))
+        if not reset:
+            return old["user"], None, old.get("api_key", "")
+    password = password or secrets.token_urlsafe(12)
+    api_key = old.get("api_key") or secrets.token_urlsafe(24)
     salt, digest = hash_password(password)
     AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
     AUTH_FILE.write_text(json.dumps({"user": user, "salt": salt, "hash": digest, "api_key": api_key}), encoding="utf-8")
@@ -121,14 +127,17 @@ def main():
     ap.add_argument("--init", action="store_true", help="create credentials if missing")
     ap.add_argument("--user", default="colab")
     ap.add_argument("--reset-password", action="store_true")
+    ap.add_argument("--password", default=None, help="choose the password yourself (default: random)")
     args = ap.parse_args()
     if not args.init:
         ap.print_help()
         return
-    user, password, api_key = init_credentials(args.user, args.reset_password)
+    user, password, api_key = init_credentials(args.user, args.reset_password, args.password)
     print(f"DASH_USER={user}")
     print(f"DASH_PASSWORD={password if password else '(unchanged, use --reset-password to issue a new one)'}")
     print(f"DASH_API_KEY={api_key}")
+    if password and len(password) < 8:
+        print("WARNING: short password; anyone who finds the public link can try it.")
 
 
 if __name__ == "__main__":

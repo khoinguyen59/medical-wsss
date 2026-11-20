@@ -154,6 +154,18 @@ def test_start_validates_input_and_launches_tmux(secured, monkeypatch) -> None:
     dashboard.STATE["usage"]["active"] = "0"
 
 
+def test_reset_password_keeps_api_key_and_accepts_custom_password(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(dash_auth, "AUTH_FILE", tmp_path / "auth.json")
+    user, pw, key = dash_auth.init_credentials("colab")
+    assert pw and key and dash_auth.init_credentials("colab") == (user, None, key)  # no silent regeneration
+    user2, pw2, key2 = dash_auth.init_credentials("colab", reset=True, password="admin123")
+    assert (pw2, key2) == ("admin123", key)
+    monkeypatch.delenv("DASH_USER", raising=False)
+    dash_auth.CREDS.clear()
+    assert dash_auth.load() and dash_auth.verify_login("colab", "admin123") and not dash_auth.verify_login("colab", pw)
+    dash_auth.configure(None)
+
+
 def test_params_and_progress_are_parsed() -> None:
     log = (
         "[READY] Compute Device: cuda (NVIDIA L4)\n"
