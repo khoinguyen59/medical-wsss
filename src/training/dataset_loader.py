@@ -239,6 +239,31 @@ def sample_patient_stratified(
     return selected
 
 
+class RandomD4Transform:
+    """Picklable 8-element dihedral group (D4) augmentation on PIL images.
+
+    Applies uniform random 0/90/180/270-degree rotation plus horizontal and vertical
+    flips. Safe for Windows/Colab multiprocessing ('spawn' + persistent_workers).
+    """
+
+    def __call__(self, image: Image.Image) -> Image.Image:
+        rot_k = random.randint(0, 3)
+        if rot_k == 1:
+            image = image.transpose(Image.ROTATE_90)
+        elif rot_k == 2:
+            image = image.transpose(Image.ROTATE_180)
+        elif rot_k == 3:
+            image = image.transpose(Image.ROTATE_270)
+        if random.random() < 0.5:
+            image = image.transpose(Image.FLIP_LEFT_RIGHT)
+        if random.random() < 0.5:
+            image = image.transpose(Image.FLIP_TOP_BOTTOM)
+        return image
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()"
+
+
 class BCSSStage1Dataset(Dataset):
     """PyTorch Dataset for Stage-1 ResNet38d classifier training and validation on BCSS-WSSS.
 
@@ -260,11 +285,13 @@ class BCSSStage1Dataset(Dataset):
         return_mask: bool = False,
         input_norm: str = "imagenet",
         strict_patient_filter: bool = False,
+        use_d4_aug: bool = False,
     ) -> None:
         super().__init__()
         self.root_dir = Path(root_dir)
         self.is_train = is_train
         self.return_mask = return_mask
+        self.use_d4_aug = bool(use_d4_aug)
         self.input_norm = str(input_norm or "imagenet").strip().lower()
         if self.input_norm not in ("imagenet", "zero_one"):
             raise ValueError(
@@ -308,10 +335,13 @@ class BCSSStage1Dataset(Dataset):
         else:
             ops: List[Any] = [transforms.Resize((224, 224))]
             if is_train:
-                ops.extend([
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomVerticalFlip(p=0.5),
-                ])
+                if self.use_d4_aug:
+                    ops.append(RandomD4Transform())
+                else:
+                    ops.extend([
+                        transforms.RandomHorizontalFlip(p=0.5),
+                        transforms.RandomVerticalFlip(p=0.5),
+                    ])
             ops.append(transforms.ToTensor())
             if self.input_norm == "imagenet":
                 ops.append(transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
@@ -365,9 +395,11 @@ class BCSSStage1TrainDataset(Dataset):
         input_norm: str = "zero_one",
         strict_patient_filter: bool = True,
         seed: int = 42,
+        use_d4_aug: bool = False,
     ) -> None:
         super().__init__()
         self.img_dir = Path(img_dir)
+        self.use_d4_aug = bool(use_d4_aug)
         self.input_norm = str(input_norm or "zero_one").strip().lower()
         if self.input_norm not in ("imagenet", "zero_one"):
             raise ValueError(
@@ -377,12 +409,15 @@ class BCSSStage1TrainDataset(Dataset):
         if transform is not None:
             self.transform = transform
         else:
-            ops: List[Any] = [
-                transforms.Resize((224, 224)),
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.RandomVerticalFlip(p=0.5),
-                transforms.ToTensor(),
-            ]
+            ops: List[Any] = [transforms.Resize((224, 224))]
+            if self.use_d4_aug:
+                ops.append(RandomD4Transform())
+            else:
+                ops.extend([
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomVerticalFlip(p=0.5),
+                ])
+            ops.append(transforms.ToTensor())
             if self.input_norm == "imagenet":
                 ops.append(transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD))
             self.transform = transforms.Compose(ops)
@@ -760,6 +795,7 @@ def create_stage1_dataloaders(
     input_norm: str = "imagenet",
     return_val_masks: bool = False,
     strict_patient_filter: bool = False,
+    use_d4_aug: bool = False,
 ) -> Tuple[DataLoader, Optional[DataLoader]]:
     """Build high-throughput DataLoaders for Stage 1 multi-label training.
 
@@ -805,6 +841,7 @@ def create_stage1_dataloaders(
         max_samples=max_train_samples,
         input_norm=input_norm,
         strict_patient_filter=strict_patient_filter,
+        use_d4_aug=use_d4_aug,
     )
 
     train_workers = num_workers if len(train_dataset) > 0 else 0

@@ -14,6 +14,7 @@ All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
 import ast
+import inspect
 import json
 from pathlib import Path
 
@@ -35,6 +36,7 @@ NOTEBOOKS = {
     "stage2_l4": Path("notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb"),
     "medsam_l4": Path("notebooks/03_Train_Proposed_MedSAM_L4.ipynb"),
     "benchmark_l4": Path("notebooks/04_Exhaustive_Benchmark_Survival_L4.ipynb"),
+    "stage1_t4_root": Path("01_Train_Stage1_Classifier_T4.ipynb"),
     "stage2_t4_root": Path("02_Pseudo_Masks_Train_Stage2_T4.ipynb"),
 }
 
@@ -593,28 +595,47 @@ def test_generator_clean_cells_have_safe_paletted_mask_loading():
 
 
 def test_notebook_01_rule17_pretrained_validation_loop_and_parity():
-    """Verify Notebook 01 (Base, T4, L4) enforces Rule 17 pretrained init, independent val loop, and loss/LR parity."""
-    for key in ("stage1", "stage1_t4", "stage1_l4"):
+    """Verify Notebook 01 (Base, T4, L4, root T4) enforces Rule 17 init, env presets, EMA, and metrics."""
+    for key in ("stage1", "stage1_t4", "stage1_l4", "stage1_t4_root"):
         content = NOTEBOOKS[key].read_text(encoding="utf-8")
+        assert "resolve_stage1_config_from_env()" in content, f"{key} missing env-driven preset resolution"
         assert "load_pretrained_resnet38d_weights" in content, f"{key} missing pretrained ResNet-38d loader"
         assert "ALLOW_RANDOM_INIT = DRY_RUN" in content, f"{key} missing anti-silent-random-init guard"
-        assert "LOSS_TYPE = 'soft_margin'" in content, f"{key} missing paper-parity soft_margin loss default"
+        assert "LOSS_TYPE = EXP_CFG.loss_type" in content, f"{key} missing preset loss_type binding"
         assert "STAGE1_INPUT_NORM" in content and "'input_norm': STAGE1_INPUT_NORM" in content, (
             f"{key} missing explicit input_norm persistence in checkpoint"
         )
         assert "BCSSStage1ValDataset" in content and "evaluate_stage1_validation" in content, (
             f"{key} missing independent validation loop"
         )
-        for metric_key in ("val_mAP", "val_auroc", "val_best_f1", "val_gated_pm_miou"):
-            assert metric_key in content, f"{key} missing validation metric {metric_key}"
+        assert "Stage1Trainer(" in content and "ModelEMA(" in content, (
+            f"{key} missing Stage1Trainer delegation or ModelEMA"
+        )
+        assert "stage1_best_cls.pth" in content, f"{key} missing stage1_best_cls.pth export"
+        for metric_key in (
+            "val_mAP",
+            "val_auroc",
+            "val_best_f1",
+            "val_gated_pm_miou",
+            "val_gated_pm_miou_global",
+            "fc8_std",
+            "ema_metrics",
+            "exp_preset",
+            "selected_weights",
+            "best_cls_score",
+        ):
+            assert metric_key in content, f"{key} missing validation/export metric {metric_key}"
         assert "if epoch_acc >= best_acc:" not in content, (
             f"{key} must NOT select best checkpoint by train accuracy!"
         )
 
     t4_s1 = NOTEBOOKS["stage1_t4"].read_text(encoding="utf-8")
     l4_s1 = NOTEBOOKS["stage1_l4"].read_text(encoding="utf-8")
-    assert "MAX_EPOCHS = 3 if DRY_RUN else 20" in t4_s1 and "LEARNING_RATE = 1e-4" in t4_s1
-    assert "MAX_EPOCHS = 3 if DRY_RUN else 25" in l4_s1 and "LEARNING_RATE = 1.4e-4" in l4_s1
+    root_t4_s1 = NOTEBOOKS["stage1_t4_root"].read_text(encoding="utf-8")
+    assert t4_s1 == root_t4_s1, "Root 01_Train_Stage1_Classifier_T4.ipynb is out of sync with notebooks/"
+    assert "else 16" in t4_s1 and "else 20" in t4_s1
+    assert "else 32" in l4_s1 and "else 25" in l4_s1
+    assert "LEARNING_RATE = EXP_CFG.lr_bb" in t4_s1 and "LEARNING_RATE = EXP_CFG.lr_bb" in l4_s1
 
 
 def test_notebook_02_six_audit_fixes_parity():
@@ -622,7 +643,9 @@ def test_notebook_02_six_audit_fixes_parity():
     for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
         content = NOTEBOOKS[key].read_text(encoding="utf-8")
         # (a) Explicit Stage-1 checkpoint policy + SG-DAP + quick val pseudo-mask sanity check
-        assert "STAGE1_CKPT_SOURCE = 'author_baseline'" in content, f"{key} missing explicit Stage-1 selection policy"
+        assert "os.environ.get('STAGE1_CKPT_SOURCE', 'author_baseline')" in content, (
+            f"{key} missing env-wired Stage-1 selection policy"
+        )
         assert "USE_SG_DAP = True" in content, f"{key} missing verified USE_SG_DAP=True default"
         assert "[PM SANITY CHECK" in content, f"{key} missing pre-generation validation PM sanity check"
         # (b) Outside-ROI gt==4 exclusion in _quick_val_miou and Cell 16
@@ -655,50 +678,206 @@ def test_notebook_02_six_audit_fixes_parity():
 
 
 def test_notebook_01_zero_tie_and_compact_best_checkpoint():
-    """Verify Notebook 01 masks inactive CAM channels before argmax and saves compact best checkpoints."""
+    """Verify Notebook 01 delegates zero-tie evaluation to Stage1Trainer and saves strict compact best checkpoints."""
+    from src.training.train_stage1 import Stage1Trainer
+
+    trainer_eval_src = inspect.getsource(Stage1Trainer.evaluate)
+    assert "cam_masked = torch.where(gate > 0.5, cam_norm, torch.full_like(cam_norm, -1.0))" in trainer_eval_src
+    assert "cam_masked_g = torch.where(gate > 0.5, cam_norm_g, torch.full_like(cam_norm_g, -1.0))" in trainer_eval_src
+
     for key in ("stage1", "stage1_t4", "stage1_l4"):
         content = NOTEBOOKS[key].read_text(encoding="utf-8")
-        assert "cam_masked = torch.where(gate > 0.5, cam_norm, torch.full_like(cam_norm, -1.0))" in content, (
-            f"{key} missing zero-tie absent-class masking in evaluate_stage1_validation"
+        assert "return trainer.evaluate(adapted_batches)" in content, (
+            f"{key} evaluate_stage1_validation must delegate to Stage1Trainer.evaluate"
         )
-        assert "best_state = {k: v for k, v in latest_state.items() if k not in ('optimizer', 'scheduler')}" in content, (
-            f"{key} missing compact inference-only best checkpoint stripping optimizer/scheduler"
+        assert "if k not in ('optimizer', 'scheduler', 'ema_state_dict', 'proj_head_state_dict', 'mpppc_state_dict')" in content, (
+            f"{key} missing compact inference-only best checkpoint stripping optimizer/scheduler/EMA/Arm-C keys"
         )
+        assert "best_state['state_dict'] = winning_state_dict" in content
+        assert "'state_dict': cls_state_dict" in content
 
 
 def test_notebook_01_stage1_parity_and_spawn_guards():
-    """Verify Notebook 01 enforces C-D1..C-D5 parity fixes (picklable datasets, spawn, dual-branch, grad clip, resume)."""
+    """Verify Notebook 01 enforces env presets, spawn D4 loaders, ModelEMA, resume, and split VPS alarms."""
     for key in ("stage1", "stage1_t4", "stage1_l4"):
         nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
+        c4 = "".join(nb_data["cells"][4]["source"])
         c8 = "".join(nb_data["cells"][8]["source"])
         c10 = "".join(nb_data["cells"][10]["source"])
         c12 = "".join(nb_data["cells"][12]["source"])
         c14 = "".join(nb_data["cells"][14]["source"])
+        c16 = "".join(nb_data["cells"][16]["source"])
 
-        # C-D3 / C-D4: No ColorJitter, picklable Datasets from src.training.dataset_loader, spawn + persistent_workers
+        # Cell 4: env-driven STAGE1_EXP_PRESET, STAGE1_SEED, STAGE1_GIT_REF before src/ imports
+        assert "STAGE1_EXP_PRESET" in c4 and "STAGE1_SEED" in c4 and "STAGE1_GIT_REF" in c4
+
+        # C-D3 / C-D4: No ColorJitter, picklable Datasets + D4 from src.training.dataset_loader, spawn + persistent_workers
         assert "transforms.ColorJitter" not in c8, f"{key} Cell 8 must not include transforms.ColorJitter"
         assert "from src.training.dataset_loader import" in c8
         assert "BCSSStage1TrainDataset" in c8 and "BCSSStage1ValDataset" in c8
+        assert "RandomD4Transform" in c8 and "use_d4_aug=EXP_CFG.use_d4_aug" in c8
         assert "class BCSSStage1Dataset" not in c8 and "class BCSSStage1ValDataset" not in c8
         assert "'multiprocessing_context': 'spawn'" in c8 and "'persistent_workers': True" in c8
         assert "strict_patient_filter=True" in c8
 
-        # C-D2 / C-D3: model.train() before build_optimizer_and_scheduler; forward_stage1_with_pda default gamma=1.0
+        # C-D2 / C-D3: model.train() before build_optimizer_and_scheduler; forward_stage1_dual with active_labels
         assert c10.index("model.train()") < c10.index("build_optimizer_and_scheduler("), (
             f"{key} Cell 10 must call model.train() before build_optimizer_and_scheduler"
         )
-        assert "gamma=1.0" in c10 and "def forward_stage1_dual(" in c10
+        assert "gamma=1.0" in c10 and "def forward_stage1_dual(" in c10 and "active_labels=None" in c10
+        assert "ModelEMA(" in c10 and "ProjectionHead(" in c10 and "MultiPrototypePPCLoss(" in c10
 
-        # C-D5: resume epoch=-1 default & epochs_without_improve restored
+        # C-D5: resume epoch=-1 default, EMA, proj_head, best_cls_score, joint_no_improve restored
         assert "int(ckpt.get('epoch', -1)) + 1" in c12
         assert "epochs_without_improve = int(ckpt.get('epochs_without_improve', 0))" in c12
+        assert "ema_state_dict" in c12 and "proj_head_state_dict" in c12
+        assert "best_cls_score" in c12 and "joint_no_improve" in c12
 
-        # C-D1 / C-D3 / C-D4 / C-D5: PDA_START_EPOCH=3, dual-branch loss, clip_grad_norm_, pbar cleanup, collapse break
-        assert "PDA_START_EPOCH = 3" in c14
+        # C-D1 / C-D3 / C-D4 / C-D5 + VPS alarms: Stage1Trainer, dual-branch loss, clip_grad_norm_, split alarms
+        assert "PDA_START_EPOCH = EXP_CFG.pda_start_epoch" in c14
         assert "0.5 * criterion(logits_clean, labels) + 0.5 * criterion(logits_pda, labels)" in c14
-        assert "clip_grad_norm_(model.parameters(), max_norm=5.0)" in c14
+        assert "clip_grad_norm_(_trainable_all, max_norm=5.0)" in c14
         assert "pbar.close()" in c14 and "gc.collect()" in c14
-        assert "val_best_f1 < 0.55 or val_loss > 1.2" in c14 and "break" in c14
+        assert "sel_best_f1 < 0.55 or sel_val_loss > 1.20 or sel_val_map < 0.65" in c14 and "break" in c14
+        assert "[CALIBRATION COLLAPSE ALARM]" in c14
+        assert "[EARLY STOP PATIENCE]" in c14
+        assert "[EARLY REGRESSION ALARM]" not in c14, (
+            f"{key} Cell 14 must never emit [EARLY REGRESSION ALARM] so run_colab_vps.sh exits cleanly on patience"
+        )
+        assert "stage1_best_cls.pth" in c12 and "stage1_best_cls.pth" in c14 and "stage1_best_cls.pth" in c16
+
+
+@pytest.mark.parametrize(
+    "preset,expected_opt,expected_sched,expected_d4,expected_equiv,expected_ppc",
+    [
+        ("arm_a_polysgd", "SGD", "LambdaLR", True, False, False),
+        ("arm_b_equiv_adamw", "AdamW", "LambdaLR", True, True, False),
+        ("arm_c_mpppc_polysgd", "SGD", "LambdaLR", True, False, True),
+    ],
+)
+def test_notebook_01_env_preset_overrides_and_active_labels_forward(
+    monkeypatch,
+    preset,
+    expected_opt,
+    expected_sched,
+    expected_d4,
+    expected_equiv,
+    expected_ppc,
+):
+    """Verify env overrides resolve and configure Notebook 01 Cell 8/10/14 cleanly for Arms A/B/C."""
+    from src.config.stage1_experiments import resolve_stage1_config_from_env
+    from src.losses_metrics.losses import MultiPrototypePPCLoss
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.train_stage1 import (
+        AttentionModule,
+        ModelEMA,
+        ProjectionHead,
+        Stage1Trainer,
+        build_optimizer_and_scheduler,
+    )
+
+    monkeypatch.setenv("STAGE1_EXP_PRESET", preset)
+    monkeypatch.setenv("STAGE1_MAX_EPOCHS", "7")
+    monkeypatch.setenv("STAGE1_SEED", "123")
+    monkeypatch.setenv("STAGE1_BATCH_SIZE", "8")
+
+    nb_data = json.loads(NOTEBOOKS["stage1_l4"].read_text(encoding="utf-8"))
+    c4 = "".join(nb_data["cells"][4]["source"])
+    c8 = "".join(nb_data["cells"][8]["source"])
+    c10 = "".join(nb_data["cells"][10]["source"])
+
+    # 1. Cell 4 env seed & preset reading
+    assert "STAGE1_EXP_PRESET = os.environ.get(\"STAGE1_EXP_PRESET\"" in c4
+    assert "_raw_seed = os.environ.get(\"STAGE1_SEED\"" in c4
+    cfg = resolve_stage1_config_from_env()
+    assert cfg.preset_name == preset
+    assert cfg.max_epochs == 7
+    assert cfg.seed == 123
+    assert cfg.batch_size == 8
+    assert cfg.use_d4_aug is expected_d4
+    assert cfg.use_equiv_consistency is expected_equiv
+    assert cfg.use_mpppc is expected_ppc
+
+    # 2. Cell 8 transform & batch resolution logic
+    assert "if EXP_CFG.use_d4_aug:" in c8
+    assert "use_d4_aug=EXP_CFG.use_d4_aug" in c8
+
+    # 3. Cell 10 optimizer/scheduler/EMA/Arm-C construction with preset hyperparams
+    model = WSSSTissueStage1NetCAM(num_classes=4)
+    model.train()
+    proj_head = ProjectionHead(4096, 256, 128, 16) if cfg.use_mpppc else None
+    mpppc = (
+        MultiPrototypePPCLoss(4, cfg.ppc_num_prototypes, 128, conf_thresh=cfg.ppc_conf_thresh, warm_start=True)
+        if cfg.use_mpppc
+        else None
+    )
+    ema = ModelEMA(model, decay=cfg.ema_decay) if cfg.use_ema else None
+    steps_per_ep = 10
+    step_sched_per_batch = (cfg.scheduler_type == "poly") or (cfg.warmup_epochs > 0.0)
+    warmup_steps = int(round(cfg.warmup_epochs * steps_per_ep)) if step_sched_per_batch else 0
+    total_steps = (cfg.max_epochs * steps_per_ep) if step_sched_per_batch else None
+    optimizer, scheduler = build_optimizer_and_scheduler(
+        model,
+        lr=cfg.lr_bb,
+        weight_decay=cfg.wd_bb,
+        epochs=cfg.max_epochs,
+        optimizer_type=cfg.optimizer_type,
+        scheduler_type=cfg.scheduler_type,
+        lr_fc8=cfg.lr_fc8,
+        wd_fc8=cfg.wd_fc8,
+        momentum=cfg.momentum,
+        warmup_steps=warmup_steps,
+        total_steps=total_steps,
+        poly_power=cfg.poly_power,
+        eta_min=cfg.eta_min,
+        extra_params=list(proj_head.parameters()) if proj_head is not None else None,
+    )
+    assert type(optimizer).__name__ == expected_opt
+    assert type(scheduler).__name__ == expected_sched
+    assert ema is not None and set(ema.clean_model_state_dict().keys()) == set(model.state_dict().keys())
+
+    # 4. Cell 10 forward_stage1_dual with active_labels=single-class targets
+    start_idx = c10.index("def forward_stage1_dual(")
+    ns = {"torch": torch, "AttentionModule": AttentionModule}
+    exec(c10[start_idx:], ns)
+    forward_dual = ns["forward_stage1_dual"]
+    images = torch.randn(2, 3, 224, 224)
+    single_cls_targets = torch.tensor([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+    attn_mod = AttentionModule(pda_mode=cfg.pda_mode)
+    lc, pc, lp, pp = forward_dual(
+        model, images, enable_pda=True, gamma=0.75, attn_module=attn_mod, active_labels=single_cls_targets
+    )
+    assert lc.shape == (2, 4) and lp.shape == (2, 4)
+    assert torch.isfinite(lc).all() and torch.isfinite(lp).all()
+    assert not torch.allclose(lc, lp)
+
+    # 5. Stage1Trainer construction matching Cell 14
+    trainer = Stage1Trainer(
+        model=model,
+        optimizer=optimizer,
+        criterion=torch.nn.MultiLabelSoftMarginLoss(),
+        scheduler=scheduler,
+        device=torch.device("cpu"),
+        enable_amp=False,
+        pda_start_epoch=cfg.pda_start_epoch,
+        initial_gamma=cfg.initial_gamma,
+        gamma_decay=cfg.gamma_decay,
+        min_gamma=cfg.min_gamma,
+        pda_mode=cfg.pda_mode,
+        step_scheduler_per_batch=step_sched_per_batch,
+        model_ema=ema,
+        proj_head=proj_head,
+        mpppc_loss=mpppc,
+        lambda_ppc=cfg.lambda_ppc,
+        ppc_start_epoch=cfg.ppc_start_epoch,
+        use_equiv_consistency=cfg.use_equiv_consistency,
+        equiv_scales=cfg.equiv_scales,
+        lambda_eq_max=cfg.lambda_eq_max,
+        eq_ramp_start_epoch=cfg.eq_ramp_start_epoch,
+        eq_ramp_end_epoch=cfg.eq_ramp_end_epoch,
+    )
+    assert trainer.use_equiv_consistency is expected_equiv
+    assert (trainer.mpppc_loss is not None) is expected_ppc
 
 
 def test_notebook_02_gradcam_sgdap_guards_and_prose_parity():
@@ -738,6 +917,51 @@ def test_notebook_02_gradcam_sgdap_guards_and_prose_parity():
         # 4. Cell 14: anti-blind-training s2_val_loader guard and all-NaN total_batches==0 guard
         assert "if not DRY_RUN and (s2_val_loader is None" in c14, f"{key} Cell 14 missing s2_val_loader guard"
         assert "if total_batches == 0" in c14, f"{key} Cell 14 missing total_batches == 0 all-NaN guard"
+
+
+def test_notebook_01_stop_after_epoch_and_notebook_02_ckpt_source_env_wiring(monkeypatch):
+    """Verify STAGE1_STOP_AFTER_EPOCH decoupling in NB1 and STAGE1_CKPT_SOURCE env wiring in NB2."""
+    for key in ("stage1", "stage1_t4", "stage1_l4", "stage1_t4_root"):
+        nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
+        c10 = "".join(nb_data["cells"][10]["source"])
+        c14 = "".join(nb_data["cells"][14]["source"])
+        c16 = "".join(nb_data["cells"][16]["source"])
+
+        assert "STOP_AFTER_EPOCH = None if DRY_RUN else EXP_CFG.stop_after_epoch" in c10, (
+            f"{key} Cell 10 missing STOP_AFTER_EPOCH wiring"
+        )
+        assert "total_steps = (MAX_EPOCHS * _steps_per_ep)" in c10, (
+            f"{key} Cell 10 must keep total_steps tied to full MAX_EPOCHS"
+        )
+        assert "if 'STOP_AFTER_EPOCH' not in globals():" in c14, (
+            f"{key} Cell 14 missing STOP_AFTER_EPOCH fallback"
+        )
+        assert "if STOP_AFTER_EPOCH is not None and (epoch + 1) >= int(STOP_AFTER_EPOCH):" in c14, (
+            f"{key} Cell 14 missing end-of-epoch STOP_AFTER_EPOCH break"
+        )
+        assert "[STOP AFTER EPOCH]" in c14, f"{key} Cell 14 missing [STOP AFTER EPOCH] marker"
+        stop_idx = c14.index("[STOP AFTER EPOCH]")
+        early_idx = c14.index("[EARLY STOP PATIENCE]")
+        assert stop_idx < early_idx, f"{key} Cell 14 must check STOP_AFTER_EPOCH before [EARLY STOP PATIENCE]"
+        assert "'stop_after_epoch': globals().get('STOP_AFTER_EPOCH', None)" in c16, (
+            f"{key} Cell 16 missing stop_after_epoch metadata in STAGE1_TRAINING_METRICS.json"
+        )
+
+    for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
+        nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
+        c6 = "".join(nb_data["cells"][6]["source"])
+        src_line = next(ln for ln in c6.splitlines() if ln.strip().startswith("STAGE1_CKPT_SOURCE ="))
+        assert "os.environ.get('STAGE1_CKPT_SOURCE', 'author_baseline')" in src_line
+
+        monkeypatch.delenv("STAGE1_CKPT_SOURCE", raising=False)
+        ns_default = {"os": __import__("os")}
+        exec(src_line, ns_default)
+        assert ns_default["STAGE1_CKPT_SOURCE"] == "author_baseline"
+
+        monkeypatch.setenv("STAGE1_CKPT_SOURCE", "retrained")
+        ns_retrained = {"os": __import__("os")}
+        exec(src_line, ns_retrained)
+        assert ns_retrained["STAGE1_CKPT_SOURCE"] == "retrained"
 
 
 

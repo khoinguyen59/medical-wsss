@@ -8,36 +8,37 @@
   :root { --blue:#1565c0; --blue2:#1e88e5; --soft:#e3f2fd; --line:#d6e4f5; --text:#1b2a3a; --muted:#5f7390; --ok:#2e7d32; --bad:#c62828; --warn:#ef6c00; }
   * { box-sizing:border-box; }
   body { margin:0; background:#f6faff; color:var(--text); font:14px/1.5 "Segoe UI",system-ui,sans-serif; }
-  header { background:#fff; border-bottom:2px solid var(--blue2); padding:14px 24px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header { background:#fff; border-bottom:2px solid var(--blue2); padding:14px 24px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
   header h1 { margin:0; font-size:20px; color:var(--blue); }
   header .sub { color:var(--muted); font-size:12px; }
   header .spacer { flex:1; }
-  select, button { font:inherit; border-radius:8px; border:1px solid var(--line); padding:7px 12px; background:#fff; color:var(--text); }
-  button.stop { background:var(--bad); border-color:var(--bad); color:#fff; font-weight:600; cursor:pointer; }
+  select, button, input { font:inherit; border-radius:8px; border:1px solid var(--line); padding:6px 10px; background:#fff; color:var(--text); }
+  button { cursor:pointer; }
+  button.stop { background:var(--bad); border-color:var(--bad); color:#fff; font-weight:600; }
   button.stop:hover { background:#a31f1f; }
+  button.warn { background:#fff3e0; border-color:var(--warn); color:var(--warn); font-weight:600; }
   main { padding:18px 24px 40px; max-width:1280px; margin:0 auto; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; margin-bottom:14px; }
-  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px 16px; box-shadow:0 1px 3px rgba(21,101,192,.06); }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px 16px; box-shadow:0 1px 3px rgba(21,101,192,.06); overflow-x:auto; }
   .card h2 { margin:0 0 8px; font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:var(--blue); }
   .big { font-size:26px; font-weight:700; color:var(--blue); }
   .kv { display:flex; justify-content:space-between; gap:12px; padding:3px 0; border-bottom:1px dashed var(--line); }
-  .kv:last-child { border-bottom:0; }
-  .kv span:first-child { color:var(--muted); }
+  .kv:last-child { border-bottom:0; } .kv span:first-child { color:var(--muted); }
   .badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600; }
   .b-ok { background:#e8f5e9; color:var(--ok); } .b-bad { background:#ffebee; color:var(--bad); }
   .b-warn { background:#fff3e0; color:var(--warn); } .b-idle { background:var(--soft); color:var(--blue); }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
   th { background:var(--soft); color:var(--blue); font-weight:600; }
-  .wide { margin-bottom:14px; }
+  .wide { margin-bottom:14px; display:block; }
   pre { margin:0; background:#f1f6fc; border:1px solid var(--line); border-radius:8px; padding:10px; max-height:320px; overflow:auto; font:12px/1.45 Consolas,monospace; white-space:pre-wrap; word-break:break-word; }
   .row { display:flex; gap:14px; flex-wrap:wrap; } .row > .card { flex:1 1 420px; }
   canvas { width:100%; height:180px; background:#fff; }
   .muted { color:var(--muted); } .msg { margin-top:8px; color:var(--blue); font-size:12px; }
-  .card { overflow-x:auto; } .wide { display:block; }
+  .banner { padding:8px 12px; border-radius:8px; background:#fff3e0; border:1px solid #ffcc80; color:#8d4200; font-size:12px; margin-bottom:10px; display:none; }
   .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:14px; }
   .tile { background:linear-gradient(180deg,#fff,var(--soft)); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
-  .tile .v { font-size:24px; font-weight:700; color:var(--blue); } .tile .l { color:var(--muted); font-size:12px; }
+  .tile .v { font-size:22px; font-weight:700; color:var(--blue); } .tile .l { color:var(--muted); font-size:12px; }
   .bar { height:8px; background:var(--soft); border-radius:99px; overflow:hidden; margin-top:6px; } .bar > i { display:block; height:100%; background:var(--blue2); width:0; }
   @media (max-width:600px) { header { padding:10px 14px; } main { padding:12px 12px 30px; } .big { font-size:22px; } }
 </style>
@@ -48,6 +49,7 @@
   <div class="spacer"></div>
   <label class="muted">Phiên chạy&nbsp;<select id="session"></select></label>
   <button class="stop" id="stopBtn">TẮT GPU NGAY</button>
+  <button class="warn" id="stopOwnedBtn">Dừng tất cả phiên tôi</button>
   <a href="/logout" class="muted" style="font-size:12px">Đăng xuất</a>
 </header>
 <main>
@@ -57,27 +59,34 @@
     <div class="tile"><div class="v" id="t_last">-</div><div class="l" id="t_lastl">Epoch mới nhất</div></div>
     <div class="tile"><div class="v" id="t_elapsed">-</div><div class="l">Đã chạy</div></div>
     <div class="tile"><div class="v" id="t_eta">-</div><div class="l">Ước tính còn lại</div></div>
-    <div class="tile"><div class="v" id="t_gpu">-</div><div class="l">GPU Colab đang bật</div></div>
+    <div class="tile"><div class="v" id="t_gpu">-</div><div class="l" id="t_gpul">Owned / Foreign GPU</div></div>
+  </div>
+  <div class="card wide"><h2>Tất cả phiên của hệ thống (Owned vs Foreign)</h2>
+    <div id="foreignWarn" class="banner"></div>
+    <table><thead><tr><th>Phiên</th><th>GPU</th><th>Preset</th><th>Trạng thái</th><th>Epoch</th><th>Best</th><th>Còn lại</th><th>Hành động</th></tr></thead><tbody id="sessBody"></tbody></table>
   </div>
   <div class="card wide"><h2>Thông số chính của lần chạy</h2><div id="params" class="muted">Chưa có dữ liệu cấu hình.</div></div>
-  <div style="height:14px"></div>
   <div class="card wide"><h2>Khởi chạy phiên mới</h2>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <select id="startNb"><option value="nb1">Notebook 1 (Stage 1)</option><option value="nb2">Notebook 2 (Stage 2)</option></select>
-      <select id="startGpu"><option>L4</option><option>T4</option></select>
-      <label class="muted">Giới hạn&nbsp;<input id="startMin" type="number" min="10" max="300" value="210" style="width:80px;font:inherit;padding:6px;border:1px solid var(--line);border-radius:8px"> phút</label>
-      <button id="startBtn" style="background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600;cursor:pointer">Bắt đầu chạy</button>
+      <select id="startGpu"><option>A100</option><option>H100</option><option>G4</option><option selected>L4</option><option>T4</option></select>
+      <label class="muted"><input id="startHighMem" type="checkbox" disabled> High-RAM</label>
+      <select id="startPreset"><option value="">Preset: mặc định</option><option value="arm_a_polysgd">arm_a_polysgd</option><option value="arm_b_equiv_adamw">arm_b_equiv_adamw</option><option value="arm_c_mpppc_polysgd">arm_c_mpppc_polysgd</option><option value="default">default</option></select>
+      <input id="startSession" type="text" placeholder="se374_arm_a (tùy chọn)" style="width:165px">
+      <input id="startFallback" type="text" placeholder="Fallback (vd A100,L4)" style="width:150px">
+      <label class="muted">Phút&nbsp;<input id="startMin" type="number" min="10" max="720" value="210" style="width:74px"></label>
+      <input id="startEnv" type="text" placeholder="KEY=VALUE;KEY2=VAL2" style="width:190px">
+      <button id="startBtn" style="background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600">Bắt đầu chạy</button>
     </div>
-    <div class="muted" style="margin-top:6px;font-size:12px">Chỉ chạy được khi không có GPU nào đang bật. Tự tắt GPU khi hết giới hạn thời gian.</div></div>
-  <div style="height:14px"></div>
-
+    <div class="muted" style="margin-top:6px;font-size:12px">Chỉ chặn khi số phiên owned đạt ngưỡng COLAB_MAX_OWNED_CONCURRENT. Phiên ngoài hệ thống (Protected) không bao giờ bị tắt.</div>
+  </div>
   <div class="grid">
     <div class="card"><h2>Google Colab</h2><div class="big" id="balance">-</div><div class="muted">compute units còn lại</div>
       <div class="kv"><span>Tốc độ tiêu thụ</span><b id="rate">-</b></div>
-      <div class="kv"><span>GPU đang chạy</span><b id="active">-</b></div></div>
+      <div class="kv"><span>Owned / Foreign đang chạy</span><b id="active">-</b></div></div>
     <div class="card"><h2>Tiến trình runner</h2>
       <div class="kv"><span>Trạng thái</span><span id="running" class="badge b-idle">-</span></div>
-      <div class="kv"><span>Notebook</span><b id="nb">-</b></div>
+      <div class="kv"><span>Notebook / Preset</span><b id="nb">-</b></div>
       <div class="kv"><span>GPU / Phiên</span><b id="gpu">-</b></div>
       <div class="kv"><span>Lần thử</span><b id="attempt">-</b></div>
       <div class="kv"><span>Watchdog còn lại</span><b id="remain">-</b></div>
@@ -88,21 +97,17 @@
       <div class="kv"><span>Ổ đĩa</span><b id="disk">-</b></div>
       <div class="kv"><span>Cập nhật</span><b id="now">-</b></div></div>
   </div>
-
   <div class="card wide"><h2>Checkpoint & kết quả đã tải về VPS</h2>
     <table><thead><tr><th>Tệp</th><th>Loại</th><th>Dung lượng</th><th>Lần ghi cuối</th><th>Cách đây</th><th>SHA256</th></tr></thead><tbody id="ckpt"></tbody></table>
     <div class="muted" id="ckptEmpty" style="display:none;padding-top:6px">Chưa có checkpoint nào được tải về VPS.</div></div>
-
   <div class="row wide">
     <div class="card"><h2>Chỉ số theo epoch</h2><div id="epochs"></div></div>
     <div class="card"><h2>Biểu đồ</h2><select id="metric"></select><canvas id="chart" width="560" height="180"></canvas></div>
   </div>
-
   <div class="row wide">
     <div class="card"><h2>Sự kiện chính</h2><pre id="events"></pre></div>
     <div class="card"><h2>Phiên Colab trên server</h2><pre id="sessions"></pre><div class="msg" id="stopmsg"></div></div>
   </div>
-
   <div class="card"><h2>Log gần nhất (đã lọc nhiễu)</h2><pre id="log"></pre></div>
 </main>
 <script>
@@ -110,8 +115,42 @@ const $ = id => document.getElementById(id);
 let current = "", series = {}, chosenMetric = "";
 const fmtAge = s => s < 90 ? s + " giây" : s < 5400 ? Math.round(s/60) + " phút" : (s/3600).toFixed(1) + " giờ";
 const fmtHMS = s => { s = Math.max(0, s|0); const h = (s/3600|0), m = (s%3600/60|0); return h + "g " + String(m).padStart(2,"0") + "p " + String(s%60).padStart(2,"0") + "s"; };
+function cell(tr, text, bold) { const td = document.createElement("td"); td.textContent = text; if (bold) td.style.fontWeight = 600; tr.appendChild(td); return td; }
+function setBadge(el, text, cls) { el.textContent = text; el.className = "badge " + cls; }
 
-function cell(tr, text, bold) { const td = document.createElement("td"); td.textContent = text; if (bold) td.style.fontWeight = 600; tr.appendChild(td); }
+async function stopCall(body, label) {
+  if (!confirm(label)) return;
+  $("stopBtn").disabled = true; $("stopOwnedBtn").disabled = true;
+  try {
+    const r = await (await fetch("/api/stop", { method: "POST", headers: { "X-Requested-With": "dashboard", "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+    $("stopmsg").textContent = r.message || r.error;
+  } finally { $("stopBtn").disabled = false; $("stopOwnedBtn").disabled = false; refresh(); }
+}
+
+function renderAllSessions(d) {
+  const warn = $("foreignWarn"), assigns = d.colab_assignments || {owned:[], foreign:[]}, f = assigns.foreign || [];
+  if (f.length) {
+    warn.style.display = "block";
+    warn.textContent = "Phát hiện " + f.length + " phiên ngoài hệ thống (Protected): " + f.map(x => x.endpoint + " [" + x.name + "]").join(", ") + " - Hệ thống tuyệt đối không chạm vào các phiên này.";
+  } else { warn.style.display = "none"; }
+  const body = $("sessBody"); body.replaceChildren();
+  (d.all_sessions_summary || []).forEach(r => {
+    const tr = document.createElement("tr");
+    cell(tr, r.session, r.session === current);
+    cell(tr, (r.gpu || "-") + (r.high_mem ? " HM" : ""));
+    cell(tr, r.preset || "default");
+    const st = document.createElement("td"), b = document.createElement("span");
+    setBadge(b, r.running ? "RUNNING" : (r.stop_reason || "STOPPED"), r.running ? "b-ok" : "b-idle"); st.appendChild(b); tr.appendChild(st);
+    cell(tr, r.total ? (r.epoch + "/" + r.total) : "-");
+    cell(tr, r.best ? (r.best.value.toFixed(4) + " (e" + r.best.epoch + ")") : "-");
+    cell(tr, r.remaining_s == null ? "-" : fmtHMS(r.remaining_s));
+    const act = document.createElement("td");
+    const pick = document.createElement("button"); pick.textContent = "Xem"; pick.onclick = () => { current = r.session; refresh(); };
+    const stp = document.createElement("button"); stp.textContent = "Dừng"; stp.className = "stop"; stp.style.marginLeft = "6px";
+    stp.onclick = () => stopCall({ scope: "session", session: r.session }, "Dừng phiên owned '" + r.session + "'?");
+    act.append(pick, stp); tr.appendChild(act); body.appendChild(tr);
+  });
+}
 
 function renderCkpt(rows) {
   const body = $("ckpt"); body.replaceChildren();
@@ -155,22 +194,19 @@ function drawChart() {
   ctx.fillStyle = "#5f7390"; ctx.fillText("epoch " + x0, 40, cv.height - 6); ctx.fillText("epoch " + x1, cv.width - 70, cv.height - 6);
 }
 
-function setBadge(el, text, cls) { el.textContent = text; el.className = "badge " + cls; }
-
 function renderTop(d) {
-  const p = d.progress || {}, act = parseInt(d.usage.active || "0", 10);
+  const p = d.progress || {}, own = d.owned_active_count || 0, frg = d.foreign_active_count || 0;
   $("t_epoch").textContent = p.total ? (p.epoch + " / " + p.total) : "-";
   $("t_bar").style.width = p.total ? Math.min(100, (p.done / p.total) * 100) + "%" : "0";
   $("t_best").textContent = p.best ? p.best.value.toFixed(4) : "-";
-  $("t_bestl").textContent = p.best ? p.best.name + " tốt nhất (epoch " + p.best.epoch + ")" : "Chỉ số val tốt nhất";
-  const last = p.last, keys = last ? Object.keys(last.metrics) : [];
-  const lk = keys.find(k => /Loss/.test(k)) || keys[0];
+  $("t_bestl").textContent = p.best ? p.best.name + " tốt nhất (e" + p.best.epoch + ")" : "Chỉ số val tốt nhất";
+  const last = p.last, keys = last ? Object.keys(last.metrics) : [], lk = keys.find(k => /Loss/.test(k)) || keys[0];
   $("t_last").textContent = last && lk ? String(last.metrics[lk]) : "-";
-  $("t_lastl").textContent = last ? lk + " (epoch " + last.epoch + ")" : "Epoch mới nhất";
+  $("t_lastl").textContent = last ? lk + " (e" + last.epoch + ")" : "Epoch mới nhất";
   $("t_elapsed").textContent = p.elapsed_s == null ? "-" : fmtHMS(p.elapsed_s);
   $("t_eta").textContent = p.eta_s == null ? "-" : fmtHMS(p.eta_s);
-  $("t_gpu").textContent = d.usage.active == null ? "-" : (act > 0 ? "BẬT" : "TẮT");
-  $("t_gpu").style.color = act > 0 ? "var(--bad)" : "var(--ok)";
+  $("t_gpu").textContent = own + " / " + frg;
+  $("t_gpu").style.color = own > 0 ? "var(--ok)" : "var(--blue)";
   const box = $("params"); box.replaceChildren();
   if (!d.params.length) { box.textContent = "Chưa có dữ liệu cấu hình (notebook chưa in log)."; return; }
   d.params.forEach(([k, v]) => { const row = document.createElement("div"); row.className = "kv";
@@ -186,20 +222,18 @@ async function refresh() {
     current = d.session; sel.value = current;
     $("balance").textContent = d.usage.balance ? d.usage.balance.replace(" compute units", "") : "-";
     $("rate").textContent = d.usage.rate || "-";
-    const act = parseInt(d.usage.active || "0", 10);
-    $("active").textContent = d.usage.active == null ? "-" : act + (act > 0 ? " (ĐANG TỐN GPU)" : " (đã tắt)");
-    $("active").style.color = act > 0 ? "var(--bad)" : "var(--ok)";
+    $("active").textContent = (d.owned_active_count || 0) + " owned / " + (d.foreign_active_count || 0) + " foreign (max owned " + (d.max_owned_concurrent || 1) + ")";
     setBadge($("running"), d.runner_running ? "ĐANG CHẠY" : "KHÔNG CHẠY", d.runner_running ? "b-ok" : "b-idle");
     const m = d.meta || {};
-    $("nb").textContent = (m.notebook || "-").split("/").pop();
-    $("gpu").textContent = (m.gpu || "-") + " / " + (m.session || "-");
+    $("nb").textContent = ((m.notebook || "-").split("/").pop()) + (m.preset ? " [" + m.preset + "]" : "");
+    $("gpu").textContent = (m.gpu || "-") + (m.high_mem === "1" ? " HM" : "") + " / " + (m.session || "-");
     $("attempt").textContent = m.attempt ? m.attempt + "/" + (m.max_attempts || "?") : "-";
     $("remain").textContent = d.remaining_s == null ? "-" : fmtHMS(d.remaining_s);
     $("reason").textContent = m.stop_reason || "-";
     $("load").textContent = (d.system.load || ["-"]).join(" / ");
     $("mem").textContent = d.system.mem || "-"; $("disk").textContent = d.system.disk || "-"; $("now").textContent = d.now;
     $("sub").textContent = "Cập nhật " + d.now + " | Colab poll " + (d.colab_ts ? fmtAge(Math.max(0, (Date.now()/1000|0) - d.colab_ts)) + " trước" : "chưa có");
-    renderCkpt(d.checkpoints); renderEpochs(d.epochs); renderTop(d);
+    renderAllSessions(d); renderCkpt(d.checkpoints); renderEpochs(d.epochs); renderTop(d);
     const pre = (id, lines) => { const el = $(id), stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30; el.textContent = lines; if (stick) el.scrollTop = el.scrollHeight; };
     pre("events", d.events.join("\n")); pre("log", d.log.join("\n")); $("sessions").textContent = d.colab_sessions || "-";
     $("stopmsg").textContent = d.stop_msg || "";
@@ -208,16 +242,17 @@ async function refresh() {
 
 $("session").addEventListener("change", e => { current = e.target.value; refresh(); });
 $("metric").addEventListener("change", e => { chosenMetric = e.target.value; drawChart(); });
-$("stopBtn").addEventListener("click", async () => {
-  if (!confirm("Tắt toàn bộ GPU Colab và dừng runner ngay bây giờ?\nCheckpoint đã đồng bộ về VPS vẫn được giữ lại.")) return;
-  $("stopBtn").disabled = true; $("stopBtn").textContent = "Đang tắt...";
-  try { const r = await (await fetch("/api/stop", { method: "POST", headers: { "X-Requested-With": "dashboard" } })).json(); $("stopmsg").textContent = r.message || r.error; }
-  finally { $("stopBtn").disabled = false; $("stopBtn").textContent = "TẮT GPU NGAY"; refresh(); }
-});
+$("stopBtn").addEventListener("click", () => stopCall({ scope: "session", session: current }, "Dừng phiên owned '" + (current || "hiện tại") + "'? Phiên ngoài hệ thống không bị ảnh hưởng."));
+$("stopOwnedBtn").addEventListener("click", () => stopCall({ scope: "owned_all" }, "Dừng TẤT CẢ phiên owned của hệ thống? Phiên ngoài hệ thống (Protected) vẫn được giữ nguyên."));
 $("startNb").addEventListener("change", e => { $("startMin").value = e.target.value === "nb1" ? 210 : 240; });
+$("startGpu").addEventListener("change", e => { const g = e.target.value; $("startHighMem").checked = ["H100","G4"].includes(g); $("startHighMem").disabled = (g === "L4"); });
 $("startBtn").addEventListener("click", async () => {
-  const body = { notebook: $("startNb").value, gpu: $("startGpu").value, max_minutes: parseInt($("startMin").value, 10) };
-  if (!confirm("Khởi chạy " + body.notebook + " trên GPU " + body.gpu + " (tối đa " + body.max_minutes + " phút)?\nViệc này tiêu tốn compute units.")) return;
+  const envObj = {};
+  $("startEnv").value.split(/[;\n]+/).map(x => x.trim()).filter(Boolean).forEach(x => { const i = x.indexOf("="); if (i > 0) envObj[x.slice(0, i).trim()] = x.slice(i + 1); });
+  const body = { notebook: $("startNb").value, gpu: $("startGpu").value, high_mem: $("startHighMem").checked,
+    max_minutes: parseInt($("startMin").value, 10), session: $("startSession").value.trim(),
+    preset: $("startPreset").value.trim(), gpu_fallback: $("startFallback").value.trim(), env: envObj };
+  if (!confirm("Khởi chạy " + (body.session || body.notebook) + " trên " + body.gpu + " (" + body.max_minutes + " phút)?")) return;
   $("startBtn").disabled = true;
   try {
     const r = await fetch("/api/start", { method: "POST", headers: { "X-Requested-With": "dashboard", "Content-Type": "application/json" }, body: JSON.stringify(body) });
