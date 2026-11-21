@@ -4,6 +4,7 @@
 # Core Deep Learning & Medical Frameworks
 torch>=2.2.0
 torchvision>=0.17.0
+transformers>=4.38.0
 monai>=1.3.0
 timm>=0.9.16
 einops>=0.7.0
