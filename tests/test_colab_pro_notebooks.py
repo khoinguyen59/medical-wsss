@@ -964,9 +964,87 @@ def test_notebook_01_stop_after_epoch_and_notebook_02_ckpt_source_env_wiring(mon
         assert ns_retrained["STAGE1_CKPT_SOURCE"] == "retrained"
 
 
+def test_notebook_02_stage2_prelaunch_patch_contracts(monkeypatch):
+    """Verify all Stage-2 Pre-Launch Patch contracts across Base, T4, L4, and root T4 notebooks."""
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
 
+    for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
+        nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
+        c4 = "".join(nb_data["cells"][4]["source"])
+        c6 = "".join(nb_data["cells"][6]["source"])
+        c8 = "".join(nb_data["cells"][8]["source"])
+        c10 = "".join(nb_data["cells"][10]["source"])
+        c12 = "".join(nb_data["cells"][12]["source"])
+        c14 = "".join(nb_data["cells"][14]["source"])
+        c16 = "".join(nb_data["cells"][16]["source"])
 
+        # Cell 4: STAGE2_GIT_REF fail-fast + sys.modules purge + STAGE2_SEED + device print
+        assert "STAGE2_GIT_REF" in c4 and "check=True" in c4
+        assert "sys.modules.pop(_mod_k, None)" in c4
+        assert "STAGE2_SEED" in c4 and "cudnn.benchmark = False" in c4
+        assert "[READY] Compute Device:" in c4
+        if key in ("stage2", "stage2_l4"):
+            assert "including_emulation=False" in c4
 
+        # Cell 6: TEST split resolution + STAGE1_LOCAL_CKPT + SHA256 + strict=True + finiteness + STAGE1_META
+        assert "TEST_IMG_DIR = resolve_split_path(DATASET_DIR, 'test', 'img')" in c6
+        assert "TEST_MASK_DIR = resolve_split_path(DATASET_DIR, 'test', 'mask')" in c6
+        assert "STAGE1_LOCAL_CKPT" in c6 and "STAGE1_SHA256" in c6
+        assert "strict=True" in c6 and "torch.isfinite(v).all()" in c6
+        assert "STAGE1_META" in c6
 
+        # Cell 8: anti-leakage fail-fast + env knobs + pm_manifest.json + MS-TTA bn7 + use_deep_affinity=False + ThreadPoolExecutor
+        assert "raise RuntimeError('[STAGE2 ERROR] Anti-leakage train_split_pids" in c8
+        assert "raise RuntimeError(f'[STAGE2 ERROR] Anti-leakage val_split_pids" in c8
+        assert "STAGE2_PM_MODE" in c8 and "STAGE2_USE_OTSU" in c8
+        assert "STAGE2_USE_SG_DAP" in c8 and "STAGE2_BATCH_PM" in c8
+        assert "pm_manifest.json" in c8
+        assert "StainGuidedAffinityRefiner(use_deep_affinity=False)" in c8
+        assert "_extract_bn7_ms_tta_cam" in c8
+        assert "ThreadPoolExecutor(max_workers=4)" in c8 and "mininterval=10.0" in c8
 
+        # Cell 10: env overrides + [PARITY] banner
+        assert "STAGE2_EPOCHS" in c10 and "STAGE2_LR" in c10
+        assert "UNC_WEIGHT" in c10 and "UABL_WEIGHT" in c10
+        assert "[PARITY] Model=DeepLabV3+ ResNet-101" in c10
+
+        # Cell 12: CPU load + epoch=-1 default + scaler_s2 restore
+        assert "map_location='cpu'" in c12
+        assert "int(ckpt_s2.get('epoch', -1)) + 1" in c12
+        assert "_pending_scaler_s2_state" in c12
+
+        # Cell 14: picklable dataset_loader import + spawn DataLoader + 4-cls quick val + clip_grad + atomic save + [EPOCH]
+        assert "from src.training.dataset_loader import" in c14
+        assert "BCSSStage2Dataset" in c14 and "BCSSStage2ValDataset" in c14
+        assert "class BCSSStage2Dataset(" not in c14 and "class BCSSStage2ValDataset(" not in c14
+        assert "'multiprocessing_context': 'spawn'" in c14
+        assert "'persistent_workers': True" in c14 and "'prefetch_factor': 2" in c14
+        assert "STAGE2_BATCH_SIZE" in c14 and "STAGE2_NUM_WORKERS" in c14 and "STAGE2_USE_D4_AUG" in c14
+        assert "torch.argmax(logits_v[:, :4], dim=1)" in c14
+        assert "unscale_(optimizer_s2)" in c14 and "clip_grad_norm_(model_stage2.parameters(), 5.0)" in c14
+        assert "os.replace(" in c14
+        assert "[EPOCH {epoch+1:02d}] Train Loss={avg_loss:.4f} | Val_mIoU=" in c14
+        assert "pbar.close()" in c14 and "gc.collect()" in c14
+
+        # Cell 16: strict=True + val_split_pids_s2 + test_eval + 4 modes + provenance
+        assert "strict=True" in c16 and "patient_ids=val_split_pids_s2" in c16
+        assert "TEST_IMG_DIR" in c16 and "TEST_MASK_DIR" in c16 and "test_split_pids_s2" in c16
+        for tok in ("'raw'", "'cgm'", "'ms_tta'", "'ms_tta_cgm'", "'val_eval'", "'test_eval'", "'provenance'", "has_any_active"):
+            assert tok in c16, f"{key} Cell 16 missing {tok}"
+
+    # Execute Cell 8 _extract_bn7_ms_tta_cam directly on synthetic tensors to verify shape/gating/normalization
+    nb_l4 = json.loads(NOTEBOOKS["stage2_l4"].read_text(encoding="utf-8"))
+    c8_l4 = "".join(nb_l4["cells"][8]["source"])
+    fn_start = c8_l4.index("def _extract_bn7_ms_tta_cam(")
+    fn_end = c8_l4.index("def _assemble_pm_no_otsu(")
+    ns_cam = {"torch": torch}
+    exec(c8_l4[fn_start:fn_end], ns_cam)
+    s1_model = WSSSTissueStage1NetCAM(num_classes=4).eval()
+    imgs = torch.randn(2, 3, 64, 64)
+    lbls = torch.tensor([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 0.0]], dtype=torch.float32)
+    cam_out = ns_cam["_extract_bn7_ms_tta_cam"](s1_model, imgs, lbls, target_hw=(64, 64))
+    assert cam_out.shape == (2, 4, 64, 64)
+    assert torch.isfinite(cam_out).all()
+    assert torch.all(cam_out[0, 1] == 0.0) and torch.all(cam_out[0, 3] == 0.0)
+    assert float(cam_out.max()) <= 1.0 + 1e-6 and float(cam_out.min()) >= 0.0
 

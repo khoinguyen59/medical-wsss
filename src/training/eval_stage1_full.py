@@ -219,6 +219,7 @@ def evaluate_stage1_checkpoint(
     num_workers: int = 0,
     input_norm: str = "auto",
     strict_patient_filter: bool = True,
+    use_deep_affinity: bool = False,
 ) -> Dict[str, Any]:
     """Run full Stage-1 validation benchmark on a strict=True loaded checkpoint."""
     device = torch.device(device_str if device_str else ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -253,7 +254,13 @@ def evaluate_stage1_checkpoint(
         pin_memory=(device.type == "cuda"),
     )
 
-    sg_dap = StainGuidedAffinityRefiner(kernel_size=5, num_iters=10).to(device).eval() if run_sg_dap else None
+    sg_dap = (
+        StainGuidedAffinityRefiner(
+            kernel_size=5, num_iters=10, use_deep_affinity=use_deep_affinity
+        ).to(device).eval()
+        if run_sg_dap
+        else None
+    )
 
     acc_raw_pc = _ConfusionAccumulator()
     acc_raw_gl = _ConfusionAccumulator()
@@ -261,6 +268,7 @@ def evaluate_stage1_checkpoint(
     acc_mstta_pc = _ConfusionAccumulator()
     acc_mstta_gl = _ConfusionAccumulator()
     acc_mstta_sgdap = _ConfusionAccumulator()
+    acc_mstta_gl_sgdap = _ConfusionAccumulator()
 
     all_probs: List[np.ndarray] = []
     all_targets: List[np.ndarray] = []
@@ -299,20 +307,21 @@ def evaluate_stage1_checkpoint(
         # 2. MS-TTA CAM (per-channel & global)
         cam_ms_up = _extract_ms_tta_cam(model, images, target_hw=target_hw, scales=scales, use_hflip=True)
         pred_ms_pc, cam_ms_norm_pc = _cam_to_discrete_pred(cam_ms_up, targets, norm_kind="per_channel")
-        pred_ms_gl, _ = _cam_to_discrete_pred(cam_ms_up, targets, norm_kind="global")
+        pred_ms_gl, cam_ms_norm_gl = _cam_to_discrete_pred(cam_ms_up, targets, norm_kind="global")
         acc_mstta_pc.update(pred_ms_pc, gt_np, valid_roi)
         acc_mstta_gl.update(pred_ms_gl, gt_np, valid_roi)
 
-        # 3 & 4. SG-DAP 1x and MS-TTA+SG-DAP
+        # 3 & 4. SG-DAP 1x, MS-TTA+SG-DAP (per-channel), and MS-TTA+SG-DAP (global)
         if sg_dap is not None:
             rgb_01 = prepare_stage1_input(
                 images,
                 stage1_norm_mode="zero_one",
                 images_are_imagenet_norm=(norm_mode == "imagenet"),
             )
+            deep_in = conv6_f if use_deep_affinity else None
             _, mask_sg_1x = sg_dap(
                 rgb_01,
-                conv6_f,
+                deep_in,
                 cam_1x_norm_pc,
                 return_ignore_mask=False,
                 active_labels=targets,
@@ -321,12 +330,21 @@ def evaluate_stage1_checkpoint(
 
             _, mask_sg_ms = sg_dap(
                 rgb_01,
-                conv6_f,
+                deep_in,
                 cam_ms_norm_pc,
                 return_ignore_mask=False,
                 active_labels=targets,
             )
             acc_mstta_sgdap.update(mask_sg_ms.cpu().numpy(), gt_np, valid_roi)
+
+            _, mask_sg_ms_gl = sg_dap(
+                rgb_01,
+                deep_in,
+                cam_ms_norm_gl,
+                return_ignore_mask=False,
+                active_labels=targets,
+            )
+            acc_mstta_gl_sgdap.update(mask_sg_ms_gl.cpu().numpy(), gt_np, valid_roi)
 
     y_prob = np.concatenate(all_probs, axis=0) if all_probs else np.zeros((0, NUM_FOREGROUND))
     y_true = np.concatenate(all_targets, axis=0) if all_targets else np.zeros((0, NUM_FOREGROUND))
@@ -343,6 +361,7 @@ def evaluate_stage1_checkpoint(
         "input_norm": norm_mode,
         "num_patches": total_patches,
         "scales": [float(s) for s in scales],
+        "use_deep_affinity": bool(use_deep_affinity),
         **ckpt_meta,
         "fc8_std": float(fc8_flat.std().item()),
         "fc8_norms": {
@@ -365,6 +384,7 @@ def evaluate_stage1_checkpoint(
     if sg_dap is not None:
         report["modes"]["sg_dap_1x"] = acc_sgdap.summary()
         report["modes"]["ms_tta_sg_dap"] = acc_mstta_sgdap.summary()
+        report["modes"]["ms_tta_global_sg_dap"] = acc_mstta_gl_sgdap.summary()
     return report
 
 
@@ -378,6 +398,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", type=str, default=None, help="Device ('cuda' or 'cpu')")
     parser.add_argument("--scales", type=float, nargs="+", default=[0.75, 1.0, 1.25], help="MS-TTA scales")
     parser.add_argument("--no-sg-dap", action="store_true", help="Skip SG-DAP refinement modes")
+    parser.add_argument(
+        "--use-deep-affinity",
+        action="store_true",
+        default=False,
+        help="Enable deep-feature cosine affinity in SG-DAP (default: stain-only)",
+    )
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader workers")
     parser.add_argument(
         "--input-norm",
@@ -401,6 +427,7 @@ def main() -> None:
         run_sg_dap=not args.no_sg_dap,
         num_workers=args.num_workers,
         input_norm=args.input_norm,
+        use_deep_affinity=args.use_deep_affinity,
     )
     print(f"Checkpoint: {report['checkpoint_path']} | SHA256: {report['sha256'][:16]}... | strict={report['strict_load_ok']}")
     print(f"Patches={report['num_patches']} | norm={report['input_norm']} | fc8_std={report['fc8_std']:.5f} | bn7_var={report['bn7_var_mean']:.5f}")

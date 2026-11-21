@@ -1605,6 +1605,7 @@ def test_arms_a_b_c_dry_runs_and_strict_ema_checkpoint_export(mock_dataset_dir: 
         run_sg_dap=True,
     )
     assert eval_report["strict_load_ok"] is True
+    assert eval_report["use_deep_affinity"] is False
     assert len(eval_report["sha256"]) == 64
     for mode_key in (
         "raw_1x_per_channel",
@@ -1613,6 +1614,7 @@ def test_arms_a_b_c_dry_runs_and_strict_ema_checkpoint_export(mock_dataset_dir: 
         "ms_tta_global",
         "sg_dap_1x",
         "ms_tta_sg_dap",
+        "ms_tta_global_sg_dap",
     ):
         assert mode_key in eval_report["modes"]
         assert 0.0 <= eval_report["modes"][mode_key]["mIoU"] <= 1.0
@@ -2022,6 +2024,210 @@ def test_stage1_stop_after_epoch_decoupled_lr_schedule_and_resume(
     ep6_step1_idx = 5 * steps_per_ep
     assert lrs_part2[0] == pytest.approx(lrs_full[ep6_step1_idx], abs=1e-9)
     assert lrs_part1 + lrs_part2 == pytest.approx(lrs_full, abs=1e-9)
+
+
+def test_stage2_picklable_datasets_mode_p_d4_anti_leakage_and_spawn_workers(tmp_path: Path):
+    """Verify BCSSStage2Dataset & BCSSStage2ValDataset tuples, mode-P losslessness, D4 sync, P0 fail-fast, and spawn DataLoader."""
+    import random
+
+    from torch.utils.data import DataLoader
+
+    from src.training import (
+        IMG_EXTENSIONS,
+        BCSSStage2Dataset,
+        BCSSStage2ValDataset,
+        _sample_patient_stratified_s2,
+    )
+
+    assert ".png" in IMG_EXTENSIONS
+
+    train_img_dir = tmp_path / "train"
+    pm_dir = tmp_path / "train_PM"
+    val_img_dir = tmp_path / "val" / "img"
+    val_mask_dir = tmp_path / "val" / "mask"
+    for d in (
+        train_img_dir,
+        pm_dir / "PM_bn7",
+        pm_dir / "PM_b5_2",
+        pm_dir / "PM_b4_5",
+        val_img_dir,
+        val_mask_dir,
+    ):
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Create 4 patches across 2 patients with asymmetric top-left markers to verify synchronized D4/flip transforms
+    train_specs = [
+        ("TCGA-A1-A0SK_0_0_[1 1 0 0].png", 0),
+        ("TCGA-A1-A0SK_0_224_[1 0 1 0].png", 1),
+        ("TCGA-A2-A04N_0_0_[0 1 1 0].png", 2),
+        ("TCGA-A2-A04N_0_224_[0 0 1 1].png", 3),
+    ]
+    for fname, corner_cls in train_specs:
+        # Bright red marker in top-left quadrant (y < 64, x < 64)
+        img_arr = np.full((128, 128, 3), 80, dtype=np.uint8)
+        img_arr[:64, :64] = [240, 20, 20]
+        Image.fromarray(img_arr).save(train_img_dir / fname)
+
+        # Paletted ('P') masks: top-left = corner_cls, bottom-right = 255 (ignore), rest = 4 (BACK), plus out-of-range 99
+        m_arr = np.full((128, 128), 4, dtype=np.uint8)
+        m_arr[:64, :64] = corner_cls
+        m_arr[64:, 64:] = 255
+        m_arr[64:, :32] = 99  # non-255 out-of-range must map to 4 without np.clip collapsing 255
+        for layer in ("PM_bn7", "PM_b5_2", "PM_b4_5"):
+            save_palette_mask(m_arr, pm_dir / layer / fname)
+
+    val_specs = [
+        ("TCGA-AN-A03X_0_0.png", 1),
+        ("TCGA-AN-A0AL_0_0.png", 3),
+    ]
+    for fname, cls_id in val_specs:
+        Image.fromarray(np.full((128, 128, 3), 120, dtype=np.uint8)).save(val_img_dir / fname)
+        vm = np.full((128, 128), 4, dtype=np.uint8)
+        vm[:64, :64] = cls_id
+        vm[64:, 64:] = 255
+        save_palette_mask(vm, val_mask_dir / fname)
+
+    # 1. Stratified sampling helper
+    sampled = _sample_patient_stratified_s2(sorted((pm_dir / "PM_bn7").glob("*.png")), 2, seed=42)
+    assert len(sampled) == 2
+    assert len({extract_patient_id(p.name) for p in sampled}) == 2
+
+    # 2. P0 Anti-Leakage Fail-Fast on 0-match patient_ids for BOTH datasets
+    with pytest.raises(RuntimeError, match="matched 0 Stage-2 train pseudo-masks"):
+        BCSSStage2Dataset(train_img_dir, pm_dir, patient_ids=["TCGA-XX-0000"])
+    with pytest.raises(RuntimeError, match="matched 0 Stage-2 val patches"):
+        BCSSStage2ValDataset(val_img_dir, val_mask_dir, patient_ids=["TCGA-XX-0000"])
+
+    # 3. 4-tuple shape/dtype, lossless mode-'P', out-of-range non-255 -> 4, and synchronized D4 + H/V flips
+    ds_train = BCSSStage2Dataset(
+        img_dir=train_img_dir,
+        pm_dir=pm_dir,
+        patient_ids=["TCGA-A1-A0SK", "TCGA-A2-A04N"],
+        is_train=True,
+        use_d4_aug=True,
+    )
+    assert len(ds_train) == 4
+    random.seed(123)
+    for sample_idx in range(4):
+        img_t, m_bn7, m_b5_2, m_b4_5 = ds_train[sample_idx]
+        assert img_t.shape == (3, 224, 224) and img_t.dtype == torch.float32
+        for mt in (m_bn7, m_b5_2, m_b4_5):
+            assert mt.shape == (224, 224) and mt.dtype == torch.int64
+            uniq = set(torch.unique(mt).tolist())
+            assert 255 in uniq
+            assert 99 not in uniq
+            assert uniq.issubset({0, 1, 2, 3, 4, 255})
+        # All 3 mask layers underwent the exact same D4 rotation + H/V flip
+        assert torch.equal(m_bn7, m_b5_2)
+        assert torch.equal(m_bn7, m_b4_5)
+        # Bright red marker quadrant in RGB aligns with the active class quadrant in m_bn7
+        corner_cls = train_specs[sample_idx][1]
+        red_dominant = img_t[0] > (img_t[1] + 1.0)
+        cls_mask = m_bn7 == corner_cls
+        overlap = float((red_dominant & cls_mask).sum().item()) / float(cls_mask.sum().clamp(min=1).item())
+        assert overlap > 0.90, f"Image and pseudo-mask D4/flip desynced (overlap={overlap:.3f})"
+
+    # Also verify use_d4_aug=False path returns valid 4-tuple
+    ds_no_d4 = BCSSStage2Dataset(
+        img_dir=train_img_dir,
+        pm_dir=pm_dir,
+        patient_ids=["TCGA-A1-A0SK"],
+        is_train=True,
+        use_d4_aug=False,
+    )
+    nd_img, nd_bn7, nd_b5, nd_b4 = ds_no_d4[0]
+    assert nd_img.shape == (3, 224, 224) and nd_bn7.shape == (224, 224)
+    assert torch.equal(nd_bn7, nd_b5) and torch.equal(nd_bn7, nd_b4)
+
+    # 4. BCSSStage2ValDataset 2-tuple & lossless mode-'P'
+    ds_val = BCSSStage2ValDataset(
+        img_dir=val_img_dir,
+        mask_dir=val_mask_dir,
+        patient_ids=["TCGA-AN-A03X", "TCGA-AN-A0AL"],
+    )
+    assert len(ds_val) == 2
+    v_img, v_gt = ds_val[0]
+    assert v_img.shape == (3, 224, 224) and v_img.dtype == torch.float32
+    assert v_gt.shape == (224, 224) and v_gt.dtype == torch.int64
+    assert set(torch.unique(v_gt).tolist()) == {1, 4, 255}
+
+    # 5. Multiprocessing picklability with spawn + persistent_workers=True
+    train_loader = DataLoader(
+        ds_train,
+        batch_size=2,
+        shuffle=False,
+        num_workers=2,
+        multiprocessing_context="spawn",
+        persistent_workers=True,
+    )
+    val_loader = DataLoader(
+        ds_val,
+        batch_size=2,
+        shuffle=False,
+        num_workers=2,
+        multiprocessing_context="spawn",
+        persistent_workers=True,
+    )
+    b_img, b_bn7, b_b5_2, b_b4_5 = next(iter(train_loader))
+    assert b_img.shape == (2, 3, 224, 224)
+    assert b_bn7.shape == (2, 224, 224)
+    assert b_b5_2.shape == (2, 224, 224)
+    assert b_b4_5.shape == (2, 224, 224)
+
+    bv_img, bv_gt = next(iter(val_loader))
+    assert bv_img.shape == (2, 3, 224, 224)
+    assert bv_gt.shape == (2, 224, 224)
+
+
+def test_eval_stage1_full_use_deep_affinity_flag_and_cli(
+    mock_dataset_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Verify eval_stage1_full CLI --use-deep-affinity flag and explicit use_deep_affinity=True mode."""
+    import sys
+
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.eval_stage1_full import evaluate_stage1_checkpoint, parse_args
+
+    monkeypatch.setattr(sys, "argv", ["eval_stage1_full.py", "--checkpoint", "dummy.pth"])
+    args_default = parse_args()
+    assert args_default.use_deep_affinity is False
+
+    monkeypatch.setattr(
+        sys, "argv", ["eval_stage1_full.py", "--checkpoint", "dummy.pth", "--use-deep-affinity"]
+    )
+    args_deep = parse_args()
+    assert args_deep.use_deep_affinity is True
+
+    splits = load_bcss_patient_splits()
+    val_pid = splits["val"][0]
+    val_img_dir = mock_dataset_dir / "val" / "img"
+    val_mask_dir = mock_dataset_dir / "val" / "mask"
+    fname = f"{val_pid}-DX1_xmin600_ymin600_MPP-0.2500+0.png"
+    Image.fromarray(np.random.randint(90, 200, (224, 224, 3), dtype=np.uint8)).save(val_img_dir / fname)
+    m_arr = np.zeros((224, 224), dtype=np.uint8)
+    m_arr[112:, :] = 1
+    m_img = Image.fromarray(m_arr, mode="P")
+    m_img.putpalette(BCSS_PALETTE)
+    m_img.save(val_mask_dir / fname)
+
+    ckpt_p = tmp_path / "stage1_eval_deep_flag.pth"
+    torch.save({"state_dict": WSSSTissueStage1NetCAM(n_class=4).state_dict()}, ckpt_p)
+
+    report = evaluate_stage1_checkpoint(
+        checkpoint_path=ckpt_p,
+        data_dir=mock_dataset_dir,
+        batch_size=2,
+        max_samples=2,
+        device_str="cpu",
+        scales=(1.0,),
+        run_sg_dap=True,
+        use_deep_affinity=True,
+    )
+    assert report["use_deep_affinity"] is True
+    assert "ms_tta_global_sg_dap" in report["modes"]
+    assert 0.0 <= report["modes"]["ms_tta_global_sg_dap"]["mIoU"] <= 1.0
 
 
 

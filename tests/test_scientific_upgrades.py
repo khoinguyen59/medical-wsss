@@ -714,6 +714,92 @@ def test_sg_dap_affinity_refiner_and_ignore_index() -> None:
     assert 255 in discrete_train
 
 
+def test_sg_dap_stain_only_mode_and_deep_affinity_toggle() -> None:
+    """Verifies default use_deep_affinity=False stain-only fast path vs explicit use_deep_affinity=True."""
+    from src.models.sg_dap import StainGuidedAffinityRefiner
+
+    torch.manual_seed(17)
+    refiner_stain = StainGuidedAffinityRefiner(
+        kernel_size=5,
+        alpha_rw=0.85,
+        num_iters=3,
+        conf_ignore_thresh=0.60,
+        margin_ignore_thresh=0.20,
+    )
+    assert refiner_stain.use_deep_affinity is False
+
+    b, c, h, w = 2, 4, 24, 24
+    rgb = torch.rand(b, 3, h, w, dtype=torch.float32).clamp(0.05, 0.95)
+    # Create spatial stain regions with an ambiguous transition band at columns 10..14
+    rgb[0, :, :, :10] = torch.tensor([0.85, 0.35, 0.55]).view(3, 1, 1)
+    rgb[0, :, :, 10:14] = torch.tensor([0.60, 0.30, 0.65]).view(3, 1, 1)
+    rgb[0, :, :, 14:] = torch.tensor([0.35, 0.25, 0.75]).view(3, 1, 1)
+
+    init_cam = torch.zeros(b, c, h, w, dtype=torch.float32)
+    init_cam[0, 0, :, :10] = 4.0
+    init_cam[0, 1, :, 14:] = 4.0
+    init_cam[0, 0, :, 10:14] = 1.0
+    init_cam[0, 1, :, 10:14] = 1.0
+    init_cam[1, 2, :, :] = 3.5  # single active class sample
+    init_cam[:, 3, :, :] = 2.0  # spurious absent-class activation
+
+    active_labels = torch.tensor([[1.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], dtype=torch.float32)
+
+    # 1. Stain-only with deep_feats=None, return_ignore_mask=False
+    probs_none, mask_none = refiner_stain(
+        rgb, None, init_cam, return_ignore_mask=False, active_labels=active_labels
+    )
+    assert probs_none.shape == (b, c, h, w)
+    assert torch.isfinite(probs_none).all()
+    assert torch.allclose(probs_none.sum(dim=1), torch.ones(b, h, w), atol=1e-5)
+    assert float(probs_none[0, 2:].abs().max()) == 0.0
+    assert float(probs_none[1, [0, 1, 3]].abs().max()) == 0.0
+    assert 255 not in mask_none
+    assert set(torch.unique(mask_none[0]).tolist()).issubset({0, 1})
+    assert set(torch.unique(mask_none[1]).tolist()) == {2}
+
+    # 2. Stain-only with deep_feats=None, return_ignore_mask=True
+    probs_ign, mask_ign = refiner_stain(
+        rgb, None, init_cam, return_ignore_mask=True, active_labels=active_labels
+    )
+    assert torch.isfinite(probs_ign).all()
+    assert 255 in mask_ign[0]
+    assert set(torch.unique(mask_ign[0]).tolist()).issubset({0, 1, 255})
+    assert torch.all(mask_ign[1] == 2)  # zero absent-class leak on single-class patch
+
+    # 3. Passing structured deep_feats when use_deep_affinity=False MUST be bypassed identically to None
+    deep_struct = torch.zeros(b, 32, 6, 6, dtype=torch.float32)
+    deep_struct[:, :16, :, :3] = 3.0
+    deep_struct[:, 16:, :, 3:] = 3.0
+    probs_with_feats, mask_with_feats = refiner_stain(
+        rgb, deep_struct, init_cam, return_ignore_mask=False, active_labels=active_labels
+    )
+    assert torch.equal(probs_none, probs_with_feats)
+    assert torch.equal(mask_none, mask_with_feats)
+
+    # 4. use_deep_affinity=True MUST use structured deep_feats (modulating output vs stain-only)
+    refiner_deep = StainGuidedAffinityRefiner(
+        kernel_size=5,
+        alpha_rw=0.85,
+        num_iters=3,
+        conf_ignore_thresh=0.60,
+        margin_ignore_thresh=0.20,
+        use_deep_affinity=True,
+    )
+    assert refiner_deep.use_deep_affinity is True
+    probs_deep, _ = refiner_deep(
+        rgb, deep_struct, init_cam, return_ignore_mask=False, active_labels=active_labels
+    )
+    assert torch.isfinite(probs_deep).all()
+    assert torch.allclose(probs_deep.sum(dim=1), torch.ones(b, h, w), atol=1e-5)
+    assert not torch.allclose(probs_deep, probs_none, atol=1e-5)
+
+    # 5. use_deep_affinity=True with all-zero deep_feats still conserves mass via center self-loop
+    zero_feats = torch.zeros(1, 32, h, w, dtype=torch.float32)
+    zero_cam, _ = refiner_deep(rgb[:1], zero_feats, init_cam[:1], return_ignore_mask=False)
+    assert torch.allclose(zero_cam.sum(dim=1), torch.ones(1, h, w), atol=1e-4)
+
+
 def test_multi_prototype_ppc_loss_and_ema_update() -> None:
     """Verifies MultiPrototypePPCLoss EMA update in train() vs strict buffer immutability in eval()."""
     from src.losses_metrics.losses import MultiPrototypePPCLoss
