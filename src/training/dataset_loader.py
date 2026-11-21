@@ -49,6 +49,7 @@ BCSS_PALETTE: List[int] = [
 
 IMAGENET_MEAN: Tuple[float, float, float] = (0.485, 0.456, 0.406)
 IMAGENET_STD: Tuple[float, float, float] = (0.229, 0.224, 0.225)
+IMG_EXTENSIONS: Tuple[str, ...] = (".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG")
 
 
 def extract_patient_id(filepath_or_name: Union[str, Path]) -> str:
@@ -160,7 +161,7 @@ def find_image_files(root_dir: Union[str, Path], recursive: bool = True) -> List
     if not root_path.exists():
         return []
 
-    extensions = {".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG"}
+    extensions = set(IMG_EXTENSIONS)
     files: List[Path] = []
     if recursive:
         for p in root_path.rglob("*"):
@@ -237,6 +238,15 @@ def sample_patient_stratified(
             break
         idx += 1
     return selected
+
+
+def _sample_patient_stratified_s2(
+    files: List[Path],
+    max_samples: Optional[int],
+    seed: int = 42,
+) -> List[Path]:
+    """Picklable Stage-2 wrapper for deterministic patient-stratified sampling."""
+    return sample_patient_stratified(files, max_samples, seed=seed)
 
 
 class RandomD4Transform:
@@ -694,6 +704,204 @@ class BCSSStage2MultiMaskDataset(Dataset):
             "cls_label": cls_label,
             "name": img_path.stem,
         }
+
+
+def _load_stage2_mask_pil(
+    target_p: Path,
+    fallback_p: Path,
+    target_size: Tuple[int, int] = (224, 224),
+) -> Image.Image:
+    """Load a Stage-2 mask preserving mode 'P' palette indices and closing the file handle."""
+    actual_p = target_p if target_p.is_file() else fallback_p
+    with Image.open(actual_p) as m_raw:
+        m_img = m_raw.copy() if m_raw.mode == "P" else m_raw.convert("L")
+    if m_img.size != target_size:
+        m_img = m_img.resize(target_size, Image.NEAREST)
+    return m_img
+
+
+def _pil_to_stage2_mask_tensor(m_pil: Image.Image) -> torch.Tensor:
+    """Convert PIL mask to int64 tensor preserving {0..4, 255} and mapping out-of-range non-255 to 4."""
+    arr = np.array(m_pil, dtype=np.int64)
+    if arr.ndim == 3:
+        arr = arr[:, :, 0]
+    arr = np.where((arr != 255) & ((arr < 0) | (arr > 4)), 4, arr)
+    return torch.from_numpy(arr).long()
+
+
+class BCSSStage2Dataset(Dataset):
+    """Picklable Stage-2 training dataset returning 4-tuple (img_t, m_bn7, m_b5_2, m_b4_5).
+
+    Scans PM_bn7/*.png, enforces strict patient-level anti-leakage (raises RuntimeError
+    if patient_ids matches 0 files), and applies synchronized D4/flip/RGB-blur augmentations.
+    """
+
+    def __init__(
+        self,
+        img_dir: Union[str, Path],
+        pm_dir: Union[str, Path],
+        limit: Optional[int] = None,
+        patient_ids: Optional[Iterable[str]] = None,
+        is_train: bool = True,
+        use_d4_aug: bool = True,
+        strict_patient_filter: bool = True,
+        seed: int = 42,
+    ) -> None:
+        super().__init__()
+        self.img_dir = Path(img_dir)
+        self.pm_dir = Path(pm_dir)
+        self.is_train = bool(is_train)
+        self.use_d4_aug = bool(use_d4_aug)
+
+        files = sorted((self.pm_dir / "PM_bn7").glob("*.png"))
+        if len(files) == 0:
+            raise FileNotFoundError(
+                f"[STAGE2 ERROR] No pseudo-masks found in {self.pm_dir / 'PM_bn7'}. "
+                "Please generate pseudo-masks before Stage-2 training."
+            )
+
+        if patient_ids is not None:
+            allowed_pids = {str(p).upper() for p in patient_ids}
+            filtered = [f for f in files if extract_patient_id(f.name) in allowed_pids]
+            if strict_patient_filter and len(filtered) == 0:
+                raise RuntimeError(
+                    f"[STAGE2 ERROR] Patient ID filter matched 0 Stage-2 train pseudo-masks in "
+                    f"{self.pm_dir / 'PM_bn7'} (total={len(files)})."
+                )
+            files = filtered
+
+        if limit is not None and limit > 0:
+            files = _sample_patient_stratified_s2(files, limit, seed=seed)
+
+        self.files = files
+        self._img_map: Optional[Dict[str, Path]] = None
+        if len(self.files) > 0 and any(not (self.img_dir / f.name).is_file() for f in self.files[:8]):
+            self._img_map = {p.name: p for p in find_image_files(self.img_dir)}
+
+        self.img_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ])
+
+    def __len__(self) -> int:
+        return len(self.files)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        fallback_p = self.files[idx]
+        fname = fallback_p.name
+        img_path = self.img_dir / fname
+        if not img_path.is_file() and self._img_map is not None:
+            img_path = self._img_map.get(fname, img_path)
+        if not img_path.is_file():
+            candidates = list(self.img_dir.rglob(fname))
+            img_path = candidates[0] if len(candidates) > 0 else img_path
+        if not img_path.is_file():
+            raise FileNotFoundError(f"[STAGE2 ERROR] Image patch {fname} not found in {self.img_dir}")
+
+        with Image.open(img_path) as im:
+            img = im.convert("RGB")
+
+        m_bn7_pil = _load_stage2_mask_pil(self.pm_dir / "PM_bn7" / fname, fallback_p)
+        m_b5_2_pil = _load_stage2_mask_pil(self.pm_dir / "PM_b5_2" / fname, fallback_p)
+        m_b4_5_pil = _load_stage2_mask_pil(self.pm_dir / "PM_b4_5" / fname, fallback_p)
+
+        if self.is_train:
+            if self.use_d4_aug:
+                rot_k = random.randint(0, 3)
+                if rot_k == 1:
+                    img = img.transpose(Image.ROTATE_90)
+                    m_bn7_pil = m_bn7_pil.transpose(Image.ROTATE_90)
+                    m_b5_2_pil = m_b5_2_pil.transpose(Image.ROTATE_90)
+                    m_b4_5_pil = m_b4_5_pil.transpose(Image.ROTATE_90)
+                elif rot_k == 2:
+                    img = img.transpose(Image.ROTATE_180)
+                    m_bn7_pil = m_bn7_pil.transpose(Image.ROTATE_180)
+                    m_b5_2_pil = m_b5_2_pil.transpose(Image.ROTATE_180)
+                    m_b4_5_pil = m_b4_5_pil.transpose(Image.ROTATE_180)
+                elif rot_k == 3:
+                    img = img.transpose(Image.ROTATE_270)
+                    m_bn7_pil = m_bn7_pil.transpose(Image.ROTATE_270)
+                    m_b5_2_pil = m_b5_2_pil.transpose(Image.ROTATE_270)
+                    m_b4_5_pil = m_b4_5_pil.transpose(Image.ROTATE_270)
+
+            if random.random() < 0.5:
+                img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                m_bn7_pil = m_bn7_pil.transpose(Image.FLIP_LEFT_RIGHT)
+                m_b5_2_pil = m_b5_2_pil.transpose(Image.FLIP_LEFT_RIGHT)
+                m_b4_5_pil = m_b4_5_pil.transpose(Image.FLIP_LEFT_RIGHT)
+
+            if random.random() < 0.5:
+                img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                m_bn7_pil = m_bn7_pil.transpose(Image.FLIP_TOP_BOTTOM)
+                m_b5_2_pil = m_b5_2_pil.transpose(Image.FLIP_TOP_BOTTOM)
+                m_b4_5_pil = m_b4_5_pil.transpose(Image.FLIP_TOP_BOTTOM)
+
+            if random.random() < 0.5:
+                img = img.filter(ImageFilter.GaussianBlur(radius=random.random()))
+
+        return (
+            self.img_transform(img),
+            _pil_to_stage2_mask_tensor(m_bn7_pil),
+            _pil_to_stage2_mask_tensor(m_b5_2_pil),
+            _pil_to_stage2_mask_tensor(m_b4_5_pil),
+        )
+
+
+class BCSSStage2ValDataset(Dataset):
+    """Picklable Stage-2 validation/test dataset returning 2-tuple (img_t, gt_t).
+
+    Uses lossless mode-'P' mask loading and enforces strict patient-level filtering.
+    """
+
+    def __init__(
+        self,
+        img_dir: Union[str, Path],
+        mask_dir: Union[str, Path],
+        patient_ids: Optional[Iterable[str]] = None,
+        limit: Optional[int] = None,
+        strict_patient_filter: bool = True,
+        seed: int = 42,
+    ) -> None:
+        super().__init__()
+        self.img_dir = Path(img_dir)
+        self.mask_dir = Path(mask_dir)
+
+        files = find_image_files(self.img_dir, recursive=False)
+        if len(files) == 0 and self.img_dir.is_dir():
+            files = find_image_files(self.img_dir, recursive=True)
+
+        if patient_ids is not None:
+            allowed_pids = {str(p).upper() for p in patient_ids}
+            filtered = [f for f in files if extract_patient_id(f.name) in allowed_pids]
+            if strict_patient_filter and len(filtered) == 0:
+                raise RuntimeError(
+                    f"[STAGE2 ERROR] Patient ID filter matched 0 Stage-2 val patches in "
+                    f"{self.img_dir} (total={len(files)})."
+                )
+            files = filtered
+
+        files = [f for f in files if (self.mask_dir / f.name).is_file()]
+        self.files = (
+            _sample_patient_stratified_s2(files, limit, seed=seed)
+            if (limit is not None and limit > 0)
+            else files
+        )
+        self.val_tf = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ])
+
+    def __len__(self) -> int:
+        return len(self.files)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        vf = self.files[idx]
+        with Image.open(vf) as im:
+            img_t = self.val_tf(im.convert("RGB"))
+        m_pil = _load_stage2_mask_pil(self.mask_dir / vf.name, self.mask_dir / vf.name)
+        return img_t, _pil_to_stage2_mask_tensor(m_pil)
 
 
 class BCSSEvalDataset(Dataset):

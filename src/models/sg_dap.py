@@ -34,6 +34,7 @@ class StainGuidedAffinityRefiner(nn.Module):
         conf_ignore_thresh: float = 0.55,
         margin_ignore_thresh: float = 0.15,
         ignore_index: int = 255,
+        use_deep_affinity: bool = False,
     ) -> None:
         super().__init__()
         self.ks = kernel_size
@@ -45,13 +46,14 @@ class StainGuidedAffinityRefiner(nn.Module):
         self.conf_ignore_thresh = conf_ignore_thresh
         self.margin_ignore_thresh = margin_ignore_thresh
         self.ignore_index = ignore_index
+        self.use_deep_affinity = bool(use_deep_affinity)
 
         self.stain_extractor = StainDeconvLayer()
 
     def forward(
         self,
         rgb_img: torch.Tensor,
-        deep_feats: torch.Tensor,
+        deep_feats: Optional[torch.Tensor],
         init_cam: torch.Tensor,
         return_ignore_mask: bool = False,
         active_labels: Optional[torch.Tensor] = None,
@@ -60,7 +62,8 @@ class StainGuidedAffinityRefiner(nn.Module):
 
         Args:
             rgb_img: (B, 3, H, W) normalized input image in [0.0, 1.0].
-            deep_feats: (B, D, h, w) high-level feature activations from backbone.
+            deep_feats: Optional (B, D, h, w) high-level feature activations from backbone.
+                        Bypassed when use_deep_affinity is False or deep_feats is None.
             init_cam: (B, C, h, w) initial class activation probability maps.
             return_ignore_mask: If False (evaluation/test mode), returns pure discrete
                                 argmax mask strictly in {0, ..., C-1}. If True (training
@@ -110,41 +113,45 @@ class StainGuidedAffinityRefiner(nn.Module):
         # Extract H&E optical density and chromatin dispersion features
         _, _, stain_features = self.stain_extractor(rgb_small)        # (B, 6, h, w)
 
-        # Memory-safe per-sample k x k deep-feature cosine similarity (avoids huge B*D*H*W allocations)
         k2 = self.ks * self.ks
-        sim_deep = torch.empty((b, k2, h * w), device=init_cam.device, dtype=torch.float32)
-        for bi in range(b):
-            feat_i = deep_feats[bi : bi + 1]
-            if feat_i.shape[-2:] != (h, w):
-                feat_i = F.interpolate(feat_i, size=(h, w), mode="bilinear", align_corners=False)
-            norm_i = F.normalize(feat_i.float(), dim=1, eps=1e-6)  # (1, D, h, w)
-            idx_k = 0
-            for dy in range(-self.pad, self.pad + 1):
-                src_y0 = max(0, dy)
-                src_y1 = h + min(0, dy)
-                dst_y0 = max(0, -dy)
-                dst_y1 = h - max(0, dy)
-                for dx in range(-self.pad, self.pad + 1):
-                    src_x0 = max(0, dx)
-                    src_x1 = w + min(0, dx)
-                    dst_x0 = max(0, -dx)
-                    dst_x1 = w - max(0, dx)
-                    dot_map = torch.zeros((h, w), device=init_cam.device, dtype=torch.float32)
-                    dot_valid = (
-                        norm_i[0, :, dst_y0:dst_y1, dst_x0:dst_x1]
-                        * norm_i[0, :, src_y0:src_y1, src_x0:src_x1]
-                    ).sum(dim=0).clamp(min=0.0)
-                    dot_map[dst_y0:dst_y1, dst_x0:dst_x1] = dot_valid
-                    sim_deep[bi, idx_k] = dot_map.reshape(-1)
-                    idx_k += 1
-
         stain_unfold = F.unfold(stain_features, kernel_size=self.ks, padding=self.pad).view(b, 6, k2, h * w)
         stain_center = stain_features.view(b, 6, 1, h * w)
         dist_stain = ((stain_center - stain_unfold) ** 2).sum(dim=1)      # (B, K2, h*w)
         sim_stain = torch.exp(-dist_stain / (2.0 * (self.sigma_stain ** 2)))
 
-        # Hybrid affinity matrix with row-stochastic center self-loop fallback when row_sum == 0
-        affinity = (sim_deep * sim_stain) ** self.beta
+        if self.use_deep_affinity and deep_feats is not None:
+            # Memory-safe per-sample k x k deep-feature cosine similarity (avoids huge B*D*H*W allocations)
+            sim_deep = torch.empty((b, k2, h * w), device=init_cam.device, dtype=torch.float32)
+            for bi in range(b):
+                feat_i = deep_feats[bi : bi + 1]
+                if feat_i.shape[-2:] != (h, w):
+                    feat_i = F.interpolate(feat_i, size=(h, w), mode="bilinear", align_corners=False)
+                norm_i = F.normalize(feat_i.float(), dim=1, eps=1e-6)  # (1, D, h, w)
+                idx_k = 0
+                for dy in range(-self.pad, self.pad + 1):
+                    src_y0 = max(0, dy)
+                    src_y1 = h + min(0, dy)
+                    dst_y0 = max(0, -dy)
+                    dst_y1 = h - max(0, dy)
+                    for dx in range(-self.pad, self.pad + 1):
+                        src_x0 = max(0, dx)
+                        src_x1 = w + min(0, dx)
+                        dst_x0 = max(0, -dx)
+                        dst_x1 = w - max(0, dx)
+                        dot_map = torch.zeros((h, w), device=init_cam.device, dtype=torch.float32)
+                        dot_valid = (
+                            norm_i[0, :, dst_y0:dst_y1, dst_x0:dst_x1]
+                            * norm_i[0, :, src_y0:src_y1, src_x0:src_x1]
+                        ).sum(dim=0).clamp(min=0.0)
+                        dot_map[dst_y0:dst_y1, dst_x0:dst_x1] = dot_valid
+                        sim_deep[bi, idx_k] = dot_map.reshape(-1)
+                        idx_k += 1
+
+            # Hybrid affinity matrix with row-stochastic center self-loop fallback when row_sum == 0
+            affinity = (sim_deep * sim_stain) ** self.beta
+        else:
+            # Pure H&E stain-guided affinity (sim_deep = 1.0, skips 25-shift 4096-D upsampling)
+            affinity = sim_stain ** self.beta
         row_sum = affinity.sum(dim=1, keepdim=True)
         identity_loop = torch.zeros_like(affinity)
         identity_loop[:, k2 // 2, :] = 1.0

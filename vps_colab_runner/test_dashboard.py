@@ -154,13 +154,15 @@ def test_start_supports_multi_gpu_and_ignores_foreign_active(secured, monkeypatc
     assert "--gpu A100" in launch_cmd and "--no-high-mem" in launch_cmd
     assert "--preset arm_a_polysgd" in launch_cmd and "STAGE1_SEED=42" in launch_cmd
 
-    # Explicit high_mem=True on A100 passes --high-mem; H100 defaults to --high-mem
-    monkeypatch.setenv("COLAB_MAX_OWNED_CONCURRENT", "3")
+    # Explicit high_mem=True passes --high-mem; G4 & H100 default to --no-high-mem
+    monkeypatch.setenv("COLAB_MAX_OWNED_CONCURRENT", "4")
     assert start({"notebook": "nb1", "gpu": "A100", "high_mem": True, "session": "se374_a100_hm"}) == 200
     assert "--high-mem" in calls[-1][5]
+    assert start({"notebook": "nb2", "gpu": "G4", "session": "se374_g4_def"}) == 200
+    assert "--no-high-mem" in calls[-1][5]
 
-    # _PENDING_STARTS TOCTOU guard: 2 pending launches block a 3rd launch at limit 2
-    monkeypatch.setenv("COLAB_MAX_OWNED_CONCURRENT", "2")
+    # _PENDING_STARTS TOCTOU guard: 3 pending launches block a 4th launch at limit 3
+    monkeypatch.setenv("COLAB_MAX_OWNED_CONCURRENT", "3")
     assert start({"notebook": "nb1", "gpu": "H100", "session": "se374_arm_b"}) == 400
     dashboard._PENDING_STARTS.clear()
 
@@ -171,6 +173,12 @@ def test_start_supports_multi_gpu_and_ignores_foreign_active(secured, monkeypatc
     monkeypatch.setenv("COLAB_MAX_OWNED_CONCURRENT", "2")
     assert start({"notebook": "nb1", "gpu": "H100", "session": "se374_arm_b"}) == 200
     assert calls[-1][:5] == ["tmux", "new-session", "-d", "-s", "colab_se374_arm_b"]
+    assert "--no-high-mem" in calls[-1][5]
+    dashboard._PENDING_STARTS.clear()
+    monkeypatch.setattr(dashboard, "runner_pids", lambda: {})
+    assert start({"notebook": "nb2", "gpu": "G4", "high_mem": True, "session": "se374_g4_hm"}) == 200
+    assert "--high-mem" in calls[-1][5]
+    assert start({"notebook": "nb2", "gpu": "H100", "high_mem": True, "session": "se374_h100_hm"}) == 200
     assert "--high-mem" in calls[-1][5]
 
 
@@ -294,6 +302,27 @@ def test_params_and_progress_are_parsed() -> None:
     assert dict(params)["Thiết bị"] == "cuda (NVIDIA A100)"
     prog = dashboard.progress(dashboard.parse_epochs(lines), cur_total, {}, False)
     assert prog["best"]["name"] == "GatedPM_mIoU" and prog["best"]["epoch"] == 2
+
+    log_nb2 = (
+        "[READY] Compute Device: cuda (NVIDIA G4)\n"
+        "[READY] Mixed Precision AMP Dtype: torch.bfloat16\n"
+        "[PARITY] Model=DeepLabV3+ ResNet-101 | Pretrained=267 | Epochs=25 | LR=0.00012 | Loss=MLPS+Unc+UABL | PM=ms_tta_global | Otsu=False\n"
+        "[DATALOADER] Batches per epoch: 975 (Batch Size: 24, Total Samples: 23422)\n"
+        "[DATALOADER] Stage 2 Val: 3,418 patches across 22 patients\n"
+        "Epoch 1/25\n"
+        "[EPOCH 01] Train Loss=0.4512 | Val_mIoU=0.6123\n"
+        "Epoch 2/25\n"
+        "[EPOCH 02] Train Loss: 0.3910 | Val mIoU(4cls, gt!=4): 0.6488\n"
+    )
+    l2 = dashboard.clean_lines(log_nb2)
+    p2, ct2 = dashboard.parse_params(log_nb2, l2)
+    d2 = dict(p2)
+    assert d2["Mô hình"] == "DeepLabV3+ ResNet-101" and d2["Pretrained"] == "267" and d2["Hàm loss"] == "MLPS+Unc+UABL"
+    assert d2["Dữ liệu train"].startswith("975") and "3,418 patches" in d2["Val"] and "PM=ms_tta_global" in d2["PM / Otsu"]
+    ep2 = dashboard.parse_epochs(l2)
+    assert ep2[0]["metrics"]["Val_mIoU"] == pytest.approx(0.6123)
+    assert ep2[1]["metrics"]["Val mIoU(4cls, gt!=4)"] == pytest.approx(0.6488)
+    assert dashboard.progress(ep2, ct2, {}, False)["best"] == {"name": "Val_mIoU", "value": 0.6123, "epoch": 1}
 
 
 def test_index_serves_light_blue_html_and_stop_requires_header(server) -> None:

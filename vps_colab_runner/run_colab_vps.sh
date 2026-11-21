@@ -21,7 +21,7 @@ usage() {
   cat <<'EOF'
 Usage: bash vps_colab_runner/run_colab_vps.sh [OPTIONS]
   --notebook nb1|nb2 | --file <path> | --gpu T4|L4|G4|A100|H100 | --gpu-fallback <csv>
-  --high-mem | --no-high-mem (auto-on H100/G4; default 0 on A100/L4/T4)
+  --high-mem | --no-high-mem (default 0 on all GPUs; --high-mem on A100/G4/H100/T4, ignored on L4)
   --env KEY=VALUE | --preset <name> | --session <name> (^se374_... or nb1|nb2)
   --max-minutes <int> [210/240] | --max-retries <int> [3] | --sync-interval <sec> [300]
   --output-dir <dir> | --credentials <path> | --no-stop-on-alarm | --dry-run | -h
@@ -39,8 +39,11 @@ while [ $# -gt 0 ]; do
     --gpu-fallback) GPU_FALLBACK="$(printf '%s' "$2" | tr '[:lower:]' '[:upper:]')"; shift 2 ;;
     --env)
       [[ "$2" == *=* ]] || { printf '[ERROR] --env expects KEY=VALUE, got: %s\n' "$2" >&2; exit 2; }
-      [[ "${2%%=*}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { printf '[ERROR] Invalid --env key: %s\n' "${2%%=*}" >&2; exit 2; }
-      ENV_ARGS+=(--env "$2"); ENV_DISPLAY+=("$2"); shift 2 ;;
+      _ek="${2%%=*}"; _ev="${2#*=}"
+      [[ "$_ek" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { printf '[ERROR] Invalid --env key: %s\n' "$_ek" >&2; exit 2; }
+      ENV_DISPLAY+=("$2")
+      case "$_ek" in STAGE1_LOCAL_CKPT) STAGE1_LOCAL_CKPT="$_ev" ;; STAGE1_CKPT_SOURCE) STAGE1_CKPT_SOURCE="$_ev"; ENV_ARGS+=(--env "$2") ;; *) ENV_ARGS+=(--env "$2") ;; esac
+      shift 2 ;;
     --preset) PRESET_NAME="$2"; ENV_ARGS+=(--env "STAGE1_EXP_PRESET=$2"); ENV_DISPLAY+=("STAGE1_EXP_PRESET=$2"); shift 2 ;;
     --session) SESSION_NAME="$2"; shift 2 ;;
     --max-minutes) MAX_RUNTIME_MIN="$2"; shift 2 ;;
@@ -63,13 +66,7 @@ for _g in "$GPU_TYPE" $(printf '%s' "$GPU_FALLBACK" | tr ',' ' '); do
   case "$_g" in T4|L4|G4|A100|H100) ;; *) printf '[ERROR] Unsupported GPU tier: %s\n' "$_g" >&2; exit 2 ;; esac
 done
 
-resolve_tier_hmem() {
-  local tier="$1"
-  if [ "$HIGH_MEM" = "1" ]; then [ "$tier" = "L4" ] && echo 0 || echo 1
-  elif [ "$HIGH_MEM" = "0" ]; then echo 0
-  else case "$tier" in H100|G4) echo 1 ;; *) echo 0 ;; esac
-  fi
-}
+resolve_tier_hmem() { [ "$HIGH_MEM" = "1" ] && [ "$1" != "L4" ] && echo 1 || echo 0; }
 
 TIER_LIST="$GPU_TYPE"
 for _t in $(printf '%s' "$GPU_FALLBACK" | tr ',' ' '); do
@@ -77,11 +74,7 @@ for _t in $(printf '%s' "$GPU_FALLBACK" | tr ',' ' '); do
   case ",$TIER_LIST," in *,"$_t",*) ;; *) TIER_LIST="$TIER_LIST,$_t" ;; esac
 done
 
-if [ -z "$COLAB_BIN" ]; then
-  if [ -x "$VENV_DIR/bin/colab" ]; then COLAB_BIN="$VENV_DIR/bin/colab"
-  elif command -v colab >/dev/null 2>&1; then COLAB_BIN="$(command -v colab)"
-  else COLAB_BIN="colab"; fi
-fi
+[ -n "$COLAB_BIN" ] || { [ -x "$VENV_DIR/bin/colab" ] && COLAB_BIN="$VENV_DIR/bin/colab" || COLAB_BIN="$(command -v colab 2>/dev/null || echo colab)"; }
 
 guard_cmd() { "$PY_BIN" "$SCRIPT_DIR/session_guard.py" "$@"; }
 colab_global_cmd() { local rc="${COLAB_GUARD_STATE_DIR:-$SCRIPT_DIR/.state}/.readonly_sessions.json"; mkdir -p "$(dirname "$rc")"; GOOGLE_APPLICATION_CREDENTIALS="$CRED_PATH" "$COLAB_BIN" --config "$rc" --auth adc "$@"; }
@@ -97,6 +90,7 @@ elif [ "$NOTEBOOK_KEY" = "nb2" ]; then
   [ -z "$NOTEBOOK_FILE" ] && NOTEBOOK_FILE="$( [ "$GPU_TYPE" = "T4" ] && echo notebooks/02_Pseudo_Masks_Train_Stage2_T4.ipynb || echo notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb )"
   CKPT_LATEST_NAME="stage2_latest.pth"; CKPT_BEST_NAME="stage2_retrained_best.pth"; CKPT_CLS_NAME=""
   REMOTE_ZIP="/content/SE374_Stage2_Training_Results.zip"; REMOTE_METRICS_JSON="/content/stage2_results/STAGE2_TRAINING_METRICS.json"; REMOTE_PLOT_PNG="/content/stage2_results/stage2_training_loss.png"
+  if [ -n "${STAGE1_LOCAL_CKPT:-}" ] && [ -z "${STAGE1_CKPT_SOURCE:-}" ]; then STAGE1_CKPT_SOURCE="retrained"; ENV_ARGS+=(--env "STAGE1_CKPT_SOURCE=retrained"); ENV_DISPLAY+=("STAGE1_CKPT_SOURCE=retrained"); fi
 else
   printf '[ERROR] Unsupported --notebook value: %s (expected nb1 or nb2)\n' "$NOTEBOOK_KEY" >&2; exit 2
 fi
@@ -109,15 +103,9 @@ RESOLVED_HMEM="$(resolve_tier_hmem "$GPU_TYPE")"
 
 colab_session_cmd() { GOOGLE_APPLICATION_CREDENTIALS="$CRED_PATH" "$COLAB_BIN" --config "$SESS_COLAB_CFG" --auth adc "$@"; }
 colab_session_t() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then GOOGLE_APPLICATION_CREDENTIALS="$CRED_PATH" timeout "$s" "$COLAB_BIN" --config "$SESS_COLAB_CFG" --auth adc "$@"; else colab_session_cmd "$@"; fi; }
-log() {
-  local msg="[VPS-RUNNER $(date '+%Y-%m-%d %H:%M:%S')] $*"
-  printf '%s\n' "$msg"
-  [ -d "$OUTPUT_DIR" ] && printf '%s\n' "$msg" >> "$RUN_LOG" 2>/dev/null || true
-}
-write_meta_env() {
-  printf 'START_EPOCH=%s\nDEADLINE_EPOCH=%s\nMAX_MINUTES=%s\nNOTEBOOK=%s\nGPU=%s\nHIGH_MEM=%s\nASSIGNED_GPU=%s\nASSIGNED_HMEM=%s\nPRESET=%s\nSESSION=%s\nMAX_ATTEMPTS=%s\n' \
-    "$START_EPOCH" "$DEADLINE_EPOCH" "$MAX_RUNTIME_MIN" "$NOTEBOOK_FILE" "$1" "$2" "$1" "$2" "${PRESET_NAME:-default}" "$SESSION_NAME" "$((MAX_RETRIES + 1))" > "$STATE_DIR/meta.env"
-}
+log() { local msg="[VPS-RUNNER $(date '+%Y-%m-%d %H:%M:%S')] $*"; printf '%s\n' "$msg"; [ -d "$OUTPUT_DIR" ] && printf '%s\n' "$msg" >> "$RUN_LOG" 2>/dev/null || true; }
+write_meta_env() { printf 'START_EPOCH=%s\nDEADLINE_EPOCH=%s\nMAX_MINUTES=%s\nNOTEBOOK=%s\nGPU=%s\nHIGH_MEM=%s\nASSIGNED_GPU=%s\nASSIGNED_HMEM=%s\nPRESET=%s\nSESSION=%s\nMAX_ATTEMPTS=%s\n' \
+  "$START_EPOCH" "$DEADLINE_EPOCH" "$MAX_RUNTIME_MIN" "$NOTEBOOK_FILE" "$1" "$2" "$1" "$2" "${PRESET_NAME:-default}" "$SESSION_NAME" "$((MAX_RETRIES + 1))" > "$STATE_DIR/meta.env"; }
 
 if [ "$ACTION" = "status" ]; then
   printf '=== Colab Usage & Sessions ===\n'
@@ -151,6 +139,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   printf '[DRY-RUN] Validation PASS. Zero Colab sessions created.\n'; exit 0
 fi
 
+if [ -n "${STAGE1_LOCAL_CKPT:-}" ] && [ ! -f "$STAGE1_LOCAL_CKPT" ]; then printf '[ERROR] STAGE1_LOCAL_CKPT not found: %s\n' "$STAGE1_LOCAL_CKPT" >&2; exit 2; fi
+if [ "$NOTEBOOK_KEY" = "nb2" ] && [ "${STAGE1_CKPT_SOURCE:-}" = "retrained" ] && [ -z "${STAGE1_LOCAL_CKPT:-}" ] && [ ! -f "$CKPT_LOCAL_DIR/stage1_retrained_best.pth" ]; then printf '[ERROR] Missing Stage-1 checkpoint for nb2 retrained mode\n' >&2; exit 2; fi
 [ -f "$NOTEBOOK_FILE" ] || { printf '[ERROR] Notebook file not found: %s\n' "$NOTEBOOK_FILE" >&2; exit 1; }
 [ -f "$CRED_PATH" ] || { printf '[ERROR] ADC credentials file not found: %s\n' "$CRED_PATH" >&2; exit 1; }
 chmod 600 "$CRED_PATH" 2>/dev/null || true
@@ -201,9 +191,7 @@ upload_checkpoint_for_resume() {
       remote_sha="$(colab_session_cmd ssh -s "$SESSION_NAME" -- sha256sum "$remote_path" 2>/dev/null | awk '{print $1}' || true)"
       [ "$local_sha" = "$remote_sha" ] && { log "Verified resume checkpoint uploaded: $remote_path (SHA256=$remote_sha)"; return 0; }
       log "WARN: Upload SHA256 mismatch (try $try/3) for $remote_path"
-    else
-      log "WARN: Resume checkpoint SSH upload failed (try $try/3) for $remote_path"
-    fi
+    else log "WARN: Resume checkpoint SSH upload failed (try $try/3) for $remote_path"; fi
     [ "$try" -lt 3 ] && sleep 5
   done
   log "ERROR: Upload failed after 3 attempts for $remote_path"; return 1
@@ -241,7 +229,7 @@ start_watcher() {
         log "WATCHDOG TIMEOUT: Reached ${MAX_RUNTIME_MIN} min limit. Stopping VM!"; trigger_stop_exec "WATCHDOG_TIMEOUT"; exit 0
       fi
       if [ -f "$RUN_LOG" ]; then
-        if tail -n +"$start_line" "$RUN_LOG" | grep -E 'Loss: nan|Non-finite epoch loss|Train Loss=nan' >/dev/null; then
+        if tail -n +"$start_line" "$RUN_LOG" | grep -E 'Loss: nan|Non-finite epoch loss|Train Loss=nan|non-finite loss|\[STAGE[12] ERROR\]|OutOfMemoryError|FileNotFoundError|Failed to checkout.*STAGE[12]_GIT_REF' >/dev/null; then
           log "FAIL-FAST ALARM: Non-finite/NaN loss detected in run.log!"; trigger_stop_exec "NAN_ALARM"; exit 0
         fi
         if [ "$STOP_ON_ALARM" -eq 1 ] && tail -n +"$start_line" "$RUN_LOG" | grep -E '\[EARLY REGRESSION ALARM\]|\[CALIBRATION COLLAPSE ALARM\]' >/dev/null; then
@@ -368,7 +356,7 @@ while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
   if [ -f "$STATE_DIR/stop_reason" ]; then log "Halting loop due to safety guard: $(cat "$STATE_DIR/stop_reason")"; break; fi
   if [ "$EXEC_RC" -eq 0 ] && [ -f "${EXEC_NB_COPY%.ipynb}_output.ipynb" ]; then
     set +e
-    NB_ERR_MSG="$("$PY_BIN" -c 'import json,re,sys;nb=json.load(open(sys.argv[1],encoding="utf-8"));errs=[(i,o.get("ename",""),o.get("evalue",""),"\n".join(o.get("traceback",[]))) for i,c in enumerate(nb.get("cells",[])) for o in c.get("outputs",[]) if o.get("output_type")=="error"];errs and (print("; ".join(f"cell_{i}: {a}: {b}" for i,a,b,_ in errs)[:400]),sys.exit(2 if any(re.search(r"STAGE1_GIT_REF|Non-finite epoch loss|CALIBRATION COLLAPSE|strict=True",f"{a} {b} {tb}") for _,a,b,tb in errs) else 1))' "${EXEC_NB_COPY%.ipynb}_output.ipynb" 2>&1)"
+    NB_ERR_MSG="$("$PY_BIN" -c 'import json,re,sys;nb=json.load(open(sys.argv[1],encoding="utf-8"));errs=[(i,o.get("ename",""),o.get("evalue",""),"\n".join(o.get("traceback",[]))) for i,c in enumerate(nb.get("cells",[])) for o in c.get("outputs",[]) if o.get("output_type")=="error"];errs and (print("; ".join(f"cell_{i}: {a}: {b}" for i,a,b,_ in errs)[:400]),sys.exit(2 if any(re.search(r"STAGE[12]_GIT_REF|\[STAGE[12] ERROR\]|Non-finite|non-finite loss|CALIBRATION COLLAPSE|strict=True|OutOfMemoryError|FileNotFoundError",f"{a} {b} {tb}") for _,a,b,tb in errs) else 1))' "${EXEC_NB_COPY%.ipynb}_output.ipynb" 2>&1)"
     NB_ERR_RC=$?
     set -e
     if [ "$NB_ERR_RC" -ne 0 ]; then

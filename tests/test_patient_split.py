@@ -260,3 +260,66 @@ def test_hypothesis_extract_patient_id_never_crashes(text):
     """Property test: extract_patient_id must be resilient to arbitrary text input."""
     result = extract_patient_id(text)
     assert isinstance(result, str)
+
+
+def test_stage2_datasets_patient_anti_leakage_fail_fast(tmp_path: Path):
+    """Verify BCSSStage2Dataset and BCSSStage2ValDataset raise RuntimeError on 0-match patient_ids."""
+    from src.training.dataset_loader import (
+        BCSS_PALETTE,
+        BCSSStage2Dataset,
+        BCSSStage2ValDataset,
+    )
+
+    train_img_dir = tmp_path / "train"
+    pm_dir = tmp_path / "train_PM"
+    val_img_dir = tmp_path / "val" / "img"
+    val_mask_dir = tmp_path / "val" / "mask"
+    for d in (train_img_dir, pm_dir / "PM_bn7", pm_dir / "PM_b5_2", pm_dir / "PM_b4_5", val_img_dir, val_mask_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    train_fname = "TCGA-A2-A0T2_0_0_[1 0 0 0].png"
+    other_fname = "TCGA-BH-A0B8_0_0_[0 1 0 0].png"
+    for fname in (train_fname, other_fname):
+        Image.fromarray(np.full((64, 64, 3), 140, dtype=np.uint8)).save(train_img_dir / fname)
+        for sub in ("PM_bn7", "PM_b5_2", "PM_b4_5"):
+            m_img = Image.fromarray(np.zeros((64, 64), dtype=np.uint8), mode="P")
+            m_img.putpalette(BCSS_PALETTE)
+            m_img.save(pm_dir / sub / fname)
+
+    val_fname = "TCGA-AN-A03X_0_0.png"
+    Image.fromarray(np.full((64, 64, 3), 140, dtype=np.uint8)).save(val_img_dir / val_fname)
+    vm_img = Image.fromarray(np.ones((64, 64), dtype=np.uint8), mode="P")
+    vm_img.putpalette(BCSS_PALETTE)
+    vm_img.save(val_mask_dir / val_fname)
+
+    # P0 Fail-Fast: 0 matching patients must raise RuntimeError (no silent unfiltered fallback)
+    with pytest.raises(RuntimeError, match="matched 0 Stage-2 train pseudo-masks"):
+        BCSSStage2Dataset(
+            img_dir=train_img_dir,
+            pm_dir=pm_dir,
+            patient_ids=["TCGA-ZZ-9999"],
+        )
+    with pytest.raises(RuntimeError, match="matched 0 Stage-2 val patches"):
+        BCSSStage2ValDataset(
+            img_dir=val_img_dir,
+            mask_dir=val_mask_dir,
+            patient_ids=["TCGA-ZZ-9999"],
+        )
+
+    # Valid filter restricts strictly to allowed patient IDs
+    ds_train = BCSSStage2Dataset(
+        img_dir=train_img_dir,
+        pm_dir=pm_dir,
+        patient_ids=["TCGA-A2-A0T2"],
+        is_train=False,
+    )
+    assert len(ds_train) == 1
+    assert extract_patient_id(ds_train.files[0].name) == "TCGA-A2-A0T2"
+
+    ds_val = BCSSStage2ValDataset(
+        img_dir=val_img_dir,
+        mask_dir=val_mask_dir,
+        patient_ids=["TCGA-AN-A03X"],
+    )
+    assert len(ds_val) == 1
+    assert extract_patient_id(ds_val.files[0].name) == "TCGA-AN-A03X"

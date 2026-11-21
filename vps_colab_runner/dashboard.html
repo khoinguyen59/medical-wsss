@@ -245,7 +245,7 @@ $("metric").addEventListener("change", e => { chosenMetric = e.target.value; dra
 $("stopBtn").addEventListener("click", () => stopCall({ scope: "session", session: current }, "Dừng phiên owned '" + (current || "hiện tại") + "'? Phiên ngoài hệ thống không bị ảnh hưởng."));
 $("stopOwnedBtn").addEventListener("click", () => stopCall({ scope: "owned_all" }, "Dừng TẤT CẢ phiên owned của hệ thống? Phiên ngoài hệ thống (Protected) vẫn được giữ nguyên."));
 $("startNb").addEventListener("change", e => { $("startMin").value = e.target.value === "nb1" ? 210 : 240; });
-$("startGpu").addEventListener("change", e => { const g = e.target.value; $("startHighMem").checked = ["H100","G4"].includes(g); $("startHighMem").disabled = (g === "L4"); });
+$("startGpu").addEventListener("change", e => { const g = e.target.value; $("startHighMem").checked = false; $("startHighMem").disabled = (g === "L4"); });
 $("startBtn").addEventListener("click", async () => {
   const envObj = {};
   $("startEnv").value.split(/[;\n]+/).map(x => x.trim()).filter(Boolean).forEach(x => { const i = x.indexOf("="); if (i > 0) envObj[x.slice(0, i).trim()] = x.slice(i + 1); });

@@ -37,7 +37,7 @@ bash vps_colab_runner/run_colab_vps.sh \
   --env STAGE1_SEED=42 --max-minutes 240 --sync-interval 300
 ```
 
-- `--high-mem`: Tu dong bat cho `H100|G4` (mac dinh `0` tren `A100|L4|T4`, co the bat tren `A100` bang `--high-mem` hoac tat bang `--no-high-mem`; bo qua tren `L4` theo `colab_cli`).
+- `--high-mem`: Mac dinh `0` tren tat ca GPU (`A100|G4|H100|L4|T4`); co the bat bang `--high-mem` (tren `A100|G4|H100|T4`) hoac tat bang `--no-high-mem` (bo qua tren `L4` theo `colab_cli`).
 - `--preset <name>`: Truyen `--env STAGE1_EXP_PRESET=<name>` vao Colab notebook.
 - `--env KEY=VALUE`: Lap lai duoc nhieu lan.
 - `--credentials <path>`: Chi dinh tep ADC rieng neu can.

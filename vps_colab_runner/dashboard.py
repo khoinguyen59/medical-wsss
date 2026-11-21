@@ -27,7 +27,7 @@ RUNS_DIR, RUNNER_SH = RUNNER_DIR / "runs", RUNNER_DIR / "run_colab_vps.sh"
 CRED = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", str(Path.home() / ".config/gcloud/application_default_credentials.json"))
 NOISE = re.compile(r"Exception ignored|Traceback \(most|_shutdown_workers|is_alive\(|dataloader\.py|_parent_pid|can only test a child|^\s*self\._shutdown|^\s*if w\.|^\s*assert self|^\s*File \"")
 ANSI, EPOCH_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]"), re.compile(r"\[EPOCH\s+(\d+)\]\s*(.*)")
-METRIC_RE = re.compile(r"([A-Za-z][A-Za-z0-9_() ]*?)\s*[=:]\s*(-?\d+\.\d+|nan)")
+METRIC_RE = re.compile(r"([A-Za-z](?:!=|[A-Za-z0-9_() ,/-])*?)\s*[=:]\s*(-?\d+\.\d+|nan)")
 EVENT_KEYS = ("Verified atomic sync", "WATCHDOG", "ALARM", "Attempt", "CLEANUP", "SUCCESS", "STOPPED", "Halting", "WARN", "CHECKPOINT", "Uploading", "Notebook execution", "Connection was lost")
 SYNC_RE = re.compile(r"\[VPS-RUNNER ([\d\- :]+)\] Verified atomic sync OK: (\S+) \(SHA256=(\w+)\)")
 PRESET_RE, ENV_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$"), re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -37,18 +37,15 @@ LOCK = threading.Lock()
 _START_LOCK = threading.Lock()
 _PENDING_STARTS: dict[str, float] = {}
 
-
 def max_owned_concurrent():
     try:
         return max(1, int(os.environ.get("COLAB_MAX_OWNED_CONCURRENT", "1")))
     except ValueError:
         return 1
 
-
 def colab_bin():
     cand = os.environ.get("COLAB_BIN") or str(Path.home() / ".colab-venv/bin/colab")
     return cand if Path(cand).exists() else "colab"
-
 
 def run_colab(*args, timeout=40):
     ro_cfg = session_guard.resolve_state_dir() / ".readonly_sessions.json"
@@ -59,27 +56,22 @@ def run_colab(*args, timeout=40):
     except (OSError, subprocess.SubprocessError) as exc:
         return f"ERROR: {exc}"
 
-
 def parse_usage(text):
     keys = {"Current balance": "balance", "Usage rate": "rate", "Active assignments": "active"}
     return {v: m.group(1).strip() for k, v in keys.items() if (m := re.search(rf"{k}:\s*(.+)", text))}
-
 
 def refresh_colab():
     usage, sessions = run_colab("usage"), run_colab("sessions")
     with LOCK:
         STATE.update(usage=parse_usage(usage), usage_raw=usage, sessions=sessions, ts=time.time())
 
-
 def refresher(interval):
     while True:
         refresh_colab()
         time.sleep(interval)
 
-
 def clean_lines(text):
     return [x for x in (ANSI.sub("", ln).rstrip() for ln in re.split(r"[\r\n]+", text)) if x.strip() and not NOISE.search(x)]
-
 
 def tail_text(path, max_bytes=300_000):
     try:
@@ -90,7 +82,6 @@ def tail_text(path, max_bytes=300_000):
     except OSError:
         return ""
 
-
 def parse_epochs(lines):
     by_epoch = {}
     for line in lines:
@@ -98,10 +89,8 @@ def parse_epochs(lines):
             by_epoch[int(m.group(1))] = {k.strip(): float(v) if v != "nan" else None for k, v in METRIC_RE.findall(m.group(2))}
     return [{"epoch": e, "metrics": by_epoch[e]} for e in sorted(by_epoch)]
 
-
 def list_sessions():
     return [d.name for d in sorted((d for d in RUNS_DIR.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime, reverse=True)] if RUNS_DIR.is_dir() else []
-
 
 def read_meta(session):
     meta = {}
@@ -114,7 +103,6 @@ def read_meta(session):
         meta[key] = p.read_text().strip() if p.exists() else ""
     return meta
 
-
 def checkpoints(session, log_text):
     syncs = {Path(path).name: sha[:12] for _, path, sha in SYNC_RE.findall(log_text)}
     rows = []
@@ -126,10 +114,8 @@ def checkpoints(session, log_text):
                 rows.append({"name": f.name, "kind": sub, "size_mb": round(st.st_size / 1e6, 1), "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)), "age_s": int(time.time() - st.st_mtime), "sha": syncs.get(f.name, "")})
     return rows
 
-
 def runner_pids():
     return session_guard.scan_runner_pids()
-
 
 def system_stats():
     stats = {}
@@ -144,13 +130,11 @@ def system_stats():
     stats["disk"] = f"{du.used / 1e9:.1f} / {du.total / 1e9:.1f} GB"
     return stats
 
-
 def parse_params(log_text, lines):
-    rules = (("Thiết bị", r"\[READY\] Compute Device: (.+)"), ("AMP", r"AMP Dtype: (\S+)"), ("Dữ liệu train", r"Train batches/epoch: (\d+ \(.*?\))"), ("Val", r"Val batches/epoch: (\d+ \(.*?\))"), ("Hàm loss", r"\[PARITY\] Loss=(.*)"), ("Epoch / LR / Steps", r"\[PARITY\] (Epochs=.*)"), ("Pretrained", r"Pretrained: (.+)"), ("Mô hình", r"\[MODEL\] (Stage \d[^:]*|DeepLab[^:]*)"))
+    rules = (("Thiết bị", r"\[READY\] Compute Device: (.+)"), ("AMP", r"AMP Dtype: (\S+)"), ("Dữ liệu train", r"(?:Train batches/epoch|Batches per epoch): (\d+ \(.*?\))"), ("Val", r"(?:Val batches/epoch|Stage 2 Val): (.+)"), ("Hàm loss", r"\[PARITY\] (?:.*?\| )?Loss=([^|\n]+)"), ("Epoch / LR / Steps", r"\[PARITY\] .*?(Epochs=.*?)(?:\s*\|\s*Loss=|\s*\|\s*PM=|\s*$)"), ("Pretrained", r"(?:Pretrained:|\[PARITY\].*?Pretrained=)\s*([^|\n]+)"), ("Mô hình", r"(?:\[MODEL\] |\[PARITY\] Model=)([^:|\n]+)"), ("PM / Otsu", r"\[PARITY\] .*?(PM=.*)"))
     params = [[lbl, m.group(1).strip()] for lbl, pat in rules if (m := next((m for ln in reversed(lines) if (m := re.search(pat, ln))), None))]
     cur = re.findall(r"Epoch\s+(\d+)/(\d+)", log_text)
     return params, (int(cur[-1][0]), int(cur[-1][1])) if cur else (0, 0)
-
 
 def progress(epochs, cur_total, meta, running):
     cur, total = cur_total
@@ -164,7 +148,6 @@ def progress(epochs, cur_total, meta, running):
     eta = int(elapsed / done * (total - done)) if elapsed and done and total > done else None
     return {"epoch": cur, "total": total, "done": done, "best": best, "elapsed_s": elapsed, "eta_s": eta, "last": epochs[-1] if epochs else None}
 
-
 def summarize_sessions(sessions, pids_map):
     rows, now_ts = [], int(time.time())
     for s in sessions:
@@ -175,7 +158,6 @@ def summarize_sessions(sessions, pids_map):
         dl = int(m["deadline_epoch"]) if m.get("deadline_epoch", "").isdigit() else 0
         rows.append({"session": s, "notebook": m.get("notebook", "").split("/")[-1], "gpu": m.get("gpu", ""), "high_mem": m.get("high_mem", "") == "1", "preset": m.get("preset", ""), "running": bool(spids), "pids": spids, "epoch": prog["epoch"], "total": prog["total"], "best": prog["best"], "remaining_s": max(0, dl - now_ts) if dl and spids else None, "stop_reason": m.get("stop_reason", ""), "attempt": m.get("attempt", "")})
     return rows
-
 
 def build_status(session=None):
     sessions = list_sessions()
@@ -198,7 +180,6 @@ def build_status(session=None):
         "events": [x for x in lines if any(k in x for k in EVENT_KEYS)][-40:], "log": lines[-150:], "system": system_stats(), "stop_msg": stop_msg,
     }
 
-
 def _kill_pids(pid_list):
     signaled = False
     for pid in pid_list:
@@ -208,7 +189,6 @@ def _kill_pids(pid_list):
         except OSError:
             pass
     return signaled
-
 
 def do_stop(payload=None):
     payload = payload if isinstance(payload, dict) else {}
@@ -238,7 +218,6 @@ def do_stop(payload=None):
         STATE["stop_msg"] = f"{time.strftime('%H:%M:%S')} Đã dừng phiên owned ({target or 'owned_all'}). {out[-600:]}"
     return STATE["stop_msg"]
 
-
 def _parse_env_items(raw_env):
     if isinstance(raw_env, dict):
         pairs = raw_env.items()
@@ -254,7 +233,6 @@ def _parse_env_items(raw_env):
         items.append(f"{ks}={vs}")
     return items
 
-
 def do_start(payload):
     """Launch a resilient owned runner inside tmux. Raises ValueError with a user-facing reason."""
     nb, gpu = str(payload.get("notebook", "")), str(payload.get("gpu", "L4")).upper()
@@ -265,7 +243,7 @@ def do_start(payload):
     if nb not in ("nb1", "nb2") or gpu not in session_guard.ALLOWED_GPUS or not 10 <= minutes <= 720:
         raise ValueError("Tham số không hợp lệ (nb1|nb2, T4|L4|G4|A100|H100, 10-720 phút)")
     raw_hm = payload.get("high_mem")
-    high_mem = False if gpu == "L4" else ((gpu in ("H100", "G4")) if raw_hm is None else bool(raw_hm))
+    high_mem = False if (gpu == "L4" or raw_hm is None) else bool(raw_hm)
     session = str(payload.get("session") or "").strip() or f"se374_{nb}_{gpu.lower()}_{time.strftime('%H%M%S')}"
     if not session_guard.is_valid_session_name(session):
         raise ValueError("Tên phiên phải khớp ^se374_[a-zA-Z0-9_-]+$ (hoặc nb1/nb2)")
@@ -297,7 +275,6 @@ def do_start(payload):
         subprocess.run(["tmux", "new-session", "-d", "-s", tmux_name, " ".join(parts)], cwd=RUNNER_DIR.parent, check=True)
         _PENDING_STARTS[session] = now + 15.0
     return f"Đã khởi chạy {session} ({nb}, {gpu}, high_mem={high_mem}, {minutes} phút) trong tmux '{tmux_name}'."
-
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
@@ -379,7 +356,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"error": str(exc)}))
         return self._send(404, '{"error":"not found"}')
 
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default="127.0.0.1")
@@ -393,7 +369,6 @@ def main():
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Dashboard on http://{args.host}:{args.port} ({'login required' if dash_auth.configured() else 'loopback only, no login'})", flush=True)
     srv.serve_forever()
-
 
 if __name__ == "__main__":
     main()

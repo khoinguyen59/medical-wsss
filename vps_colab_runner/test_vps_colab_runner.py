@@ -14,11 +14,7 @@ sys.path.insert(0, str(RUNNER_DIR))
 import session_guard  # noqa: E402
 
 FORBIDDEN_DASHES = ("\u2014", "\u2013", "\u2015", "\u2212")
-TRACKED_FILES = [
-    "setup_vps_colab.sh", "run_colab_vps.sh", "start_dashboard_public.sh",
-    "session_guard.py", "dashboard.py", "dashboard.html", "dash_auth.py",
-    "login.html", "README.md", "test_vps_colab_runner.py", "test_dashboard.py",
-]
+TRACKED_FILES = ["setup_vps_colab.sh", "run_colab_vps.sh", "start_dashboard_public.sh", "session_guard.py", "dashboard.py", "dashboard.html", "dash_auth.py", "login.html", "README.md", "test_vps_colab_runner.py", "test_dashboard.py"]
 
 
 @pytest.mark.parametrize("name", TRACKED_FILES)
@@ -43,11 +39,11 @@ def test_runner_script_has_p0_guards_and_no_blind_stop() -> None:
     """Runner script enforces session_guard, isolated --config, notebook copy, and safe stop aliases."""
     text = (RUNNER_DIR / "run_colab_vps.sh").read_text(encoding="utf-8")
     for snippet in (
-        "trap cleanup EXIT INT TERM", "DEADLINE_EPOCH", "WATCHDOG_TIMEOUT",
-        "CALIBRATION COLLAPSE", "Loss: nan|Non-finite epoch loss", "sha256sum",
-        "snapshot-protected", "assert-can-create", "register-owned", "stop-session", "stop-owned",
-        "provision-lock-path", "cleanup-partial", "${BASHPID:-$$}", "_descendants_bottom_up", "no such file or directory", "colab_session_t",
+        "trap cleanup EXIT INT TERM", "DEADLINE_EPOCH", "WATCHDOG_TIMEOUT", "CALIBRATION COLLAPSE", "Loss: nan|Non-finite epoch loss",
+        "sha256sum", "snapshot-protected", "assert-can-create", "register-owned", "stop-session", "stop-owned", "provision-lock-path",
+        "cleanup-partial", "${BASHPID:-$$}", "_descendants_bottom_up", "no such file or directory", "colab_session_t",
         '--config "$SESS_COLAB_CFG"', "run_notebook.ipynb", "stage1_best_cls.pth", "--high-mem", "--preset",
+        r"\[STAGE[12] ERROR\]", "OutOfMemoryError", "FileNotFoundError", "STAGE1_LOCAL_CKPT",
     ):
         assert snippet in text, f"Missing mandatory guard snippet: {snippet}"
     assert "grep -Eq" not in text
@@ -78,13 +74,9 @@ def test_session_guard_protects_comfyui_and_enforces_dual_match(tmp_path: Path, 
         session_guard.snapshot_protected(sdir, str(cred), "colab")
 
     # 3. Snapshot captures ComfyUI A100 as protected (even if named nb1 on server)
-    sessions_out = (
-        "[?] m-s-comfyui-a100 | Hardware: A100 | Shape: HIGH_RAM | Variant: GPU\n"
-        "[nb1] m-s-comfyui-legacy | Hardware: A100 | Shape: HIGH_RAM | Variant: GPU\n"
-    )
+    sessions_out = "[?] m-s-comfyui-a100 | Hardware: A100 | Shape: HIGH_RAM | Variant: GPU\n[nb1] m-s-comfyui-legacy | Hardware: A100 | Shape: HIGH_RAM | Variant: GPU\n"
     prot = session_guard.snapshot_protected(sdir, str(cred), "colab", sessions_text=sessions_out)
-    assert "m-s-comfyui-a100" in prot["endpoints"]
-    assert "m-s-comfyui-legacy" in prot["endpoints"]
+    assert "m-s-comfyui-a100" in prot["endpoints"] and "m-s-comfyui-legacy" in prot["endpoints"]
 
     # 4. Invalid session name rejected
     with pytest.raises(ValueError, match="Invalid session name"):
@@ -99,10 +91,7 @@ def test_session_guard_protects_comfyui_and_enforces_dual_match(tmp_path: Path, 
     # 6. Even if manually tampered into owned_sessions, stop_session REFUSES protected endpoint
     acct = session_guard.resolve_account_name(str(cred))
     owned_path = sdir / f"{acct}_owned_sessions.json"
-    owned_path.write_text(json.dumps({
-        "account": acct,
-        "sessions": {"nb1": {"session_name": "nb1", "endpoint": "m-s-comfyui-a100", "colab_config_path": str(cfg_comfy), "status": "running"}},
-    }), encoding="utf-8")
+    owned_path.write_text(json.dumps({"account": acct, "sessions": {"nb1": {"session_name": "nb1", "endpoint": "m-s-comfyui-a100", "colab_config_path": str(cfg_comfy), "status": "running"}}}), encoding="utf-8")
     with pytest.raises(RuntimeError, match="protected"):
         session_guard.stop_session("nb1", sdir, str(cred), "colab")
     with pytest.raises(RuntimeError, match="protected"):
@@ -116,14 +105,8 @@ def test_session_guard_protects_comfyui_and_enforces_dual_match(tmp_path: Path, 
     session_guard.assert_can_create("se374_arm_a", sdir, str(cred), cfg_a)
     rec = session_guard.register_owned("se374_arm_a", cfg_a, sdir, str(cred), "A100", True, 456, "colab_se374_arm_a")
     assert rec["endpoint"] == "m-s-owned-1"
-
-    # Re-snapshotting while owned session is active keeps m-s-owned-1 out of protected_endpoints
-    prot2 = session_guard.snapshot_protected(
-        sdir, str(cred), "colab",
-        sessions_text=sessions_out + "[se374_arm_a] m-s-owned-1 | Hardware: A100 | Shape: HIGH_RAM | Variant: GPU\n",
-    )
-    assert "m-s-owned-1" not in prot2["endpoints"]
-    assert "m-s-comfyui-a100" in prot2["endpoints"]
+    prot2 = session_guard.snapshot_protected(sdir, str(cred), "colab", sessions_text=sessions_out + "[se374_arm_a] m-s-owned-1 | Hardware: A100 | Shape: HIGH_RAM | Variant: GPU\n")
+    assert "m-s-owned-1" not in prot2["endpoints"] and "m-s-comfyui-a100" in prot2["endpoints"]
 
     # Endpoint mismatch in store refuses stop
     cfg_a.write_text(json.dumps({"se374_arm_a": {"endpoint": "m-s-other-999"}}), encoding="utf-8")
@@ -139,12 +122,8 @@ def test_session_guard_protects_comfyui_and_enforces_dual_match(tmp_path: Path, 
 
     # 8. Missing protected_endpoints snapshot fails closed on stop_session
     stop_calls.clear()
-    prot_file = sdir / f"{acct}_protected_endpoints.json"
-    prot_file.unlink()
-    owned_path.write_text(json.dumps({
-        "account": acct,
-        "sessions": {"se374_arm_a": {"session_name": "se374_arm_a", "endpoint": "m-s-owned-1", "colab_config_path": str(cfg_a), "status": "running"}},
-    }), encoding="utf-8")
+    (sdir / f"{acct}_protected_endpoints.json").unlink()
+    owned_path.write_text(json.dumps({"account": acct, "sessions": {"se374_arm_a": {"session_name": "se374_arm_a", "endpoint": "m-s-owned-1", "colab_config_path": str(cfg_a), "status": "running"}}}), encoding="utf-8")
     with pytest.raises(RuntimeError, match="REFUSED: missing protected_endpoints snapshot"):
         session_guard.stop_session("se374_arm_a", sdir, str(cred), "colab")
     assert stop_calls == []
@@ -181,6 +160,13 @@ def _to_wsl(p: Path) -> str:
     return f"/mnt/{s[0].lower()}{s[2:]}" if len(s) >= 2 and s[1] == ":" else s
 
 
+def _wsl(args: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
+    wsl = shutil.which("wsl")
+    if wsl is None:
+        pytest.skip("WSL not available on this host")
+    return subprocess.run([wsl, "-d", "Ubuntu", "--", *args], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=timeout, check=False)
+
+
 def _setup_fake_colab(tmp_path: Path):
     cred, state_dir, calls, cnt_f = tmp_path / "acc11.json", tmp_path / "gs", tmp_path / "calls.log", tmp_path / "exec_cnt"
     cred.write_text('{"client_id":"c11","quota_project_id":"p11"}', encoding="utf-8")
@@ -203,7 +189,7 @@ case "$SUB" in
   exec) N=$(( $(cat "{_to_wsl(cnt_f)}" 2>/dev/null || echo 0) + 1 )); echo "$N" > "{_to_wsl(cnt_f)}"
     NB=""; A=("$@"); for ((i=0;i<${{#A[@]}};i++)); do [ "${{A[$i]}}" = "-f" ] && NB="${{A[$((i+1))]}}"; done
     if [ -n "${{FAKE_NB_ERR:-}}" ] && [ -n "$NB" ]; then
-      EV="transient error"; [ "$FAKE_NB_ERR" = "fatal" ] && EV="STAGE1_GIT_REF checkout failed"
+      EV="transient error"; [ "$FAKE_NB_ERR" = "fatal" ] && EV="STAGE1_GIT_REF checkout failed"; [ "$FAKE_NB_ERR" = "stage2" ] && EV="[STAGE2 ERROR] missing ckpt"
       printf '{{"cells":[{{"cell_type":"code","outputs":[{{"output_type":"error","ename":"RuntimeError","evalue":"%s","traceback":["%s"]}}]}}]}}\n' "$EV" "$EV" > "${{NB%.ipynb}}_output.ipynb"
       exit 0
     fi
@@ -225,24 +211,25 @@ esac
 
 
 def test_wsl_syntax_dry_runs_and_e2e_guards(tmp_path: Path) -> None:
-    """WSL: validate bash -n, multi-GPU --dry-run, ComfyUI protection, early-stop vs collapse, and notebook isolation."""
-    wsl = shutil.which("wsl")
-    if wsl is None:
-        pytest.skip("WSL not available on this host")
+    """WSL: validate bash -n, multi-GPU --dry-run (HIGH_MEM=0 default), ComfyUI guard, early-stop vs collapse."""
     for rel in ("vps_colab_runner/setup_vps_colab.sh", "vps_colab_runner/run_colab_vps.sh", "vps_colab_runner/start_dashboard_public.sh"):
-        res = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-n", rel], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=30, check=False)
+        res = _wsl(["bash", "-n", rel], timeout=30)
         assert res.returncode == 0, f"bash -n failed for {rel}: {res.stderr}"
     for gpu in ("T4", "L4", "G4", "A100", "H100"):
-        dry = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "vps_colab_runner/run_colab_vps.sh", "--notebook", "nb1", "--gpu", gpu, "--high-mem", "--preset", "arm_a_polysgd", "--session", f"se374_{gpu.lower()}", "--env", "STAGE1_SEED=42", "--dry-run"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=30, check=False)
-        assert dry.returncode == 0 and "Validation PASS. Zero Colab sessions created." in dry.stdout and f"se374_{gpu.lower()}" in dry.stdout
+        dry_def = _wsl(["bash", "vps_colab_runner/run_colab_vps.sh", "--notebook", "nb1", "--gpu", gpu, "--session", f"se374_{gpu.lower()}", "--dry-run"], timeout=30)
+        assert dry_def.returncode == 0 and f"GPU / High-Mem  : {gpu} / 0" in dry_def.stdout
+        dry_hm = _wsl(["bash", "vps_colab_runner/run_colab_vps.sh", "--notebook", "nb1", "--gpu", gpu, "--high-mem", "--preset", "arm_a_polysgd", "--session", f"se374_{gpu.lower()}", "--env", "STAGE1_SEED=42", "--dry-run"], timeout=30)
+        assert dry_hm.returncode == 0 and "Validation PASS. Zero Colab sessions created." in dry_hm.stdout
+        if gpu in ("G4", "H100"):
+            assert f"GPU / High-Mem  : {gpu} / 1" in dry_hm.stdout
 
     env_base, colab_calls, _, _, _ = _setup_fake_colab(tmp_path)
     out_dir = tmp_path / "run_arm_a"
-    r_fail = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_base + f"FAKE_SNAPSHOT_FAIL=1 bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_arm_a --output-dir '{_to_wsl(out_dir)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=30, check=False)
+    r_fail = _wsl(["bash", "-c", env_base + f"FAKE_SNAPSHOT_FAIL=1 bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_arm_a --output-dir '{_to_wsl(out_dir)}'"], timeout=30)
     assert r_fail.returncode != 0 and "CMD=new" not in colab_calls.read_text() and "CMD=stop" not in colab_calls.read_text()
 
     colab_calls.unlink()
-    r_ok = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_base + f"bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --high-mem --preset arm_a_polysgd --session se374_arm_a --env STAGE1_SEED=42 --output-dir '{_to_wsl(out_dir)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=45, check=False)
+    r_ok = _wsl(["bash", "-c", env_base + f"bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --high-mem --preset arm_a_polysgd --session se374_arm_a --env STAGE1_SEED=42 --output-dir '{_to_wsl(out_dir)}'"], timeout=45)
     assert r_ok.returncode == 0, f"E2E failed: {r_ok.stdout}\n{r_ok.stderr}"
     calls_txt = colab_calls.read_text(encoding="utf-8")
     assert "CMD=new -s se374_arm_a --gpu A100 --high-mem" in calls_txt and "STAGE1_EXP_PRESET=arm_a_polysgd" in calls_txt and "STAGE1_SEED=42" in calls_txt
@@ -255,12 +242,12 @@ def test_wsl_syntax_dry_runs_and_e2e_guards(tmp_path: Path) -> None:
 
     colab_calls.unlink()
     for flag in ("--stop-owned", "--stop-all"):
-        assert subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_base + f"bash vps_colab_runner/run_colab_vps.sh {flag}"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=30, check=False).returncode == 0
+        assert _wsl(["bash", "-c", env_base + f"bash vps_colab_runner/run_colab_vps.sh {flag}"], timeout=30).returncode == 0
     assert "CMD=stop" not in colab_calls.read_text(encoding="utf-8")
 
     colab_calls.unlink()
     out_collapse = tmp_path / "run_collapse"
-    r_col = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_base + f"FAKE_COLLAPSE=1 bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_arm_a --max-retries 0 --output-dir '{_to_wsl(out_collapse)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=45, check=False)
+    r_col = _wsl(["bash", "-c", env_base + f"FAKE_COLLAPSE=1 bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_arm_a --max-retries 0 --output-dir '{_to_wsl(out_collapse)}'"], timeout=45)
     assert r_col.returncode != 0 and (out_collapse / ".state" / "stop_reason").read_text(encoding="utf-8") == "CALIBRATION_COLLAPSE_ALARM"
     assert "m-s-comfyui-a100" not in colab_calls.read_text(encoding="utf-8")
 
@@ -308,12 +295,9 @@ def test_idempotent_stop_resilient_stop_owned_and_config_precedence(tmp_path: Pa
 
 def test_wsl_retry_resume_cls_fallback_partial_cleanup_flock_and_stop_abort(tmp_path: Path) -> None:
     """WSL E2E: primary-first A100 HIGH_MEM=0 + partial cleanup, resume cls upload, flock, stop-failure abort, stop log."""
-    wsl = shutil.which("wsl")
-    if wsl is None:
-        pytest.skip("WSL not available on this host")
     env_b, calls, state_dir, rem, cnt_f = _setup_fake_colab(tmp_path)
     out1 = tmp_path / "r1"
-    r = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_b + f"FAKE_SESS=se374_fb FAKE_EP=m-s-l4 FAIL_A100=1 FAIL_FIRST_EXEC=1 bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --gpu-fallback L4 --session se374_fb --sync-interval 999 --output-dir '{_to_wsl(out1)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=90, check=False)
+    r = _wsl(["bash", "-c", env_b + f"FAKE_SESS=se374_fb FAKE_EP=m-s-l4 FAIL_A100=1 FAIL_FIRST_EXEC=1 bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --gpu-fallback L4 --session se374_fb --sync-interval 999 --output-dir '{_to_wsl(out1)}'"], timeout=90)
     assert r.returncode == 0, f"{r.stdout}\n{r.stderr}"
     ctxt = calls.read_text(encoding="utf-8")
     assert "CMD=new -s se374_fb --gpu A100\n" in ctxt and "--high-mem" not in ctxt
@@ -324,12 +308,12 @@ def test_wsl_retry_resume_cls_fallback_partial_cleanup_flock_and_stop_abort(tmp_
 
     calls.unlink()
     cnt_f.unlink()
-    r_abort = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_b + f"FAKE_SESS=se374_fb FAIL_FIRST_EXEC=1 FAIL_STOP=1 bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_fb --max-retries 2 --output-dir '{_to_wsl(tmp_path / 'r2')}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60, check=False)
+    r_abort = _wsl(["bash", "-c", env_b + f"FAKE_SESS=se374_fb FAIL_FIRST_EXEC=1 FAIL_STOP=1 bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_fb --max-retries 2 --output-dir '{_to_wsl(tmp_path / 'r2')}'"])
     assert r_abort.returncode != 0 and calls.read_text().count("CMD=new ") == 1
 
     r_nb1_log = PROJECT_ROOT / "vps_colab_runner" / "runs" / "nb1" / "run.log"
     nb1_before = r_nb1_log.read_text() if r_nb1_log.exists() else ""
-    subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_b + "bash vps_colab_runner/run_colab_vps.sh --stop-session se374_fb"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=30, check=False)
+    _wsl(["bash", "-c", env_b + "bash vps_colab_runner/run_colab_vps.sh --stop-session se374_fb"], timeout=30)
     assert (r_nb1_log.read_text() if r_nb1_log.exists() else "") == nb1_before
 
 
@@ -338,12 +322,7 @@ def test_adc_fail_closed_and_readonly_config(tmp_path: Path, monkeypatch) -> Non
     cred = tmp_path / "acc11.json"
     cred.write_text('{"client_id":"c11","quota_project_id":"p11"}', encoding="utf-8")
     seen = []
-
-    def fake_run(cmd, **_kw):
-        seen.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(session_guard.subprocess, "run", fake_run)
+    monkeypatch.setattr(session_guard.subprocess, "run", lambda cmd, **_kw: seen.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
     rc, _ = session_guard._run_colab_global("colab", str(cred), tmp_path / "gs0", "sessions")
     assert rc == 0 and seen[-1] == ["colab", "--config", str(tmp_path / "gs0" / ".readonly_sessions.json"), "--auth", "adc", "sessions"]
     for idx, msg in enumerate(("No valid default credentials", "Please run:\n  gcloud auth application-default login", "Warning: failed to load", "EOF when reading a line")):
@@ -355,41 +334,43 @@ def test_adc_fail_closed_and_readonly_config(tmp_path: Path, monkeypatch) -> Non
 
 
 def test_wsl_notebook_cell_error_and_nb2_stage1_upload(tmp_path: Path) -> None:
-    """WSL E2E: nb2 uploads STAGE1_LOCAL_CKPT, output_type=error fails fast on STAGE1_GIT_REF and retries otherwise."""
-    wsl = shutil.which("wsl")
-    if wsl is None:
-        pytest.skip("WSL not available on this host")
+    """WSL E2E: nb2 --env STAGE1_LOCAL_CKPT, fail-fast missing ckpt, G4 HIGH_MEM=0, and [STAGE2 ERROR] 0 retries."""
     env_b, calls, _, rem, cnt_f = _setup_fake_colab(tmp_path)
+    out_miss = tmp_path / "nb_miss"
+    r_m1 = _wsl(["bash", "-c", env_b + f"bash vps_colab_runner/run_colab_vps.sh --notebook nb2 --gpu G4 --session se374_m1 --env STAGE1_LOCAL_CKPT='/no/such/ckpt.pth' --output-dir '{_to_wsl(out_miss)}'"])
+    assert r_m1.returncode == 2 and not calls.exists()
+    r_m2 = _wsl(["bash", "-c", env_b + f"bash vps_colab_runner/run_colab_vps.sh --notebook nb2 --gpu G4 --session se374_m2 --env STAGE1_CKPT_SOURCE=retrained --output-dir '{_to_wsl(out_miss)}'"])
+    assert r_m2.returncode == 2 and not calls.exists()
+
     s1_ckpt = tmp_path / "winner_s1.pth"
     s1_ckpt.write_bytes(b"stage1_winner_weights")
     out_fatal = tmp_path / "nb_fatal"
-    r_fatal = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_b + f"FAKE_SESS=se374_nb2 FAKE_NB_ERR=fatal STAGE1_LOCAL_CKPT='{_to_wsl(s1_ckpt)}' bash vps_colab_runner/run_colab_vps.sh --notebook nb2 --gpu A100 --session se374_nb2 --max-retries 2 --output-dir '{_to_wsl(out_fatal)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60, check=False)
+    r_fatal = _wsl(["bash", "-c", env_b + f"FAKE_SESS=se374_nb2 FAKE_NB_ERR=stage2 bash vps_colab_runner/run_colab_vps.sh --notebook nb2 --gpu G4 --session se374_nb2 --max-retries 2 --env STAGE1_LOCAL_CKPT='{_to_wsl(s1_ckpt)}' --output-dir '{_to_wsl(out_fatal)}'"])
     assert r_fatal.returncode != 0
-    assert calls.read_text(encoding="utf-8").count("CMD=exec ") == 1
+    ctxt = calls.read_text(encoding="utf-8")
+    assert "CMD=new -s se374_nb2 --gpu G4\n" in ctxt and "--high-mem" not in ctxt
+    exec_ln = next(ln for ln in ctxt.splitlines() if "CMD=exec " in ln)
+    assert "STAGE1_CKPT_SOURCE=retrained" in exec_ln and "STAGE1_LOCAL_CKPT" not in exec_ln
+    assert ctxt.count("CMD=exec ") == 1
     assert (out_fatal / ".state" / "stop_reason").read_text(encoding="utf-8") == "NOTEBOOK_CELL_ERROR"
     assert "Notebook cell exception:" in (out_fatal / "run.log").read_text(encoding="utf-8")
     assert (rem / "up" / "stage1_retrained_best.pth").read_bytes() == b"stage1_winner_weights"
 
     calls.unlink()
     cnt_f.unlink()
-    out_retry = tmp_path / "nb_retry"
-    r_retry = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_b + f"FAKE_SESS=se374_nb1_err FAKE_NB_ERR=retry bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu L4 --session se374_nb1_err --max-retries 1 --output-dir '{_to_wsl(out_retry)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60, check=False)
-    assert r_retry.returncode != 0 and calls.read_text(encoding="utf-8").count("CMD=exec ") == 2
+    r_retry = _wsl(["bash", "-c", env_b + f"FAKE_SESS=se374_nb1_err FAKE_NB_ERR=retry bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu L4 --session se374_nb1_err --max-retries 1 --output-dir '{_to_wsl(tmp_path / 'nb_retry')}'"])
+    assert r_retry.returncode != 0 and calls.read_text().count("CMD=exec ") == 2
 
 
 def test_wsl_sync_retry_enoent_order_and_stop_bg(tmp_path: Path) -> None:
     """WSL: sync retries transient 429, skips ENOENT with 0 retries/WARN, syncs latest last, stop_bg kills tree."""
-    wsl = shutil.which("wsl")
-    if wsl is None:
-        pytest.skip("WSL not available on this host")
     env_b, calls, _, rem, _ = _setup_fake_colab(tmp_path)
     (rem / "content" / "stage1_results" / "STAGE1_TRAINING_METRICS.json").unlink()
     out_d, flag_f = tmp_path / "run_retry", tmp_path / "stat_once.flag"
-    r = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_b + f"FAKE_SESS=se374_sync FAKE_STAT_ONCE='{_to_wsl(flag_f)}' bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_sync --sync-interval 999 --output-dir '{_to_wsl(out_d)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60, check=False)
+    r = _wsl(["bash", "-c", env_b + f"FAKE_SESS=se374_sync FAKE_STAT_ONCE='{_to_wsl(flag_f)}' bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_sync --sync-interval 999 --output-dir '{_to_wsl(out_d)}'"])
     assert r.returncode == 0 and (out_d / "checkpoints" / "stage1_retrained_best.pth").read_bytes() == b"best"
     stat_lns = [ln for ln in calls.read_text(encoding="utf-8").splitlines() if "CMD=ssh -s se374_sync -- stat " in ln]
-    assert sum("STAGE1_TRAINING_METRICS.json" in ln for ln in stat_lns) == 2
-    assert sum("stage1_retrained_best.pth" in ln for ln in stat_lns) >= 3
+    assert sum("STAGE1_TRAINING_METRICS.json" in ln for ln in stat_lns) == 2 and sum("stage1_retrained_best.pth" in ln for ln in stat_lns) >= 3
     assert stat_lns.index(next(x for x in stat_lns if "STAGE1_TRAINING_METRICS.json" in x)) < stat_lns.index(next(x for x in stat_lns if "stage1_latest.pth" in x))
     log_txt = (out_d / "run.log").read_text(encoding="utf-8")
     assert "[WARN] stat failed for /content/checkpoints/stage1_retrained_best.pth" in log_txt
@@ -397,4 +378,4 @@ def test_wsl_sync_retry_enoent_order_and_stop_bg(tmp_path: Path) -> None:
     src_sh = (RUNNER_DIR / "run_colab_vps.sh").read_text(encoding="utf-8")
     funcs = src_sh[src_sh.index("_descendants_bottom_up()"):src_sh.index("\nstop_this_owned_session()")]
     (tmp_path / "tree.sh").write_text(f"set -euo pipefail\n{funcs}\nD='{_to_wsl(tmp_path)}'\n( bash -c 'sleep 60 & echo $! > \"'\"$D\"'/gc.pid\"; wait' & echo $! > \"$D/c.pid\"; wait ) & P=$!\nfor _ in 1 2 3 4 5 6 7 8 9 10; do [ -s \"$D/gc.pid\" ] && break; sleep 0.2; done\nC=$(cat \"$D/c.pid\"); GC=$(cat \"$D/gc.pid\"); stop_bg \"$P\"\n! kill -0 \"$P\" 2>/dev/null && ! kill -0 \"$C\" 2>/dev/null && ! kill -0 \"$GC\" 2>/dev/null\n", encoding="utf-8", newline="\n")
-    assert subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", _to_wsl(tmp_path / "tree.sh")], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=30, check=False).returncode == 0
+    assert _wsl(["bash", _to_wsl(tmp_path / "tree.sh")], timeout=30).returncode == 0
