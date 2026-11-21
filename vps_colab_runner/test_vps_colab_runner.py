@@ -46,7 +46,7 @@ def test_runner_script_has_p0_guards_and_no_blind_stop() -> None:
         "trap cleanup EXIT INT TERM", "DEADLINE_EPOCH", "WATCHDOG_TIMEOUT",
         "CALIBRATION COLLAPSE", "Loss: nan|Non-finite epoch loss", "sha256sum",
         "snapshot-protected", "assert-can-create", "register-owned", "stop-session", "stop-owned",
-        "provision-lock-path", "cleanup-partial", "${BASHPID:-$$}",
+        "provision-lock-path", "cleanup-partial", "${BASHPID:-$$}", "_descendants_bottom_up", "no such file or directory", "colab_session_t",
         '--config "$SESS_COLAB_CFG"', "run_notebook.ipynb", "stage1_best_cls.pth", "--high-mem", "--preset",
     ):
         assert snippet in text, f"Missing mandatory guard snippet: {snippet}"
@@ -213,7 +213,7 @@ case "$SUB" in
   ssh) shift 3; CMD="$1"; shift
     if [ "$CMD" = "mkdir" ]; then mkdir -p "{_to_wsl(rem)}/up"
     elif [ "$CMD" = "sh" ]; then cat > "{_to_wsl(rem)}/up/$(basename "$(printf '%s' "$2" | awk -F"'" '{{print $(NF-1)}}')")"
-    elif [ "$CMD" = "stat" ]; then stat -c '%Y %s' "{_to_wsl(rem)}$3"
+    elif [ "$CMD" = "stat" ]; then [ -n "${{FAKE_STAT_ONCE:-}}" ] && [ ! -f "$FAKE_STAT_ONCE" ] && [[ "$3" == *"stage1_retrained_best.pth"* ]] && {{ touch "$FAKE_STAT_ONCE"; echo "HTTP 429" >&2; exit 1; }}; stat -c '%Y %s' "{_to_wsl(rem)}$3"
     elif [ "$CMD" = "sha256sum" ]; then [ -f "{_to_wsl(rem)}/up/$(basename "$1")" ] && sha256sum "{_to_wsl(rem)}/up/$(basename "$1")" || sha256sum "{_to_wsl(rem)}$1"
     elif [ "$CMD" = "cat" ]; then cat "{_to_wsl(rem)}$1"; fi ;;
   log) echo "session log" > "$4" ;;
@@ -375,3 +375,26 @@ def test_wsl_notebook_cell_error_and_nb2_stage1_upload(tmp_path: Path) -> None:
     out_retry = tmp_path / "nb_retry"
     r_retry = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_b + f"FAKE_SESS=se374_nb1_err FAKE_NB_ERR=retry bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu L4 --session se374_nb1_err --max-retries 1 --output-dir '{_to_wsl(out_retry)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60, check=False)
     assert r_retry.returncode != 0 and calls.read_text(encoding="utf-8").count("CMD=exec ") == 2
+
+
+def test_wsl_sync_retry_enoent_order_and_stop_bg(tmp_path: Path) -> None:
+    """WSL: sync retries transient 429, skips ENOENT with 0 retries/WARN, syncs latest last, stop_bg kills tree."""
+    wsl = shutil.which("wsl")
+    if wsl is None:
+        pytest.skip("WSL not available on this host")
+    env_b, calls, _, rem, _ = _setup_fake_colab(tmp_path)
+    (rem / "content" / "stage1_results" / "STAGE1_TRAINING_METRICS.json").unlink()
+    out_d, flag_f = tmp_path / "run_retry", tmp_path / "stat_once.flag"
+    r = subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", "-c", env_b + f"FAKE_SESS=se374_sync FAKE_STAT_ONCE='{_to_wsl(flag_f)}' bash vps_colab_runner/run_colab_vps.sh --notebook nb1 --gpu A100 --session se374_sync --sync-interval 999 --output-dir '{_to_wsl(out_d)}'"], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60, check=False)
+    assert r.returncode == 0 and (out_d / "checkpoints" / "stage1_retrained_best.pth").read_bytes() == b"best"
+    stat_lns = [ln for ln in calls.read_text(encoding="utf-8").splitlines() if "CMD=ssh -s se374_sync -- stat " in ln]
+    assert sum("STAGE1_TRAINING_METRICS.json" in ln for ln in stat_lns) == 2
+    assert sum("stage1_retrained_best.pth" in ln for ln in stat_lns) >= 3
+    assert stat_lns.index(next(x for x in stat_lns if "STAGE1_TRAINING_METRICS.json" in x)) < stat_lns.index(next(x for x in stat_lns if "stage1_latest.pth" in x))
+    log_txt = (out_d / "run.log").read_text(encoding="utf-8")
+    assert "[WARN] stat failed for /content/checkpoints/stage1_retrained_best.pth" in log_txt
+    assert not any("STAGE1_TRAINING_METRICS.json" in ln for ln in log_txt.splitlines() if "[WARN]" in ln)
+    src_sh = (RUNNER_DIR / "run_colab_vps.sh").read_text(encoding="utf-8")
+    funcs = src_sh[src_sh.index("_descendants_bottom_up()"):src_sh.index("\nstop_this_owned_session()")]
+    (tmp_path / "tree.sh").write_text(f"set -euo pipefail\n{funcs}\nD='{_to_wsl(tmp_path)}'\n( bash -c 'sleep 60 & echo $! > \"'\"$D\"'/gc.pid\"; wait' & echo $! > \"$D/c.pid\"; wait ) & P=$!\nfor _ in 1 2 3 4 5 6 7 8 9 10; do [ -s \"$D/gc.pid\" ] && break; sleep 0.2; done\nC=$(cat \"$D/c.pid\"); GC=$(cat \"$D/gc.pid\"); stop_bg \"$P\"\n! kill -0 \"$P\" 2>/dev/null && ! kill -0 \"$C\" 2>/dev/null && ! kill -0 \"$GC\" 2>/dev/null\n", encoding="utf-8", newline="\n")
+    assert subprocess.run([wsl, "-d", "Ubuntu", "--", "bash", _to_wsl(tmp_path / "tree.sh")], cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=30, check=False).returncode == 0

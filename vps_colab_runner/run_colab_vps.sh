@@ -108,6 +108,7 @@ SESS_COLAB_CFG="$STATE_DIR/colab_sessions.json"; EXEC_NB_COPY="$STATE_DIR/run_no
 RESOLVED_HMEM="$(resolve_tier_hmem "$GPU_TYPE")"
 
 colab_session_cmd() { GOOGLE_APPLICATION_CREDENTIALS="$CRED_PATH" "$COLAB_BIN" --config "$SESS_COLAB_CFG" --auth adc "$@"; }
+colab_session_t() { local s="$1"; shift; if command -v timeout >/dev/null 2>&1; then GOOGLE_APPLICATION_CREDENTIALS="$CRED_PATH" timeout "$s" "$COLAB_BIN" --config "$SESS_COLAB_CFG" --auth adc "$@"; else colab_session_cmd "$@"; fi; }
 log() {
   local msg="[VPS-RUNNER $(date '+%Y-%m-%d %H:%M:%S')] $*"
   printf '%s\n' "$msg"
@@ -163,22 +164,28 @@ PROV_LOCK="$(guard_cmd provision-lock-path --cred-path "$CRED_PATH")"
 WATCHER_PID=""; EXEC_PID=""; TAIL_PID=""; CLEANED_UP=0; SESSION_OWNED_BY_PID=0; PROVISIONING_IN_PROGRESS=0
 
 sync_remote_file_atomic() {
-  local remote_path="$1" local_path="$2" mtime_state="$STATE_DIR/$(basename "$local_path").mtime" remote_meta remote_sha tmp_file local_sha
-  remote_meta="$(colab_session_cmd ssh -s "$SESSION_NAME" -- stat -c '%Y %s' "$remote_path" 2>/dev/null || true)"
-  [ -n "$remote_meta" ] || return 1
-  if [ -f "$mtime_state" ] && [ -f "$local_path" ] && [ "$remote_meta" = "$(cat "$mtime_state" 2>/dev/null || true)" ]; then return 0; fi
-  remote_sha="$(colab_session_cmd ssh -s "$SESSION_NAME" -- sha256sum "$remote_path" 2>/dev/null | awk '{print $1}' || true)"
-  [ -n "$remote_sha" ] || return 1
-  tmp_file="${local_path}.tmp.${BASHPID:-$$}"
-  log "Syncing $remote_path -> $local_path (meta: $remote_meta)..."
-  if colab_session_cmd ssh -s "$SESSION_NAME" -- cat "$remote_path" > "$tmp_file"; then
-    local_sha="$(sha256sum "$tmp_file" | awk '{print $1}')"
-    if [ "$local_sha" = "$remote_sha" ]; then
-      mv -f "$tmp_file" "$local_path"; printf '%s' "$remote_meta" > "$mtime_state"
-      log "Verified atomic sync OK: $local_path (SHA256=$local_sha)"; return 0
-    fi
-    log "WARN: SHA256 mismatch syncing $remote_path (expected=$remote_sha got=$local_sha)."
-  fi
+  local remote_path="$1" local_path="$2" remote_meta remote_sha local_sha stat_rc try
+  local mtime_state="$STATE_DIR/$(basename "$local_path").mtime" tmp_file="${local_path}.tmp.${BASHPID:-$$}"
+  for try in 1 2 3; do
+    set +e; remote_meta="$(colab_session_t 45 ssh -s "$SESSION_NAME" -- stat -c '%Y %s' "$remote_path" 2>&1)"; stat_rc=$?; set -e
+    case "$(printf '%s' "$remote_meta" | tr '[:upper:]' '[:lower:]')" in *"no such file or directory"*) return 1 ;; esac
+    if [ "$stat_rc" -eq 0 ] && [ -n "$remote_meta" ]; then
+      if [ -f "$mtime_state" ] && [ -f "$local_path" ] && [ "$remote_meta" = "$(cat "$mtime_state" 2>/dev/null || true)" ]; then return 0; fi
+      remote_sha="$(colab_session_t 45 ssh -s "$SESSION_NAME" -- sha256sum "$remote_path" 2>/dev/null | awk '{print $1}' || true)"
+      if [ -n "$remote_sha" ]; then
+        log "Syncing $remote_path -> $local_path (meta: $remote_meta)..."
+        if colab_session_t 300 ssh -s "$SESSION_NAME" -- cat "$remote_path" > "$tmp_file"; then
+          local_sha="$(sha256sum "$tmp_file" | awk '{print $1}')"
+          if [ "$local_sha" = "$remote_sha" ]; then
+            mv -f "$tmp_file" "$local_path"; printf '%s' "$remote_meta" > "$mtime_state"
+            log "Verified atomic sync OK: $local_path (SHA256=$local_sha)"; return 0
+          fi
+          log "[WARN] SHA256 mismatch syncing $remote_path (try $try/3, expected=$remote_sha got=$local_sha)."
+        else log "[WARN] cat failed syncing $remote_path (try $try/3)."; fi
+      else log "[WARN] sha256sum failed for $remote_path (try $try/3)."; fi
+    else log "[WARN] stat failed for $remote_path (try $try/3): ${remote_meta//$'\n'/ }"; fi
+    rm -f "$tmp_file"; [ "$try" -lt 3 ] && sleep 3 || true
+  done
   rm -f "$tmp_file"; return 1
 }
 
@@ -204,9 +211,9 @@ upload_checkpoint_for_resume() {
 
 sync_all_checkpoints() {
   sync_remote_file_atomic "/content/checkpoints/$CKPT_BEST_NAME" "$CKPT_LOCAL_DIR/$CKPT_BEST_NAME" || true
-  sync_remote_file_atomic "/content/checkpoints/$CKPT_LATEST_NAME" "$CKPT_LOCAL_DIR/$CKPT_LATEST_NAME" || true
   [ -n "$CKPT_CLS_NAME" ] && sync_remote_file_atomic "/content/checkpoints/$CKPT_CLS_NAME" "$CKPT_LOCAL_DIR/$CKPT_CLS_NAME" || true
   sync_remote_file_atomic "$REMOTE_METRICS_JSON" "$ARTIFACTS_DIR/$(basename "$REMOTE_METRICS_JSON")" || true
+  sync_remote_file_atomic "/content/checkpoints/$CKPT_LATEST_NAME" "$CKPT_LOCAL_DIR/$CKPT_LATEST_NAME" || true
 }
 
 download_final_artifacts() {
@@ -247,7 +254,16 @@ start_watcher() {
   WATCHER_PID="$!"
 }
 
-stop_bg() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && { kill -TERM "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; } || true; }
+_descendants_bottom_up() {
+  local p="${1:-}" c; [ -n "$p" ] || return 0
+  for c in $(ps -o pid= --ppid "$p" 2>/dev/null || true); do _descendants_bottom_up "$c"; printf '%s\n' "$c"; done
+}
+stop_bg() {
+  local pid="${1:-}" targets="" t=""; [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+  targets="$(_descendants_bottom_up "$pid")"$'\n'"$pid"
+  for t in $targets; do kill -TERM "$t" 2>/dev/null || true; done; sleep 1
+  for t in $targets; do kill -0 "$t" 2>/dev/null && kill -KILL "$t" 2>/dev/null || true; done; wait "$pid" 2>/dev/null || true
+}
 
 stop_this_owned_session() {
   [ "${SESSION_OWNED_BY_PID:-0}" -eq 1 ] || return 0
@@ -346,6 +362,7 @@ while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
   set -e
   EXEC_PID=""; rm -f "$STATE_DIR/exec.pid"
   stop_bg "$TAIL_PID"; TAIL_PID=""; stop_bg "$WATCHER_PID"; WATCHER_PID=""
+  sleep 2; rm -f "$CKPT_LOCAL_DIR"/*.tmp.* "$ARTIFACTS_DIR"/*.tmp.* 2>/dev/null || true
   sync_all_checkpoints
 
   if [ -f "$STATE_DIR/stop_reason" ]; then log "Halting loop due to safety guard: $(cat "$STATE_DIR/stop_reason")"; break; fi
