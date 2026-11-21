@@ -160,7 +160,7 @@ class MultiPrototypePPCLoss(nn.Module):
     """Multi-Prototype Pixel-to-Prototype Contrastive Loss (L_MP-PPC).
 
     Pulls homogeneous tissue pixels towards class sub-prototypes and penalizes hard-pair
-    misclassifications (Tumor <-> Stroma and Necrosis <-> Inflammatory).
+    misclassifications (Tumor <-> Stroma, Stroma <-> Lymphocytic, Tumor <-> Necrosis).
     Enforces pixel sampling (N_samples <= max_samples) to constrain GPU VRAM under 0.5 GB.
     """
 
@@ -173,6 +173,7 @@ class MultiPrototypePPCLoss(nn.Module):
         momentum: float = 0.99,
         conf_thresh: float = 0.75,
         max_samples: int = 2048,
+        warm_start: bool = True,
     ) -> None:
         super().__init__()
         self.num_classes = num_classes
@@ -182,17 +183,25 @@ class MultiPrototypePPCLoss(nn.Module):
         self.momentum = momentum
         self.conf_thresh = conf_thresh
         self.max_samples = max_samples
+        self.warm_start = warm_start
 
         # Initialize orthogonal prototypes tensor: (C, K, D)
         protos = torch.randn(num_classes, num_prototypes, feat_dim)
         protos = F.normalize(protos, dim=-1)
         self.register_buffer("prototypes", protos)
+        self.register_buffer(
+            "prototype_initialized",
+            torch.zeros(num_classes, num_prototypes, dtype=torch.bool),
+        )
 
-        # Hard-pair penalty matrix:
+        # Hard-pair penalty matrix calibrated to empirical BCSS confusion matrix:
         # 0: Tumor, 1: Stroma, 2: Inflammatory, 3: Necrosis
         hard_weights = torch.ones(num_classes, num_classes)
-        hard_weights[0, 1] = hard_weights[1, 0] = 2.0  # Tumor <-> Stroma
-        hard_weights[2, 3] = hard_weights[3, 2] = 2.0  # Inflammatory <-> Necrosis
+        if num_classes >= 4:
+            hard_weights[0, 1] = hard_weights[1, 0] = 2.0  # Tumor <-> Stroma
+            hard_weights[1, 2] = hard_weights[2, 1] = 2.5  # Stroma <-> Lymphocytic
+            hard_weights[0, 3] = hard_weights[3, 0] = 2.0  # Tumor <-> Necrosis
+            hard_weights[2, 3] = hard_weights[3, 2] = 1.0  # Lymphocytic <-> Necrosis
         self.register_buffer("hard_weights", hard_weights)
 
     @torch.no_grad()
@@ -222,17 +231,25 @@ class MultiPrototypePPCLoss(nn.Module):
                     if mask_k.sum() > 0:
                         w_k = w_cf[mask_k].unsqueeze(-1)
                         mean_feat = (feats_cf[mask_k] * w_k).sum(dim=0) / (w_k.sum() + 1e-6)
-                        new_proto = (
-                            self.momentum * self.prototypes[c, k].float()
-                            + (1.0 - self.momentum) * mean_feat
-                        )
-                        self.prototypes[c, k] = F.normalize(new_proto, dim=-1)
+                        is_uninit = not bool(self.prototype_initialized[c, k].item())
+                        if self.warm_start and is_uninit:
+                            self.prototypes[c, k] = F.normalize(mean_feat, dim=-1)
+                        else:
+                            new_proto = (
+                                self.momentum * self.prototypes[c, k].float()
+                                + (1.0 - self.momentum) * mean_feat
+                            )
+                            self.prototypes[c, k] = F.normalize(new_proto, dim=-1)
+                        self.prototype_initialized[c, k] = True
 
     def forward(
         self,
         proj_feats: torch.Tensor,
         cam_probs: torch.Tensor,
         img_labels: torch.Tensor,
+        raw_cams: Optional[torch.Tensor] = None,
+        rgb_images: Optional[torch.Tensor] = None,
+        cam_norm_thresh: float = 0.35,
     ) -> torch.Tensor:
         """Computes pixel-to-prototype contrastive loss.
 
@@ -240,6 +257,9 @@ class MultiPrototypePPCLoss(nn.Module):
             proj_feats: (B, D, H, W) projected feature embeddings.
             cam_probs: (B, C, H, W) normalized class activation maps.
             img_labels: (B, C) multi-hot image-level ground truth.
+            raw_cams: Optional (B, C, H, W) pre-simplex ReLU CAMs for single-class anti-glass guard.
+            rgb_images: Optional (B, 3, H_img, W_img) RGB images for non-white tissue masking.
+            cam_norm_thresh: Minimum per-class channel-max normalized CAM score (default 0.35).
 
         Returns:
             loss: Scalar tensor representing L_MP-PPC loss.
@@ -260,6 +280,40 @@ class MultiPrototypePPCLoss(nn.Module):
             conf_weights = (1.0 - entropy).detach()
 
             confident_mask = max_probs >= self.conf_thresh
+
+            # Single-class anti-glass guard 1: pre-simplex channel-max normalized CAM >= cam_norm_thresh
+            if raw_cams is not None:
+                raw_cams_f = torch.clamp(raw_cams.float(), min=0.0)
+                if raw_cams_f.shape[-2:] != (h, w):
+                    raw_cams_f = F.interpolate(
+                        raw_cams_f, size=(h, w), mode="bilinear", align_corners=False
+                    )
+                cam_max = raw_cams_f.amax(dim=(-2, -1), keepdim=True).clamp(min=1e-6)
+                cam_max_norm = raw_cams_f / cam_max
+                gathered_cam = cam_max_norm.gather(1, pseudo_labels.unsqueeze(1)).squeeze(1)
+                confident_mask = confident_mask & (gathered_cam >= float(cam_norm_thresh))
+
+            # Single-class anti-glass guard 2: non-white tissue mask (mean_rgb < 0.90 or sat > 0.08)
+            if rgb_images is not None:
+                rgb_f = rgb_images.float()
+                if float(rgb_f.min()) < -1e-4:
+                    mean_t = torch.tensor([0.485, 0.456, 0.406], device=rgb_f.device).view(1, 3, 1, 1)
+                    std_t = torch.tensor([0.229, 0.224, 0.225], device=rgb_f.device).view(1, 3, 1, 1)
+                    rgb_f = rgb_f * std_t + mean_t
+                elif float(rgb_f.max()) > 5.0:
+                    rgb_f = rgb_f / 255.0
+                rgb_f = rgb_f.clamp(0.0, 1.0)
+                if rgb_f.shape[-2:] != (h, w):
+                    rgb_f = F.interpolate(
+                        rgb_f, size=(h, w), mode="bilinear", align_corners=False
+                    )
+                mean_rgb = rgb_f.mean(dim=1)
+                rgb_max = rgb_f.max(dim=1).values
+                rgb_min = rgb_f.min(dim=1).values
+                sat = (rgb_max - rgb_min) / (rgb_max + 1e-6)
+                tissue_mask = (mean_rgb < 0.90) | (sat > 0.08)
+                confident_mask = confident_mask & tissue_mask
+
             if confident_mask.sum() < 16:
                 return proj_feats.sum() * 0.0
 

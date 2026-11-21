@@ -368,9 +368,12 @@ def test_governance_invariants_training_files():
     root = Path(__file__).resolve().parent.parent
 
     target_files = [
+        root / "src" / "config" / "__init__.py",
+        root / "src" / "config" / "stage1_experiments.py",
         root / "src" / "training" / "__init__.py",
         root / "src" / "training" / "dataset_loader.py",
         root / "src" / "training" / "train_stage1.py",
+        root / "src" / "training" / "eval_stage1_full.py",
         root / "src" / "training" / "generate_pseudo_masks.py",
         root / "src" / "training" / "train_stage2.py",
         root / "src" / "training" / "train_proposed_sam.py",
@@ -1375,6 +1378,653 @@ def test_stage1_spawn_persistent_workers_dataloader_3_epochs(mock_dataset_dir: P
         assert len(fnames) == 2 and imgs.shape == (2, 3, 224, 224) and lbls.shape == (2, 4)
         vfnames, vimgs, vlbls, vmasks = val_batches[0]
         assert len(vfnames) == 2 and vimgs.shape == (2, 3, 224, 224) and vmasks.shape == (2, 224, 224)
+
+
+def test_stage1_experiment_presets_and_env_resolution(monkeypatch: pytest.MonkeyPatch):
+    """Verify Stage1ExperimentConfig presets (default, Arms A/B/C) and env variable resolution."""
+    from src.config import STAGE1_PRESETS, get_stage1_preset, resolve_stage1_config_from_env
+
+    assert set(STAGE1_PRESETS.keys()) == {
+        "default",
+        "arm_a_polysgd",
+        "arm_b_equiv_adamw",
+        "arm_c_mpppc_polysgd",
+    }
+
+    arm_a = get_stage1_preset("arm_a_polysgd")
+    assert arm_a.optimizer_type == "polysgd"
+    assert arm_a.scheduler_type == "poly"
+    assert arm_a.lr_bb == pytest.approx(1.5e-3)
+    assert arm_a.lr_fc8 == pytest.approx(1.5e-2)
+    assert arm_a.wd_bb == pytest.approx(5e-4)
+    assert arm_a.use_d4_aug is True
+    assert arm_a.pda_mode == "multiplicative"
+    assert arm_a.use_ema is True
+    assert arm_a.ema_decay == pytest.approx(0.995)
+
+    arm_b = get_stage1_preset("arm_b_equiv_adamw")
+    assert arm_b.optimizer_type == "adamw"
+    assert arm_b.lr_bb == pytest.approx(8e-5)
+    assert arm_b.lr_fc8 == pytest.approx(2.4e-4)
+    assert arm_b.wd_fc8 == pytest.approx(5e-2)
+    assert arm_b.use_equiv_consistency is True
+    assert arm_b.equiv_scales == (1.0, 1.25)
+    assert 0.75 not in arm_b.equiv_scales
+
+    arm_c = get_stage1_preset("arm_c_mpppc_polysgd")
+    assert arm_c.optimizer_type == "polysgd"
+    assert arm_c.use_mpppc is True
+    assert arm_c.ppc_num_prototypes == 1
+    assert arm_c.lambda_ppc == pytest.approx(0.10)
+    assert arm_c.ppc_start_epoch == 3
+
+    monkeypatch.setenv("STAGE1_EXP_PRESET", "arm_b_equiv_adamw")
+    monkeypatch.setenv("STAGE1_MAX_EPOCHS", "12")
+    monkeypatch.setenv("STAGE1_SEED", "77")
+    monkeypatch.setenv("STAGE1_BATCH_SIZE", "16")
+    monkeypatch.setenv("STAGE1_INPUT_NORM", "zero_one")
+    monkeypatch.setenv("STAGE1_LOSS_TYPE", "soft_margin")
+    monkeypatch.setenv("STAGE1_GIT_REF", "abc1234")
+    monkeypatch.setenv("STAGE1_NUM_WORKERS", "4")
+    resolved = resolve_stage1_config_from_env()
+    assert resolved.preset_name == "arm_b_equiv_adamw"
+    assert resolved.max_epochs == 12
+    assert resolved.seed == 77
+    assert resolved.batch_size == 16
+    assert resolved.git_ref == "abc1234"
+    assert resolved.num_workers == 4
+
+
+def test_attention_module_label_gated_multiplicative_drops_single_class_peak_to_zero():
+    """Verify Label-Gated Multiplicative Peak-Drop drops active single-class peak strictly to 0.0."""
+    torch.manual_seed(5)
+    attn = AttentionModule(pda_mode="multiplicative")
+
+    # Feature map with hotspot at (5:8, 5:8) aligned with class 0 weights
+    x = torch.ones(2, 16, 14, 14)
+    x[:, :, 5:8, 5:8] = 10.0
+    w = torch.zeros(4, 16, 1, 1)
+    w[0, :, 0, 0] = 1.0  # Active class 0 has sharp peak at 5:8, 5:8
+    w[1, :, 0, 0] = 0.0  # Inactive classes
+
+    # Single-class GT label [1, 0, 0, 0]
+    active_labels = torch.tensor([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]])
+
+    # Without active_labels (legacy mean mode): 3 inactive channels contribute 1.0 -> peak drops only to 0.75 / scale
+    out_legacy = attn(x, w, gamma=0.70)
+    assert float(out_legacy[:, :, 6, 6].min()) > 0.0
+
+    # With active_labels (Label-Gated Multiplicative): single-class peak drops strictly to 0.0
+    out_gated = attn(x, w, gamma=0.70, active_labels=active_labels)
+    assert float(out_gated[:, :, 6, 6].abs().max()) == 0.0, (
+        f"Expected single-class peak dropped to 0.0, got {float(out_gated[:, :, 6, 6].abs().max())}"
+    )
+    # Non-peak background remains strictly positive (rescaled)
+    assert float(out_gated[:, :, 0, 0].min()) > 0.0
+
+
+def test_random_d4_transform_picklable_and_spawn_loader(mock_dataset_dir: Path):
+    """Verify RandomD4Transform is picklable and runs cleanly under spawn DataLoader."""
+    import pickle
+
+    from torch.utils.data import DataLoader
+
+    from src.training.dataset_loader import BCSSStage1TrainDataset, RandomD4Transform
+
+    d4 = RandomD4Transform()
+    restored = pickle.loads(pickle.dumps(d4))
+    sample_img = Image.new("RGB", (64, 64), color=(120, 80, 140))
+    out_img = restored(sample_img)
+    assert out_img.size == (64, 64)
+
+    ds = BCSSStage1TrainDataset(
+        mock_dataset_dir / "train",
+        patient_ids=["TCGA-A1-A0SK", "TCGA-A2-A04N"],
+        use_d4_aug=True,
+    )
+    loader = DataLoader(
+        ds,
+        batch_size=2,
+        shuffle=True,
+        num_workers=2,
+        persistent_workers=True,
+        prefetch_factor=2,
+        multiprocessing_context="spawn",
+    )
+    fnames, imgs, lbls = next(iter(loader))
+    assert len(fnames) == 2 and imgs.shape == (2, 3, 224, 224) and lbls.shape == (2, 4)
+
+
+def test_arm_b_equivariant_cam_consistency_zero_nan_grad_flow():
+    """Verify D4 invertibility and Arm B Scale {1.0x, 1.25x} + D4 L_eq zero-NaN gradient flow."""
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.train_stage1 import Stage1Trainer, build_optimizer_and_scheduler
+
+    torch.manual_seed(9)
+    # 1. Exact D4 group invertibility check across all 16 combinations
+    x_rand = torch.randn(2, 4, 16, 16)
+    for k_rot in range(4):
+        for hf in (False, True):
+            for vf in (False, True):
+                xt = Stage1Trainer._apply_d4_tensor(x_rand, k_rot, hf, vf)
+                xr = Stage1Trainer._inverse_d4_tensor(xt, k_rot, hf, vf)
+                assert torch.allclose(xr, x_rand, atol=1e-6)
+
+    # 2. Equivariant branch loss & gradient flow at epoch=5 (lambda_eq = 0.25)
+    model = WSSSTissueStage1NetCAM(n_class=4)
+    model.train()
+    opt, sched = build_optimizer_and_scheduler(
+        model, lr=8e-5, weight_decay=1e-3, lr_fc8=2.4e-4, wd_fc8=5e-2, epochs=18
+    )
+    trainer = Stage1Trainer(
+        model=model,
+        optimizer=opt,
+        criterion=nn.MultiLabelSoftMarginLoss(),
+        scheduler=sched,
+        device=torch.device("cpu"),
+        enable_amp=False,
+        use_equiv_consistency=True,
+        equiv_scales=(1.0, 1.25),
+        lambda_eq_max=0.25,
+        eq_ramp_start_epoch=2,
+        eq_ramp_end_epoch=5,
+    )
+    assert trainer.get_lambda_eq(0) == pytest.approx(0.0)
+    assert trainer.get_lambda_eq(2) == pytest.approx(0.0)
+    assert trainer.get_lambda_eq(5) == pytest.approx(0.25)
+
+    imgs = torch.rand(2, 3, 64, 64)
+    targets = torch.tensor([[1.0, 1.0, 0.0, 0.0], [0.0, 1.0, 1.0, 0.0]])
+    opt.zero_grad()
+    _, _, _, _, conv6_f = trainer.forward_dual_branches(imgs, enable_pda=True, targets=targets, return_conv6=True)
+    l_cls_t, l_eq = trainer.compute_equivariant_branch(imgs, targets, conv6_f)
+    total = l_cls_t + 0.25 * l_eq
+    assert torch.isfinite(total)
+    total.backward()
+    assert model.fc8.weight.grad is not None and torch.isfinite(model.fc8.weight.grad).all()
+    assert model.b7.conv_branch2b2.weight.grad is not None and torch.isfinite(model.b7.conv_branch2b2.weight.grad).all()
+
+
+def test_arms_a_b_c_dry_runs_and_strict_ema_checkpoint_export(mock_dataset_dir: Path, tmp_path: Path):
+    """Verify dry-run parity for Arm A, Arm B, Arm C, ModelEMA strict=True export (zero proj_head leakage), and eval_stage1_full."""
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.eval_stage1_full import evaluate_stage1_checkpoint
+
+    # Add val patches matching official val split so GatedPM_mIoU is computed
+    splits = load_bcss_patient_splits()
+    val_pid = splits["val"][0]
+    val_img_dir = mock_dataset_dir / "val" / "img"
+    val_mask_dir = mock_dataset_dir / "val" / "mask"
+    for idx in range(2):
+        fname = f"{val_pid}-DX1_xmin200_ymin{idx * 224}_MPP-0.2500+{idx}.png"
+        Image.fromarray(np.random.randint(90, 200, (224, 224, 3), dtype=np.uint8)).save(val_img_dir / fname)
+        mask_arr = np.full((224, 224), 4, dtype=np.uint8)
+        mask_arr[:112, :] = idx
+        mask_arr[112:180, :] = (idx + 2) % 4
+        m_img = Image.fromarray(mask_arr, mode="P")
+        m_img.putpalette(BCSS_PALETTE)
+        m_img.save(val_mask_dir / fname)
+
+    for preset_name in ("arm_a_polysgd", "arm_b_equiv_adamw", "arm_c_mpppc_polysgd"):
+        ckpt_dir = tmp_path / f"ckpt_{preset_name}"
+        res = train_stage1_pipeline(
+            data_dir=mock_dataset_dir,
+            checkpoint_dir=ckpt_dir,
+            preset=preset_name,
+            dry_run=True,
+            device_str="cpu",
+        )
+        assert res["exp_preset"] == preset_name
+        assert res["selected_weights"] in ("raw", "ema")
+        assert "fc8_std" in res and np.isfinite(res["fc8_std"])
+        assert "val_gated_pm_miou_global" in res["history"][0]
+        assert "ema_val_mAP" in res["history"][0]
+
+        best_p = Path(res["checkpoint_path"])
+        best_cls_p = Path(res["best_cls_checkpoint_path"])
+        assert best_p.is_file() and best_cls_p.is_file()
+
+        for p in (best_p, best_cls_p):
+            payload = torch.load(p, map_location="cpu", weights_only=False)
+            sd = payload["state_dict"]
+            assert not any("proj_head" in k for k in sd.keys()), (
+                f"proj_head leaked into exported checkpoint {p}"
+            )
+            net = WSSSTissueStage1NetCAM(n_class=4)
+            net.load_state_dict(sd, strict=True)
+
+    # Also test eval_stage1_full on the Arm C exported strict=True checkpoint
+    arm_c_ckpt = tmp_path / "ckpt_arm_c_mpppc_polysgd" / "stage1_retrained_best.pth"
+    eval_report = evaluate_stage1_checkpoint(
+        checkpoint_path=arm_c_ckpt,
+        data_dir=mock_dataset_dir,
+        batch_size=2,
+        max_samples=2,
+        device_str="cpu",
+        scales=(1.0, 1.25),
+        run_sg_dap=True,
+    )
+    assert eval_report["strict_load_ok"] is True
+    assert len(eval_report["sha256"]) == 64
+    for mode_key in (
+        "raw_1x_per_channel",
+        "raw_1x_global",
+        "ms_tta_per_channel",
+        "ms_tta_global",
+        "sg_dap_1x",
+        "ms_tta_sg_dap",
+    ):
+        assert mode_key in eval_report["modes"]
+        assert 0.0 <= eval_report["modes"][mode_key]["mIoU"] <= 1.0
+
+
+def test_polysgd_scheduler_ema_bit_exact_and_arm_c_ppc_epoch_activation(
+    mock_dataset_dir: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    """Verify PolySGD+PolyLR warmup/decay, ModelEMA bn7 bit-exactness, Arm C PPC at Ep 4, and early stop logs."""
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from src.config import resolve_stage1_config_from_env
+    from src.losses_metrics.losses import MultiPrototypePPCLoss
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training.train_stage1 import (
+        ModelEMA,
+        ProjectionHead,
+        Stage1Trainer,
+        build_optimizer_and_scheduler,
+    )
+
+    model = WSSSTissueStage1NetCAM(n_class=4)
+    model.train()
+    proj_head = ProjectionHead()
+    ema = ModelEMA(model, decay=0.995)
+    bn7_var_init = model.bn7.running_var.detach().clone()
+
+    opt, sched = build_optimizer_and_scheduler(
+        model,
+        lr=1.5e-3,
+        weight_decay=5e-4,
+        epochs=20,
+        optimizer_type="polysgd",
+        scheduler_type="poly",
+        lr_fc8=1.5e-2,
+        wd_fc8=5e-4,
+        momentum=0.9,
+        warmup_steps=2,
+        total_steps=10,
+        poly_power=0.9,
+        extra_params=list(proj_head.parameters()),
+    )
+    assert isinstance(opt, torch.optim.SGD)
+    assert opt.param_groups[0]["lr"] == pytest.approx(1.5e-3 * 0.5)  # step 0 of warmup=2 -> 0.5x
+
+    ppc = MultiPrototypePPCLoss(num_classes=4, num_prototypes=1, feat_dim=128, conf_thresh=0.1)
+    trainer = Stage1Trainer(
+        model=model,
+        optimizer=opt,
+        criterion=nn.MultiLabelSoftMarginLoss(),
+        scheduler=sched,
+        device=torch.device("cpu"),
+        enable_amp=False,
+        pda_start_epoch=3,
+        step_scheduler_per_batch=True,
+        model_ema=ema,
+        proj_head=proj_head,
+        mpppc_loss=ppc,
+        lambda_ppc=0.10,
+        ppc_start_epoch=3,
+    )
+
+    imgs = torch.rand(2, 3, 64, 64) * 0.6 + 0.1  # non-white tissue
+    lbls = torch.tensor([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+    loader = DataLoader(TensorDataset(imgs, lbls, torch.zeros(2)), batch_size=2)
+
+    m_ep3 = trainer.train_epoch(loader, epoch=3)
+    assert np.isfinite(m_ep3["loss"]) and np.isfinite(m_ep3["ppc_loss"])
+    assert torch.equal(ema.shadow["bn7.running_var"], bn7_var_init)
+
+    # swap_to_ema must restore exact raw weights on exit
+    raw_fc8 = model.fc8.weight.detach().clone()
+    with ema.swap_to_ema(model):
+        assert torch.allclose(model.fc8.weight, ema.shadow["fc8.weight"])
+    assert torch.equal(model.fc8.weight, raw_fc8)
+
+    # Full pipeline 1-epoch non-dry-run with Arm C saves stage1_latest.pth containing ema_state_dict + proj_head
+    splits = load_bcss_patient_splits()
+    val_pid = splits["val"][0]
+    val_img_dir = mock_dataset_dir / "val" / "img"
+    val_mask_dir = mock_dataset_dir / "val" / "mask"
+    fname = f"{val_pid}-DX1_xmin300_ymin300_MPP-0.2500+0.png"
+    Image.fromarray(np.full((224, 224, 3), 120, dtype=np.uint8)).save(val_img_dir / fname)
+    m_arr = np.zeros((224, 224), dtype=np.uint8)
+    m_arr[112:, :] = 1
+    m_img = Image.fromarray(m_arr, mode="P")
+    m_img.putpalette(BCSS_PALETTE)
+    m_img.save(val_mask_dir / fname)
+
+    cfg = resolve_stage1_config_from_env(
+        overrides={
+            "preset_name": "arm_c_mpppc_polysgd",
+            "max_epochs": 1,
+            "batch_size": 2,
+            "num_workers": 0,
+            "ppc_start_epoch": 0,
+            "pda_start_epoch": 0,
+            "min_epochs_early_stop": 1,
+            "early_stop_patience": 1,
+        }
+    )
+    ckpt_dir = tmp_path / "arm_c_full_1ep"
+    res = train_stage1_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_dir=ckpt_dir,
+        allow_random_init=True,
+        device_str="cpu",
+        experiment_config=cfg,
+    )
+    latest_p = Path(res["latest_checkpoint_path"])
+    assert latest_p.is_file()
+    latest_obj = torch.load(latest_p, map_location="cpu", weights_only=False)
+    assert "ema_state_dict" in latest_obj
+    assert "proj_head_state_dict" in latest_obj
+
+    captured = capsys.readouterr().out
+    assert "[EARLY REGRESSION ALARM]" not in captured
+    assert "fc8_std=" in captured
+    assert "fc8_norms=" in captured
+    assert "Global=" in captured
+    assert "[EMA]" in captured
+    assert "selected=" in captured
+
+
+def test_stage1_resume_device_placement_order_and_end_to_end(
+    mock_dataset_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Verify train_stage1_pipeline moves modules to target device BEFORE optimizer build/load and resumes cleanly."""
+    from src.config import resolve_stage1_config_from_env
+    from src.losses_metrics.losses import MultiPrototypePPCLoss
+    from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
+    from src.training import train_stage1 as ts1
+
+    splits = load_bcss_patient_splits()
+    val_pid = splits["val"][0]
+    val_img_dir = mock_dataset_dir / "val" / "img"
+    val_mask_dir = mock_dataset_dir / "val" / "mask"
+    fname = f"{val_pid}-DX1_xmin400_ymin400_MPP-0.2500+0.png"
+    Image.fromarray(np.full((224, 224, 3), 120, dtype=np.uint8)).save(val_img_dir / fname)
+    m_arr = np.zeros((224, 224), dtype=np.uint8)
+    m_arr[112:, :] = 1
+    m_img = Image.fromarray(m_arr, mode="P")
+    m_img.putpalette(BCSS_PALETTE)
+    m_img.save(val_mask_dir / fname)
+
+    ckpt_dir = tmp_path / "arm_c_resume_ckpt"
+    cfg_ep1 = resolve_stage1_config_from_env(
+        overrides={
+            "preset_name": "arm_c_mpppc_polysgd",
+            "max_epochs": 1,
+            "batch_size": 2,
+            "num_workers": 0,
+            "ppc_start_epoch": 0,
+            "pda_start_epoch": 0,
+            "min_epochs_early_stop": 5,
+            "early_stop_patience": 5,
+        }
+    )
+    res1 = train_stage1_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_dir=ckpt_dir,
+        allow_random_init=True,
+        device_str="cpu",
+        experiment_config=cfg_ep1,
+    )
+    latest_p = Path(res1["latest_checkpoint_path"])
+    assert latest_p.is_file()
+    assert len(res1["history"]) == 1
+
+    # Spy on device-placement order, torch.load map_location, and optimizer.load_state_dict during resume
+    events: List[str] = []
+    seen_map_locations: List[object] = []
+    target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    orig_model_to = WSSSTissueStage1NetCAM.to
+    orig_proj_to = ts1.ProjectionHead.to
+    orig_ppc_to = MultiPrototypePPCLoss.to
+    orig_build_opt = ts1.build_optimizer_and_scheduler
+    orig_sgd_load = torch.optim.SGD.load_state_dict
+    orig_torch_load = ts1.torch.load
+
+    def spy_model_to(self_m, *args, **kwargs):
+        events.append("model.to")
+        return orig_model_to(self_m, *args, **kwargs)
+
+    def spy_proj_to(self_m, *args, **kwargs):
+        events.append("proj_head.to")
+        return orig_proj_to(self_m, *args, **kwargs)
+
+    def spy_ppc_to(self_m, *args, **kwargs):
+        events.append("mpppc.to")
+        return orig_ppc_to(self_m, *args, **kwargs)
+
+    def spy_torch_load(f, *args, **kwargs):
+        seen_map_locations.append(kwargs.get("map_location"))
+        return orig_torch_load(f, *args, **kwargs)
+
+    def spy_build_opt(model_arg, *args, **kwargs):
+        events.append("build_optimizer")
+        # Confirm every model + extra param is already on target_device before optimizer construction
+        for p in model_arg.parameters():
+            assert p.device == target_device
+        for ep in kwargs.get("extra_params") or []:
+            assert ep.device == target_device
+        return orig_build_opt(model_arg, *args, **kwargs)
+
+    def spy_sgd_load(self_opt, state_dict):
+        events.append("optimizer.load_state_dict")
+        ret = orig_sgd_load(self_opt, state_dict)
+        for group in self_opt.param_groups:
+            for p in group["params"]:
+                st = self_opt.state.get(p, {})
+                for sk, sv in st.items():
+                    if isinstance(sv, torch.Tensor) and sk != "step":
+                        assert sv.device == p.device == target_device
+        return ret
+
+    monkeypatch.setattr(WSSSTissueStage1NetCAM, "to", spy_model_to)
+    monkeypatch.setattr(ts1.ProjectionHead, "to", spy_proj_to)
+    monkeypatch.setattr(MultiPrototypePPCLoss, "to", spy_ppc_to)
+    monkeypatch.setattr(ts1.torch, "load", spy_torch_load)
+    monkeypatch.setattr(ts1, "build_optimizer_and_scheduler", spy_build_opt)
+    monkeypatch.setattr(torch.optim.SGD, "load_state_dict", spy_sgd_load)
+
+    cfg_ep2 = resolve_stage1_config_from_env(
+        overrides={
+            "preset_name": "arm_c_mpppc_polysgd",
+            "max_epochs": 2,
+            "batch_size": 2,
+            "num_workers": 0,
+            "ppc_start_epoch": 0,
+            "pda_start_epoch": 0,
+            "min_epochs_early_stop": 5,
+            "early_stop_patience": 5,
+        }
+    )
+    res2 = train_stage1_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_dir=ckpt_dir,
+        resume_path=latest_p,
+        allow_random_init=True,
+        device_str=str(target_device),
+        experiment_config=cfg_ep2,
+    )
+
+    assert len(res2["history"]) == 2
+    assert np.isfinite(res2["history"][-1]["loss"])
+    assert target_device in seen_map_locations
+    build_idx = events.index("build_optimizer")
+    load_idx = events.index("optimizer.load_state_dict")
+    assert events.index("model.to") < build_idx < load_idx
+    assert events.index("proj_head.to") < build_idx < load_idx
+    assert events.index("mpppc.to") < build_idx < load_idx
+
+
+def test_stage1_stop_after_epoch_decoupled_lr_schedule_and_resume(
+    mock_dataset_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    """Verify STAGE1_STOP_AFTER_EPOCH decouples loop stop from MAX_EPOCHS LR horizon with zero LR shock on resume."""
+    from src.config import resolve_stage1_config_from_env
+    from src.training import train_stage1 as ts1
+
+    # 1. Verify env parsing for STAGE1_STOP_AFTER_EPOCH
+    monkeypatch.setenv("STAGE1_EXP_PRESET", "arm_a_polysgd")
+    monkeypatch.setenv("STAGE1_MAX_EPOCHS", "20")
+    monkeypatch.setenv("STAGE1_STOP_AFTER_EPOCH", "5")
+    cfg_stop = resolve_stage1_config_from_env()
+    assert cfg_stop.max_epochs == 20
+    assert cfg_stop.stop_after_epoch == 5
+
+    monkeypatch.setenv("STAGE1_STOP_AFTER_EPOCH", "0")
+    with pytest.raises(ValueError, match="STAGE1_STOP_AFTER_EPOCH must be >= 1"):
+        resolve_stage1_config_from_env()
+
+    monkeypatch.delenv("STAGE1_STOP_AFTER_EPOCH", raising=False)
+    cfg_resume_env = resolve_stage1_config_from_env()
+    assert cfg_resume_env.max_epochs == 20
+    assert cfg_resume_env.stop_after_epoch is None
+
+    # Prepare val masks on official val patient so evaluate() runs full GatedPM_mIoU path
+    splits = load_bcss_patient_splits()
+    val_pid = splits["val"][0]
+    val_img_dir = mock_dataset_dir / "val" / "img"
+    val_mask_dir = mock_dataset_dir / "val" / "mask"
+    fname = f"{val_pid}-DX1_xmin500_ymin500_MPP-0.2500+0.png"
+    Image.fromarray(np.full((224, 224, 3), 120, dtype=np.uint8)).save(val_img_dir / fname)
+    m_arr = np.zeros((224, 224), dtype=np.uint8)
+    m_arr[112:, :] = 1
+    m_img = Image.fromarray(m_arr, mode="P")
+    m_img.putpalette(BCSS_PALETTE)
+    m_img.save(val_mask_dir / fname)
+
+    # Compact ResNet38d-compatible module so 20-epoch full schedule runs end-to-end quickly on CPU
+    class _CompactStage1Net(nn.Module):
+        def __init__(self, n_class: int = 4, num_classes: int = 4) -> None:
+            super().__init__()
+            out_c = n_class if n_class else num_classes
+            self.conv1a = nn.Conv2d(3, 8, kernel_size=3, padding=1, bias=False)
+            self.bn7 = nn.BatchNorm2d(8)
+            self.dropout7 = nn.Identity()
+            self.pool = nn.AdaptiveAvgPool2d((1, 1))
+            self.fc8 = nn.Conv2d(8, out_c, kernel_size=1, bias=False)
+
+        def forward_backbone(self, x: torch.Tensor) -> torch.Tensor:
+            return torch.relu(self.bn7(self.conv1a(x)))
+
+    monkeypatch.setattr(ts1, "WSSSTissueStage1NetCAM", _CompactStage1Net)
+
+    recorded_lrs: List[float] = []
+    orig_sgd_step = torch.optim.SGD.step
+
+    def spy_sgd_step(self_opt, *args, **kwargs):
+        recorded_lrs.append(float(self_opt.param_groups[0]["lr"]))
+        return orig_sgd_step(self_opt, *args, **kwargs)
+
+    monkeypatch.setattr(torch.optim.SGD, "step", spy_sgd_step)
+
+    # 2. Uninterrupted 20-epoch reference run (arm_a_polysgd)
+    cfg_full = resolve_stage1_config_from_env(
+        overrides={
+            "preset_name": "arm_a_polysgd",
+            "max_epochs": 20,
+            "stop_after_epoch": None,
+            "batch_size": 2,
+            "num_workers": 0,
+            "seed": 42,
+        }
+    )
+    res_full = train_stage1_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_dir=tmp_path / "full_20ep",
+        allow_random_init=True,
+        device_str="cpu",
+        enable_regression_guard=False,
+        experiment_config=cfg_full,
+    )
+    assert len(res_full["history"]) == 20
+    lrs_full = list(recorded_lrs)
+    steps_per_ep = len(lrs_full) // 20
+    assert steps_per_ep >= 1 and len(lrs_full) == 20 * steps_per_ep
+
+    # 3. Split run part 1: max_epochs=20, stop_after_epoch=5
+    recorded_lrs.clear()
+    _ = capsys.readouterr()
+    cfg_part1 = resolve_stage1_config_from_env(
+        overrides={
+            "preset_name": "arm_a_polysgd",
+            "max_epochs": 20,
+            "stop_after_epoch": 5,
+            "batch_size": 2,
+            "num_workers": 0,
+            "seed": 42,
+        }
+    )
+    ckpt_split_dir = tmp_path / "split_20ep"
+    res_part1 = train_stage1_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_dir=ckpt_split_dir,
+        allow_random_init=True,
+        device_str="cpu",
+        enable_regression_guard=False,
+        experiment_config=cfg_part1,
+    )
+    part1_out = capsys.readouterr().out
+    assert "[STOP AFTER EPOCH]" in part1_out
+    assert "[EARLY STOP" not in part1_out
+    assert len(res_part1["history"]) == 5
+    assert Path(res_part1["latest_checkpoint_path"]).is_file()
+    assert Path(res_part1["checkpoint_path"]).is_file()
+    assert Path(res_part1["best_cls_checkpoint_path"]).is_file()
+    lrs_part1 = list(recorded_lrs)
+    assert len(lrs_part1) == 5 * steps_per_ep
+
+    # 4. Split run part 2: resume with max_epochs=20, stop_after_epoch=None
+    recorded_lrs.clear()
+    cfg_part2 = resolve_stage1_config_from_env(
+        overrides={
+            "preset_name": "arm_a_polysgd",
+            "max_epochs": 20,
+            "stop_after_epoch": None,
+            "batch_size": 2,
+            "num_workers": 0,
+            "seed": 42,
+        }
+    )
+    res_part2 = train_stage1_pipeline(
+        data_dir=mock_dataset_dir,
+        checkpoint_dir=ckpt_split_dir,
+        resume_path=res_part1["latest_checkpoint_path"],
+        allow_random_init=True,
+        device_str="cpu",
+        enable_regression_guard=False,
+        experiment_config=cfg_part2,
+    )
+    assert len(res_part2["history"]) == 20
+    lrs_part2 = list(recorded_lrs)
+    assert len(lrs_part2) == 15 * steps_per_ep
+
+    # Ep 6 Step 1 (index 5 * steps_per_ep in uninterrupted run) must match to < 1e-9 (zero LR shock)
+    ep6_step1_idx = 5 * steps_per_ep
+    assert lrs_part2[0] == pytest.approx(lrs_full[ep6_step1_idx], abs=1e-9)
+    assert lrs_part1 + lrs_part2 == pytest.approx(lrs_full, abs=1e-9)
+
+
+
 
 
 
