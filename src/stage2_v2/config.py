@@ -11,6 +11,7 @@ Gate-5 breakthrough suite:
 All hyphens strictly use standard ASCII 0x2D ('-').
 """
 
+import math
 import os
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Dict, Mapping, Optional, Tuple
@@ -76,6 +77,7 @@ class Stage2V2Config:
     git_ref: str = ""
     eval_scales: Tuple[float, ...] = (0.75, 1.0, 1.25)
     memmap_source: str = "stage1"
+    r2_blend: float = 1.0
     fpn_dim: int = 128
     internal_scale: float = 1.0
     drop_path_rate: Optional[float] = None
@@ -471,6 +473,13 @@ def resolve_stage2_v2_config_from_env(
         else:
             raise ValueError(f"Unsupported STAGE2_EMA_ONLY_BEST_SELECTION={raw_ema_only!r}.")
 
+    raw_r2_blend = env.get("STAGE2_R2_BLEND", "")
+    if raw_r2_blend is not None and str(raw_r2_blend).strip() != "":
+        rb_val = float(str(raw_r2_blend).strip())
+        if not math.isfinite(rb_val) or not (0.0 <= rb_val <= 1.0):
+            raise ValueError(f"STAGE2_R2_BLEND must be finite and in [0, 1], got {rb_val}.")
+        updates["r2_blend"] = rb_val
+
     raw_soft_temp = env.get("STAGE2_SOFT_TEMP", "")
     if raw_soft_temp is not None and str(raw_soft_temp).strip() != "":
         st_val = float(str(raw_soft_temp).strip())
@@ -496,6 +505,10 @@ def resolve_stage2_v2_config_from_env(
         if v is not None:
             if k == "eval_scales" and not isinstance(v, tuple):
                 v = tuple(float(s) for s in v)
+            if k == "r2_blend":
+                v = float(v)
+                if not math.isfinite(v) or not (0.0 <= v <= 1.0):
+                    raise ValueError(f"r2_blend must be finite and in [0, 1], got {v}.")
             updates[k] = v
 
     if updates:

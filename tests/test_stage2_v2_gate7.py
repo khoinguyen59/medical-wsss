@@ -1022,3 +1022,31 @@ def test_iter2_remediation_p1_p2_and_challenger_defense(
         run_stage2_v2_ensemble_eval(
             [benign_arm] * 4, v_loader_s, t_loader_s, output_dir=tmp_path / "ens_b", zip_path=tmp_path / "ens_b.zip", track="invalid_track"
         )
+
+
+def test_r2_blend_config_and_notebook_wiring() -> None:
+    """Verify r2_blend defaults to 1.0, validates [0,1]/finite, and is wired in 02b notebook."""
+    from src.stage2_v2.config import resolve_stage2_v2_config_from_env
+
+    cfg_default = resolve_stage2_v2_config_from_env(environ={"STAGE2_EXP_PRESET": "arm5_dinov2_large_r2"})
+    assert cfg_default.r2_blend == pytest.approx(1.0)
+    assert cfg_default.to_dict()["r2_blend"] == pytest.approx(1.0)
+
+    cfg_env = resolve_stage2_v2_config_from_env(
+        environ={"STAGE2_EXP_PRESET": "arm6_segformer_b5_r2", "STAGE2_R2_BLEND": "0.85"}
+    )
+    assert cfg_env.r2_blend == pytest.approx(0.85)
+
+    for bad in ("-0.1", "1.2", "nan", "inf"):
+        with pytest.raises(ValueError, match="STAGE2_R2_BLEND"):
+            resolve_stage2_v2_config_from_env(environ={"STAGE2_EXP_PRESET": "arm5_dinov2_large_r2", "STAGE2_R2_BLEND": bad})
+
+    with pytest.raises(ValueError, match="r2_blend"):
+        resolve_stage2_v2_config_from_env(environ={}, overrides={"r2_blend": float("nan")})
+
+    nb_path = Path("notebooks/02b_Stage2_Breakthrough_G4.ipynb")
+    nb_obj = json.loads(nb_path.read_text(encoding="utf-8"))
+    cell_src = "\n".join("".join(c.get("source", [])) for c in nb_obj.get("cells", []))
+    assert "blend=cfg.r2_blend" in cell_src
+    assert "[R2 TELEMETRY]" in cell_src
+    assert "blend=0.5" not in cell_src
