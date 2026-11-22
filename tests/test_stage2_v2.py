@@ -38,7 +38,11 @@ from src.stage2_v2 import (
     train_stage2_v2,
 )
 from src.stage2_v2 import trainer as s2_trainer
-from src.stage2_v2.evaluator import _eval_author_stage2_split
+from src.stage2_v2.evaluator import (
+    CGM_GRID,
+    _eval_author_stage2_split,
+    calibrate_cgm_thresholds_val_only,
+)
 from src.stage2_v2.memmap_dataset import _cams_to_soft_probs
 from src.training.dataset_loader import BCSSStage2ValDataset, load_bcss_patient_splits
 from src.training.train_stage2 import prepare_stage1_input
@@ -76,7 +80,28 @@ def test_stage2_v2_presets_and_env_resolution() -> None:
 
     cfg_arm = resolve_stage2_v2_config_from_env(environ={"STAGE2_ARM": "arm3_convnext_selftrain"})
     assert cfg_arm.preset_name == "arm3_convnext_selftrain"
-    assert cfg_arm.self_train_round2_start_epoch == 10
+    assert cfg_arm.self_train_round2_start_epoch == 6
+    for arm_name in ("arm1_deeplab_cleankd", "arm2_segformer_oeem", "arm4_dinov2_adapter"):
+        assert get_stage2_v2_preset(arm_name).self_train_round2_start_epoch is None
+
+    cfg_pat_r2 = resolve_stage2_v2_config_from_env(
+        environ={
+            "STAGE2_EXP_PRESET": "arm3_convnext_selftrain",
+            "STAGE2_PATIENCE": "4",
+            "STAGE2_ROUND2_START": "8",
+        }
+    )
+    assert cfg_pat_r2.patience == 4
+    assert cfg_pat_r2.self_train_round2_start_epoch == 8
+
+    for disable_tok in ("0", "none", "false", "off", " NONE ", "Off"):
+        cfg_dis = resolve_stage2_v2_config_from_env(
+            environ={
+                "STAGE2_EXP_PRESET": "arm3_convnext_selftrain",
+                "STAGE2_ROUND2_START": disable_tok,
+            }
+        )
+        assert cfg_dis.self_train_round2_start_epoch is None
 
     with pytest.raises(ValueError):
         get_stage2_v2_preset("nonexistent_arm")
@@ -84,6 +109,12 @@ def test_stage2_v2_presets_and_env_resolution() -> None:
         resolve_stage2_v2_config_from_env(environ={"STAGE2_SOFT_MODE": "bad_mode"})
     with pytest.raises(ValueError):
         resolve_stage2_v2_config_from_env(environ={"STAGE2_SOFT_TEMP": "-0.1"})
+    with pytest.raises(ValueError):
+        resolve_stage2_v2_config_from_env(environ={"STAGE2_PATIENCE": "0"})
+    with pytest.raises(ValueError):
+        resolve_stage2_v2_config_from_env(environ={"STAGE2_ROUND2_START": "-1"})
+    with pytest.raises(ValueError):
+        resolve_stage2_v2_config_from_env(environ={"STAGE2_ROUND2_START": "invalid"})
 
 
 @pytest.mark.parametrize(
@@ -782,3 +813,344 @@ def test_cgm_author_mul0_diverges_from_cgm_neg1e4_on_negative_active_logits() ->
     assert res["cgm_neg1e4"]["mIoU"] == pytest.approx(1.0, abs=1e-4)
     assert res["cgm_author_mul0"]["mIoU"] == pytest.approx(0.0, abs=1e-4)
     assert res["cgm_author_mul0"]["mIoU"] != res["cgm_neg1e4"]["mIoU"]
+
+
+def test_arm3_patience_round2_peak_reload_opt_clear_warmup_and_early_stop(
+    tmp_path: Path,
+    e2e_64_patch_bundle,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tr_dir, val_img, val_msk, te_img, te_msk, tr_pids, val_pids, te_pids, s1, src_dat, src_man = e2e_64_patch_bundle
+    mm_dir = tmp_path / "mm_pat_r2"
+    mm_dir.mkdir(parents=True, exist_ok=True)
+    dat_p = mm_dir / src_dat.name
+    man_p = mm_dir / src_man.name
+    shutil.copy2(src_dat, dat_p)
+    shutil.copy2(src_man, man_p)
+
+    val_loader = DataLoader(BCSSStage2ValDataset(val_img, val_msk, patient_ids=val_pids), batch_size=8, shuffle=False)
+    test_loader = DataLoader(BCSSStage2ValDataset(te_img, te_msk, patient_ids=te_pids), batch_size=8, shuffle=False)
+
+    base_cfg = get_stage2_v2_preset("arm3_convnext_selftrain")
+    cfg = replace(
+        base_cfg,
+        epochs=12,
+        patience=2,
+        batch_size=8,
+        num_workers=0,
+        dry_run=True,
+        self_train_round2_start_epoch=10,
+    )
+    model = SegFormerDualHead(num_classes=4, pretrained=False, tiny_offline_config=True)
+    ckpt_dir = tmp_path / "ckpts_pat_r2"
+    out_dir = tmp_path / "out_pat_r2"
+
+    # Mock VAL mIoU: Ep1 raw=0.80 (peak), EMA=0.70; Ep2-5 raw/EMA=0.50 (stalls twice -> R2, stalls twice -> stop)
+    eval_calls = 0
+
+    def _mock_eval(*args, **kwargs):
+        nonlocal eval_calls
+        eval_calls += 1
+        miou = 0.80 if eval_calls == 1 else (0.70 if eval_calls == 2 else 0.50)
+        return {
+            "num_patches": 16,
+            "raw": {"mIoU": miou, "mDice": miou},
+            "cgm_self": {"mIoU": miou, "mDice": miou},
+            "cgm_s1": {"mIoU": miou, "mDice": miou},
+            "cgm_dual": {"mIoU": miou, "mDice": miou},
+        }
+
+    monkeypatch.setattr(s2_trainer, "evaluate_stage2_v2_model", _mock_eval)
+
+    r2_transition_snapshots = []
+    orig_gen_r2 = s2_trainer.generate_round2_ema_memmap
+    orig_set_lrs = s2_trainer._set_optimizer_lrs
+    r2_lr_scales = []
+    opt_ref = {}
+
+    def _spy_gen_r2(ema_model, **kwargs):
+        best_sd = torch.load(ckpt_dir / "stage2_retrained_best.pth", map_location="cpu", weights_only=False)["state_dict"]
+        cur_sd = {k: v.detach().cpu().clone() for k, v in ema_model.state_dict().items()}
+        max_diff = max(
+            float((best_sd[k].float() - cur_sd[k].float()).abs().max().item())
+            for k in best_sd
+        )
+        r2_transition_snapshots.append(
+            {
+                "max_weight_diff_from_peak": max_diff,
+                "opt_state_len": len(opt_ref["opt"].state),
+            }
+        )
+        return orig_gen_r2(ema_model=ema_model, **kwargs)
+
+    def _spy_set_lrs(optimizer, base_lrs, scale):
+        opt_ref["opt"] = optimizer
+        if len(r2_transition_snapshots) > 0:
+            r2_lr_scales.append(float(scale))
+        return orig_set_lrs(optimizer, base_lrs, scale)
+
+    monkeypatch.setattr(s2_trainer, "generate_round2_ema_memmap", _spy_gen_r2)
+    monkeypatch.setattr(s2_trainer, "_set_optimizer_lrs", _spy_set_lrs)
+
+    metrics = train_stage2_v2(
+        cfg=cfg,
+        model=model,
+        train_img_dir=tr_dir,
+        memmap_path=dat_p,
+        manifest_path=man_p,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        stage1_model=s1,
+        stage1_norm_mode="zero_one",
+        stage1_sha256="sha_pat_r2",
+        train_patient_ids=tr_pids,
+        checkpoint_dir=ckpt_dir,
+        output_dir=out_dir,
+        zip_path=tmp_path / "pat_r2.zip",
+        device=torch.device("cpu"),
+    )
+
+    out_text = capsys.readouterr().out
+    assert "[ROUND2 SCHEDULED]" in out_text
+    assert "[ROUND2] Reloaded peak Round-1 checkpoint" in out_text
+    assert "[EARLY STOP PATIENCE]" in out_text
+    assert metrics["stop_reason"] == "early_stop_patience"
+    assert metrics["history"]["epoch"] == [1, 2, 3, 4, 5]
+    assert len(r2_transition_snapshots) == 1
+    assert r2_transition_snapshots[0]["max_weight_diff_from_peak"] == pytest.approx(0.0, abs=1e-6)
+    assert r2_transition_snapshots[0]["opt_state_len"] == 0
+
+    # Verify Round-2 warmup ramp (steps_per_epoch=8 -> r2_warmup_steps=4 -> 0.325 -> 1.0 of lr_mult)
+    # In Ep4, global_step increments past warmup; compute relative step_lr_mult ratio vs steady-state tail
+    # Using exact _compute_lr_scale values for Ep4 steps 24..31:
+    assert len(r2_lr_scales) == 16  # Ep4 (8 batches) + Ep5 (8 batches)
+    ep4_r2_factors = []
+    for i in range(8):
+        base_s = s2_trainer._compute_lr_scale(
+            step_idx=24 + i,
+            total_steps=12 * 8,
+            warmup_steps=8,
+            scheduler_type=cfg.scheduler,
+            poly_power=cfg.poly_power,
+            min_ratio=float(cfg.eta_min) / max(float(cfg.lr_head), 1e-8),
+        )
+        ep4_r2_factors.append(r2_lr_scales[i] / (base_s * float(cfg.self_train_lr_scale)))
+    assert ep4_r2_factors[:4] == pytest.approx([0.325, 0.55, 0.775, 1.0], abs=1e-5)
+    assert ep4_r2_factors[4:] == pytest.approx([1.0, 1.0, 1.0, 1.0], abs=1e-5)
+
+    shutil.rmtree(mm_dir, ignore_errors=True)
+    shutil.rmtree(ckpt_dir, ignore_errors=True)
+    shutil.rmtree(out_dir, ignore_errors=True)
+
+
+def test_round2_scheduled_disconnect_resume_and_active_r2_no_reload(
+    tmp_path: Path,
+    e2e_64_patch_bundle,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tr_dir, val_img, val_msk, te_img, te_msk, tr_pids, val_pids, te_pids, s1, src_dat, src_man = e2e_64_patch_bundle
+    mm_dir = tmp_path / "mm_r2_sched_disc"
+    mm_dir.mkdir(parents=True, exist_ok=True)
+    dat_p = mm_dir / src_dat.name
+    man_p = mm_dir / src_man.name
+    shutil.copy2(src_dat, dat_p)
+    shutil.copy2(src_man, man_p)
+
+    val_loader = DataLoader(BCSSStage2ValDataset(val_img, val_msk, patient_ids=val_pids), batch_size=8, shuffle=False)
+    test_loader = DataLoader(BCSSStage2ValDataset(te_img, te_msk, patient_ids=te_pids), batch_size=8, shuffle=False)
+
+    base_cfg = get_stage2_v2_preset("arm3_convnext_selftrain")
+    cfg = replace(
+        base_cfg,
+        epochs=12,
+        patience=2,
+        batch_size=8,
+        num_workers=0,
+        dry_run=True,
+        self_train_round2_start_epoch=10,
+    )
+    ckpt_dir = tmp_path / "ckpts_sched_disc"
+    out_dir = tmp_path / "out_sched_disc"
+
+    eval_calls = 0
+
+    def _mock_eval(*args, **kwargs):
+        nonlocal eval_calls
+        eval_calls += 1
+        miou = 0.80 if eval_calls == 1 else (0.70 if eval_calls == 2 else 0.50)
+        return {
+            "num_patches": 16,
+            "raw": {"mIoU": miou, "mDice": miou},
+            "cgm_self": {"mIoU": miou, "mDice": miou},
+            "cgm_s1": {"mIoU": miou, "mDice": miou},
+            "cgm_dual": {"mIoU": miou, "mDice": miou},
+        }
+
+    monkeypatch.setattr(s2_trainer, "evaluate_stage2_v2_model", _mock_eval)
+
+    # Part 1: Simulate disconnect right after Ep3 [ROUND2 SCHEDULED] (before Ep4 Round-2 transition finishes)
+    orig_gen_r2 = s2_trainer.generate_round2_ema_memmap
+
+    def _fail_first_r2(*args, **kwargs):
+        raise RuntimeError("SIMULATED_DISCONNECT_AT_R2_ENTRY")
+
+    monkeypatch.setattr(s2_trainer, "generate_round2_ema_memmap", _fail_first_r2)
+    m1 = SegFormerDualHead(num_classes=4, pretrained=False, tiny_offline_config=True)
+    with pytest.raises(RuntimeError, match="SIMULATED_DISCONNECT_AT_R2_ENTRY"):
+        train_stage2_v2(
+            cfg=cfg,
+            model=m1,
+            train_img_dir=tr_dir,
+            memmap_path=dat_p,
+            manifest_path=man_p,
+            val_loader=val_loader,
+            test_loader=test_loader,
+            stage1_model=s1,
+            stage1_norm_mode="zero_one",
+            stage1_sha256="sha_disc",
+            train_patient_ids=tr_pids,
+            checkpoint_dir=ckpt_dir,
+            output_dir=out_dir,
+            zip_path=tmp_path / "disc1.zip",
+            device=torch.device("cpu"),
+        )
+
+    out_p1 = capsys.readouterr().out
+    assert "[ROUND2 SCHEDULED]" in out_p1
+    latest_ckpt = ckpt_dir / "stage2_latest.pth"
+    ck3 = torch.load(latest_ckpt, map_location="cpu", weights_only=False)
+    assert ck3["epoch"] == 3 and ck3["epochs_without_improve"] == 2 and ck3["round2_active"] is False
+
+    # Resume with epochs=4 so Ep4 completes cleanly inside Round 2 (and does not early-stop yet)
+    monkeypatch.setattr(s2_trainer, "generate_round2_ema_memmap", orig_gen_r2)
+    cfg_ep4 = replace(cfg, epochs=4)
+    m2 = SegFormerDualHead(num_classes=4, pretrained=False, tiny_offline_config=True)
+    train_stage2_v2(
+        cfg=cfg_ep4,
+        model=m2,
+        train_img_dir=tr_dir,
+        memmap_path=dat_p,
+        manifest_path=man_p,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        stage1_model=s1,
+        stage1_norm_mode="zero_one",
+        stage1_sha256="sha_disc",
+        train_patient_ids=tr_pids,
+        checkpoint_dir=ckpt_dir,
+        output_dir=out_dir,
+        zip_path=tmp_path / "disc2.zip",
+        device=torch.device("cpu"),
+        resume_from=latest_ckpt,
+    )
+    out_p2 = capsys.readouterr().out
+    assert "[ROUND2] Reloaded peak Round-1 checkpoint" in out_p2
+    assert (mm_dir / "pm_soft_r2.dat").is_file()
+    ck4 = torch.load(latest_ckpt, map_location="cpu", weights_only=False)
+    assert ck4["epoch"] == 4 and ck4["round2_active"] is True and ck4["round2_step"] == 8
+
+    # Part 2: Resume during already-active Round 2 (Ep4 -> Ep5): must NOT reload best_ckpt_path or clear optimizer.state
+    best_sd = torch.load(ckpt_dir / "stage2_retrained_best.pth", map_location="cpu", weights_only=False)["state_dict"]
+    ep4_sd = ck4["state_dict"]
+    assert any(not torch.allclose(best_sd[k].float(), ep4_sd[k].float()) for k in best_sd)
+
+    first_batch_checks = []
+    orig_set_lrs = s2_trainer._set_optimizer_lrs
+
+    def _spy_ep5_lrs(optimizer, base_lrs, scale):
+        if not first_batch_checks:
+            first_batch_checks.append({"opt_state_len": len(optimizer.state), "scale": float(scale)})
+        return orig_set_lrs(optimizer, base_lrs, scale)
+
+    monkeypatch.setattr(s2_trainer, "_set_optimizer_lrs", _spy_ep5_lrs)
+    cfg_ep6 = replace(cfg, epochs=6)
+    m3 = SegFormerDualHead(num_classes=4, pretrained=False, tiny_offline_config=True)
+    metrics_p3 = train_stage2_v2(
+        cfg=cfg_ep6,
+        model=m3,
+        train_img_dir=tr_dir,
+        memmap_path=dat_p,
+        manifest_path=man_p,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        stage1_model=s1,
+        stage1_norm_mode="zero_one",
+        stage1_sha256="sha_disc",
+        train_patient_ids=tr_pids,
+        checkpoint_dir=ckpt_dir,
+        output_dir=out_dir,
+        zip_path=tmp_path / "disc3.zip",
+        device=torch.device("cpu"),
+        resume_from=latest_ckpt,
+    )
+    out_p3 = capsys.readouterr().out
+    assert "[ROUND2] Reloaded peak Round-1 checkpoint" not in out_p3
+    assert "[ROUND2 RESUME]" in out_p3
+    assert first_batch_checks[0]["opt_state_len"] > 0
+    ck_final = torch.load(latest_ckpt, map_location="cpu", weights_only=False)
+    assert ck_final["round2_step"] == 16
+    assert metrics_p3["history"]["epoch"] == [1, 2, 3, 4, 5]
+
+    shutil.rmtree(mm_dir, ignore_errors=True)
+    shutil.rmtree(ckpt_dir, ignore_errors=True)
+    shutil.rmtree(out_dir, ignore_errors=True)
+
+
+def test_dinov2_probe_value_error_and_loading_info_fail_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    dino = DINOv2AdapterDualHead(num_classes=4, pretrained=False, unfreeze_last_n_blocks=2)
+
+    def _raise_val_err(*_args, **_kwargs):
+        raise ValueError("unexpected kwarg interpolate_pos_encoding")
+
+    monkeypatch.setattr(dino.backbone, "forward", _raise_val_err)
+    assert dino._probe_interp_pos_support() is False
+
+    from transformers import Dinov2Config, Dinov2Model
+
+    tiny_cfg = Dinov2Config(
+        hidden_size=32,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        intermediate_size=64,
+        image_size=56,
+        patch_size=14,
+    )
+    tiny_backbone = Dinov2Model(tiny_cfg)
+    n_keys = len(list(tiny_backbone.state_dict().keys()))
+    monkeypatch.setattr(
+        Dinov2Model,
+        "from_pretrained",
+        staticmethod(lambda *_args, **_kwargs: (tiny_backbone, {"missing_keys": [f"k{i}" for i in range(n_keys)]})),
+    )
+    with pytest.raises(RuntimeError, match=r"DINOv2 matched only 0 keys \(expected >= 200\)"):
+        DINOv2AdapterDualHead(num_classes=4, pretrained=True)
+
+
+def test_cgm_grid_extends_to_0_55_and_calibration_selects_gt_0_30() -> None:
+    assert CGM_GRID == (0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55)
+
+    class _DummyCalModel(torch.nn.Module):
+        def forward(self, x: torch.Tensor):
+            b, _, h, w = x.shape
+            seg_logits = torch.full((b, 4, h, w), -2.0, dtype=torch.float32)
+            # Class 0 has a mild false-positive logit (-0.1) everywhere, while class 1 has (-0.5)
+            seg_logits[:, 0] = -0.1
+            seg_logits[:, 1] = -0.5
+            # Image 0 is true class 0 (cls_prob=0.90), Image 1 is true class 1 (false-positive class 0 prob=0.40)
+            cls_logits = torch.tensor([[2.1972246, -2.0, -5.0, -5.0], [-0.4054651, 2.1972246, -5.0, -5.0]], dtype=torch.float32)
+            return {"seg_logits": seg_logits, "cls_logits": cls_logits[:b]}
+
+    imgs = torch.zeros((2, 3, 16, 16), dtype=torch.float32)
+    gts = torch.stack([torch.zeros((16, 16), dtype=torch.long), torch.ones((16, 16), dtype=torch.long)], dim=0)
+    val_loader = DataLoader(list(zip(imgs, gts)), batch_size=2, shuffle=False)
+
+    cal = calibrate_cgm_thresholds_val_only(
+        model=_DummyCalModel().eval(),
+        val_loader=val_loader,
+        device=torch.device("cpu"),
+        gate_source="self",
+    )
+    assert cal["thresholds"][0] > 0.30
+    assert cal["val_miou"] == pytest.approx(1.0, abs=1e-4)

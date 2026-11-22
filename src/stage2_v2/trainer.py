@@ -245,6 +245,7 @@ def train_stage2_v2(
     best_selected_weights = "raw"
     no_improve = 0
     round2_active = False
+    round2_step = 0
     lr_mult = 1.0
     global_step = 0
     history: Dict[str, List[Any]] = {
@@ -271,6 +272,7 @@ def train_stage2_v2(
             best_selected_weights = str(r_obj.get("selected_weights", "raw"))
             no_improve = int(r_obj.get("epochs_without_improve", 0))
             round2_active = bool(r_obj.get("round2_active", False))
+            round2_step = int(r_obj.get("round2_step", 0))
             global_step = int(r_obj.get("global_step", (start_epoch - 1) * steps_per_epoch))
             if round2_active:
                 lr_mult = float(cfg.self_train_lr_scale)
@@ -360,8 +362,22 @@ def train_stage2_v2(
         if (
             cfg.self_train_round2_start_epoch is not None
             and not round2_active
-            and epoch >= int(cfg.self_train_round2_start_epoch)
+            and (
+                epoch >= int(cfg.self_train_round2_start_epoch)
+                or no_improve >= int(cfg.patience)
+            )
         ):
+            if best_ckpt_path.is_file():
+                best_ckpt = torch.load(best_ckpt_path, map_location=dev, weights_only=False)
+                if isinstance(best_ckpt, dict) and "state_dict" in best_ckpt:
+                    model.load_state_dict(best_ckpt["state_dict"], strict=True)
+                    if ema is not None:
+                        ema.load_state_dict({"shadow": model.state_dict()})
+                    print(
+                        f"[ROUND2] Reloaded peak Round-1 checkpoint (best_val_miou={best_ckpt.get('val_miou', best_val_miou)}, epoch={best_ckpt.get('epoch')})",
+                        flush=True,
+                    )
+            optimizer.state.clear()
             r2_dat = active_memmap.parent / "pm_soft_r2.dat"
             r2_man = active_memmap.parent / "pm_soft_r2_manifest.json"
             if ema is not None:
@@ -404,6 +420,7 @@ def train_stage2_v2(
             lr_mult = float(cfg.self_train_lr_scale)
             round2_active = True
             no_improve = 0
+            round2_step = 0
             print(
                 f"[ROUND2] Switched to blended EMA memmap {r2_dat.name} (blend={cfg.self_train_blend}, lr_scale={lr_mult})",
                 flush=True,
@@ -412,6 +429,8 @@ def train_stage2_v2(
         model.train()
         ep_loss_sum = 0.0
         ep_batches = 0
+
+        r2_warmup_steps = min(200, max(1, steps_per_epoch // 2))
 
         for imgs, q_soft, y_gt, px_weight in train_loader:
             lr_scale = _compute_lr_scale(
@@ -422,7 +441,11 @@ def train_stage2_v2(
                 poly_power=cfg.poly_power,
                 min_ratio=min_ratio,
             )
-            _set_optimizer_lrs(optimizer, base_lrs, lr_scale * lr_mult)
+            if round2_active and round2_step < r2_warmup_steps:
+                step_lr_mult = lr_mult * (0.1 + 0.9 * float(round2_step + 1) / float(r2_warmup_steps))
+            else:
+                step_lr_mult = lr_mult
+            _set_optimizer_lrs(optimizer, base_lrs, lr_scale * step_lr_mult)
 
             imgs = imgs.to(dev, non_blocking=True)
             q_soft = q_soft.to(dev, non_blocking=True)
@@ -460,6 +483,8 @@ def train_stage2_v2(
             ep_loss_sum += float(loss.detach().item())
             ep_batches += 1
             global_step += 1
+            if round2_active:
+                round2_step += 1
 
         avg_train_loss = ep_loss_sum / float(max(1, ep_batches))
 
@@ -549,6 +574,7 @@ def train_stage2_v2(
             "best_val_miou": round(float(best_val_miou), 4),
             "epochs_without_improve": int(no_improve),
             "round2_active": bool(round2_active),
+            "round2_step": int(round2_step),
             "global_step": int(global_step),
             "stage1_sha256": str(stage1_sha256),
             "history": history,
@@ -566,12 +592,18 @@ def train_stage2_v2(
         )
 
         if no_improve >= int(cfg.patience):
-            stop_reason = "early_stop_patience"
-            print(
-                f"[EARLY STOP PATIENCE] No Val_mIoU improvement for {no_improve} epochs; stopping cleanly.",
-                flush=True,
-            )
-            break
+            if cfg.self_train_round2_start_epoch is None or round2_active:
+                stop_reason = "early_stop_patience"
+                print(
+                    f"[EARLY STOP PATIENCE] No Val_mIoU improvement for {no_improve} epochs; stopping cleanly.",
+                    flush=True,
+                )
+                break
+            if epoch < int(cfg.epochs):
+                print(
+                    "[ROUND2 SCHEDULED] Round-1 plateau reached; transitioning to Round-2 EMA self-training on next epoch.",
+                    flush=True,
+                )
 
     # Final Step-8 Strict Reload + Fixed-0.10 & VAL-Calibrated Evaluation
     best_model, best_meta = load_stage2_v2_checkpoint(best_ckpt_path, device=dev, strict=True)

@@ -12,7 +12,7 @@ outside-ROI gt == 4 and ignore gt == 255) across:
 
 Also provides:
 - calibrate_cgm_thresholds_val_only: Coordinate-descent grid search over
-  (t_TUM, t_STR, t_LYM, t_NEC) in [0.05, 0.10, 0.15, 0.20, 0.25, 0.30] strictly on VAL.
+  (t_TUM, t_STR, t_LYM, t_NEC) in [0.05, ..., 0.55] strictly on VAL.
 - run_step0_calibration_and_author_anchor: Official Author Stage-2 anchor benchmark
   + Champion bn7 soft-target recipe sweep (raw_l1, softmax_t T=0.15/0.25/0.40, sg_dap_soft).
 
@@ -40,7 +40,19 @@ from src.training.dataset_loader import FOREGROUND_CLASSES, NUM_FOREGROUND
 from src.training.train_stage2 import prepare_stage1_input
 
 _CLS_LOWER: Tuple[str, ...] = tuple(c.lower() for c in FOREGROUND_CLASSES)
-CGM_GRID: Tuple[float, ...] = (0.05, 0.10, 0.15, 0.20, 0.25, 0.30)
+CGM_GRID: Tuple[float, ...] = (
+    0.05,
+    0.10,
+    0.15,
+    0.20,
+    0.25,
+    0.30,
+    0.35,
+    0.40,
+    0.45,
+    0.50,
+    0.55,
+)
 
 
 class _SegConfusion4:
@@ -257,7 +269,7 @@ def calibrate_cgm_thresholds_val_only(
 
     Precomputes exact per-image confusion vectors across all 15 non-empty 4-class
     bitmasks in a single VAL pass (O(1) RAM), then runs 2 coordinate-descent sweeps
-    over [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]^4 maximizing 4-class VAL mIoU.
+    over [0.05, ..., 0.55]^4 maximizing 4-class VAL mIoU.
     """
     model.eval()
     if stage1_model is not None:

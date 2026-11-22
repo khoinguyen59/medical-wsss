@@ -142,7 +142,7 @@ STAGE2_V2_PRESETS: Dict[str, Stage2V2Config] = {
         lambda_mil=0.20,
         lambda_cls=0.20,
         use_oeem=False,
-        self_train_round2_start_epoch=10,
+        self_train_round2_start_epoch=6,
         self_train_blend=0.5,
         self_train_lr_scale=0.3,
         use_ema=True,
@@ -195,6 +195,8 @@ def resolve_stage2_v2_config_from_env(
     - STAGE2_EXP_PRESET / STAGE2_ARM: preset key
     - STAGE2_SEED: integer random seed override
     - STAGE2_EPOCHS: integer epochs override
+    - STAGE2_PATIENCE: integer early-stop patience override (>= 1)
+    - STAGE2_ROUND2_START: Round-2 start epoch (>= 1) or '0'/'none'/'false'/'off' to disable
     - STAGE2_BATCH_SIZE: integer batch size override
     - STAGE2_NUM_WORKERS: integer dataloader worker count override
     - STAGE2_SOFT_MODE: 'raw_l1' | 'softmax_t' | 'sg_dap_soft'
@@ -222,8 +224,20 @@ def resolve_stage2_v2_config_from_env(
 
     _read_int("STAGE2_SEED", "seed", min_val=0)
     _read_int("STAGE2_EPOCHS", "epochs", min_val=1)
+    _read_int("STAGE2_PATIENCE", "patience", min_val=1)
     _read_int("STAGE2_BATCH_SIZE", "batch_size", min_val=1)
     _read_int("STAGE2_NUM_WORKERS", "num_workers", min_val=0)
+
+    raw_r2_start = env.get("STAGE2_ROUND2_START", "")
+    if raw_r2_start is not None and str(raw_r2_start).strip() != "":
+        r2_s = str(raw_r2_start).strip()
+        if r2_s.lower() in {"0", "none", "false", "off"}:
+            updates["self_train_round2_start_epoch"] = None
+        else:
+            r2_val = int(r2_s)
+            if r2_val < 1:
+                raise ValueError(f"STAGE2_ROUND2_START must be >= 1, got {r2_val}.")
+            updates["self_train_round2_start_epoch"] = r2_val
 
     raw_soft_mode = env.get("STAGE2_SOFT_MODE", "")
     if raw_soft_mode is not None and str(raw_soft_mode).strip() != "":

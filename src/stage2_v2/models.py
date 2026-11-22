@@ -346,7 +346,22 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
         self.tiny_offline_config = bool(tiny_offline_config or not pretrained)
 
         if pretrained:
-            self.backbone = Dinov2Model.from_pretrained(self.backbone_id)
+            model_and_info = Dinov2Model.from_pretrained(
+                self.backbone_id,
+                output_loading_info=True,
+            )
+            if isinstance(model_and_info, tuple):
+                self.backbone, loading_info = model_and_info
+            else:
+                self.backbone, loading_info = model_and_info, {}
+            missing_keys = set(loading_info.get("missing_keys", []))
+            all_keys = list(self.backbone.state_dict().keys())
+            matched = len(all_keys) - len(missing_keys)
+            if matched < 200:
+                raise RuntimeError(
+                    f"[STAGE2 ERROR] DINOv2 matched only {matched} keys "
+                    f"(expected >= 200) for {self.backbone_id}."
+                )
         else:
             cfg = Dinov2Config(
                 hidden_size=64,
@@ -412,7 +427,7 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
             try:
                 self.backbone(pixel_values=probe, interpolate_pos_encoding=True)
                 return True
-            except TypeError:
+            except (TypeError, ValueError):
                 return False
 
     def _apply_freeze_policy(self) -> None:
