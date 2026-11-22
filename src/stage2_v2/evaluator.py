@@ -19,8 +19,10 @@ Also provides:
 Pure ASCII hyphen '-' only (Invariant 12).
 """
 
+import gc
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -35,8 +37,20 @@ from src.models.wsss_inference_methods import (
     WSSSTissueStage1NetCAM,
     build_and_load_deeplabv3plus,
 )
-from src.stage2_v2.memmap_dataset import _cams_to_soft_probs, _extract_bn7_6view_global_cam
-from src.training.dataset_loader import FOREGROUND_CLASSES, NUM_FOREGROUND
+from src.stage2_v2.config import VALID_SOFT_MODES, validate_track_name
+from src.stage2_v2.memmap_dataset import (
+    _cams_to_soft_probs,
+    _close_memmap,
+    _extract_bn7_6view_global_cam,
+    validate_track_a_teacher_checkpoint,
+)
+from src.training.dataset_loader import (
+    FOREGROUND_CLASSES,
+    NUM_FOREGROUND,
+    extract_patient_id,
+    load_bcss_patient_splits,
+)
+from src.training.eval_stage1_full import compute_file_sha256
 from src.training.train_stage2 import prepare_stage1_input
 
 _CLS_LOWER: Tuple[str, ...] = tuple(c.lower() for c in FOREGROUND_CLASSES)
@@ -556,3 +570,417 @@ def run_step0_calibration_and_author_anchor(
     tmp_p.write_text(json.dumps(report, indent=2), encoding="utf-8")
     os.replace(tmp_p, out_p)
     return report
+
+
+def _collect_loader_patient_ids(loader: DataLoader) -> List[str]:
+    ds: Any = loader.dataset
+    indices: Optional[List[int]] = None
+    while isinstance(ds, torch.utils.data.Subset):
+        sub_idx = [int(i) for i in ds.indices]
+        if indices is None:
+            indices = sub_idx
+        else:
+            indices = [sub_idx[i] for i in indices]
+        ds = ds.dataset
+
+    files = getattr(ds, "files", None)
+    if files is not None:
+        if indices is not None:
+            return [extract_patient_id(Path(files[i]).name) for i in indices]
+        return [extract_patient_id(Path(f).name) for f in files]
+
+    samples = getattr(ds, "samples", None)
+    if samples is not None:
+        sel = [samples[i] for i in indices] if indices is not None else samples
+        pids: List[str] = []
+        for item in sel:
+            p = item[0] if isinstance(item, (tuple, list)) else item
+            pids.append(extract_patient_id(Path(p).name))
+        return pids
+    return []
+
+
+@torch.no_grad()
+def evaluate_r2_pseudo_mask_val_diagnostic(
+    val_loader: DataLoader,
+    teacher_ckpt_paths: Sequence[Union[str, Path]],
+    stage1_model: Optional[WSSSTissueStage1NetCAM] = None,
+    stage1_norm_mode: str = "zero_one",
+    stage1_sha256: Optional[str] = None,
+    soft_mode: str = "sg_dap_soft",
+    soft_temp: float = 0.25,
+    blend: float = 0.5,
+    weights: Optional[Sequence[float]] = None,
+    r2_temp: float = 1.0,
+    tail_noise_thresh: float = 1e-2,
+    p_sum_diag_thresh: float = 0.05,
+    ceiling_gate_thresh: float = 0.755,
+    track: str = "track_a_clean",
+    device: Optional[torch.device] = None,
+    amp_dtype: Optional[torch.dtype] = None,
+    output_json_path: Optional[Union[str, Path]] = "/content/stage2_results/STAGE2_R2_VAL_DIAGNOSTIC.json",
+    max_ece_pixels: int = 200000,
+) -> Dict[str, Any]:
+    """Evaluate q_s1_sgdap vs p_ens4_uncal_ygated vs q_r2 strictly on val_loader (zero TEST access)."""
+    if len(teacher_ckpt_paths) == 0:
+        raise ValueError("teacher_ckpt_paths must contain at least 1 teacher checkpoint.")
+    n_teachers = len(teacher_ckpt_paths)
+    if weights is None:
+        w_list = [1.0 / float(n_teachers)] * n_teachers
+    else:
+        if len(weights) != n_teachers:
+            raise ValueError(
+                f"weights length {len(weights)} != teacher_ckpt_paths length {n_teachers}."
+            )
+        w_list = [float(w) for w in weights]
+    if any(w < 0.0 for w in w_list) or abs(sum(w_list) - 1.0) > 1e-5:
+        raise ValueError(f"weights must be non-negative and sum to 1.0, got {w_list}.")
+    alpha = float(blend)
+    temp_val = float(r2_temp)
+    if temp_val <= 0.0:
+        raise ValueError(f"r2_temp must be > 0, got {r2_temp}.")
+    soft_mode_norm = str(soft_mode).strip().lower()
+    if soft_mode_norm not in VALID_SOFT_MODES:
+        raise ValueError(
+            f"Unsupported soft_mode={soft_mode!r} in evaluate_r2_pseudo_mask_val_diagnostic. "
+            f"Expected one of {VALID_SOFT_MODES}."
+        )
+    track_norm = validate_track_name(track)
+    enforce_track_a = track_norm == "track_a_clean"
+
+    # Strict VAL-only anti-leakage check (zero TEST or TRAIN patients)
+    splits = load_bcss_patient_splits()
+    test_pids = {str(p).upper() for p in splits["test"]}
+    train_pids = {str(p).upper() for p in splits["train"]}
+    val_pids_found = {p.upper() for p in _collect_loader_patient_ids(val_loader)}
+    if len(val_pids_found) == 0:
+        raise RuntimeError(
+            "[STAGE2 ANTI-LEAKAGE ERROR] evaluate_r2_pseudo_mask_val_diagnostic could not verify "
+            "patient IDs from val_loader.dataset (empty or missing .files/.samples)."
+        )
+    leaked = sorted(val_pids_found & (test_pids | train_pids))
+    if leaked:
+        raise RuntimeError(
+            f"[STAGE2 ANTI-LEAKAGE ERROR] evaluate_r2_pseudo_mask_val_diagnostic received TEST/TRAIN patients: {leaked[:5]}"
+        )
+
+    teacher_paths = [Path(p) for p in teacher_ckpt_paths]
+    teacher_sha256s: List[str] = []
+    for p in teacher_paths:
+        if not p.is_file():
+            raise FileNotFoundError(f"Teacher checkpoint not found: {p}")
+        if enforce_track_a:
+            validate_track_a_teacher_checkpoint(p)
+        teacher_sha256s.append(compute_file_sha256(p))
+
+    dev = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = dev.type == "cuda" and amp_dtype is not None
+    if stage1_model is not None:
+        stage1_model = stage1_model.to(dev).eval()
+
+    n_val = 0
+    h = 0
+    w = 0
+    for batch in val_loader:
+        imgs_b, _, _ = _extract_img_gt(batch)
+        if n_val == 0:
+            h, w = int(imgs_b.shape[-2]), int(imgs_b.shape[-1])
+        n_val += int(imgs_b.shape[0])
+    if n_val == 0 or h == 0 or w == 0:
+        raise RuntimeError("val_loader yielded 0 batches for evaluate_r2_pseudo_mask_val_diagnostic.")
+
+    from src.stage2_v2.models import load_stage2_v2_checkpoint
+
+    acc_mm: Optional[np.memmap] = None
+    tmp_acc_path: Optional[Path] = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=".tmp_val_diag_ens4_", suffix=".dat", delete=False
+        ) as tfp:
+            tmp_acc_path = Path(tfp.name)
+
+        acc_mm = np.memmap(
+            tmp_acc_path,
+            dtype=np.float32,
+            mode="w+",
+            shape=(n_val, NUM_FOREGROUND, h, w),
+        )
+        acc_mm[:] = 0.0
+
+        for t_idx, ckpt_p in enumerate(teacher_paths):
+            teacher_m = None
+            try:
+                teacher_m, t_meta = load_stage2_v2_checkpoint(ckpt_p, device=dev, strict=True)
+                if enforce_track_a:
+                    validate_track_a_teacher_checkpoint(ckpt_p, payload_meta=t_meta)
+                teacher_m.eval()
+
+                w_t = float(w_list[t_idx])
+                pos = 0
+                for batch in val_loader:
+                    imgs_b, _, _ = _extract_img_gt(batch)
+                    b = int(imgs_b.size(0))
+                    imgs_b = imgs_b.to(dev, non_blocking=True)
+                    views = (
+                        imgs_b,
+                        torch.flip(imgs_b, dims=[-1]),
+                        torch.flip(imgs_b, dims=[-2]),
+                        torch.rot90(imgs_b, k=1, dims=[-2, -1]),
+                    )
+                    probs_sum = torch.zeros(
+                        (b, NUM_FOREGROUND, h, w), device=dev, dtype=torch.float32
+                    )
+                    for v_idx, x_v in enumerate(views):
+                        with torch.amp.autocast(
+                            device_type=dev.type, dtype=amp_dtype, enabled=use_amp
+                        ):
+                            lg_v, _ = _forward_dual_head(teacher_m, x_v)
+                        pr_v = torch.softmax(lg_v[:, :NUM_FOREGROUND].float(), dim=1)
+                        if v_idx == 1:
+                            pr_v = torch.flip(pr_v, dims=[-1])
+                        elif v_idx == 2:
+                            pr_v = torch.flip(pr_v, dims=[-2])
+                        elif v_idx == 3:
+                            pr_v = torch.rot90(pr_v, k=3, dims=[-2, -1])
+                        probs_sum = probs_sum + pr_v
+
+                    p_d4 = (probs_sum / 4.0).cpu().numpy()
+                    acc_mm[pos : pos + b] = acc_mm[pos : pos + b] + w_t * p_d4
+                    pos += b
+            finally:
+                del teacher_m
+                gc.collect()
+                if dev.type == "cuda":
+                    torch.cuda.empty_cache()
+
+        acc_mm.flush()
+
+        cand_names = ("q_s1_sgdap", "p_ens4_uncal_ygated", "q_r2")
+        overall_acc = {name: _SegConfusion4() for name in cand_names}
+        multi_acc = {name: _SegConfusion4() for name in cand_names}
+        ece_probs: Dict[str, List[np.ndarray]] = {name: [] for name in cand_names}
+        ece_gts: List[np.ndarray] = []
+        multi_ent_sum = {name: 0.0 for name in cand_names}
+        multi_ent_px = 0
+        collected_px = 0
+        n_val_multi = 0
+        psum_lt_0_05_px = 0
+        psum_lt_0_01_px = 0
+        psum_diag_total_px = 0
+        psum_all_lt_0_05_px = 0
+        psum_all_lt_0_01_px = 0
+        psum_all_total_px = 0
+
+        sg_dap = (
+            StainGuidedAffinityRefiner(kernel_size=5, num_iters=10, use_deep_affinity=False)
+            .to(dev)
+            .eval()
+            if (stage1_model is not None and soft_mode_norm == "sg_dap_soft")
+            else None
+        )
+
+        pos = 0
+        for batch in val_loader:
+            imgs_b, gts_b, _ = _extract_img_gt(batch)
+            b = int(imgs_b.size(0))
+            imgs_b = imgs_b.to(dev, non_blocking=True)
+            gt_np = gts_b.cpu().numpy()
+            valid_fg = (gt_np >= 0) & (gt_np < NUM_FOREGROUND)
+
+            y_gt = torch.stack(
+                [(gts_b == c).any(dim=(-2, -1)) for c in range(NUM_FOREGROUND)], dim=1
+            ).float().to(dev)
+            is_multi_b = (y_gt > 0.5).sum(dim=1) >= 2
+            is_multi_np = is_multi_b.cpu().numpy()
+            n_val_multi += int(np.sum(is_multi_np))
+
+            raw_gate = (y_gt > 0.5).float().view(b, NUM_FOREGROUND, 1, 1)
+            has_any = raw_gate.any(dim=1, keepdim=True)
+            gate = torch.where(has_any, raw_gate, torch.ones_like(raw_gate))
+            uniform_gt = gate / gate.sum(dim=1, keepdim=True).clamp(min=1.0)
+
+            if stage1_model is not None:
+                rgb_01 = prepare_stage1_input(
+                    imgs_b, stage1_norm_mode="zero_one", images_are_imagenet_norm=True
+                )
+                s1_inp = prepare_stage1_input(
+                    imgs_b, stage1_norm_mode=stage1_norm_mode, images_are_imagenet_norm=True
+                )
+                cam_ms = _extract_bn7_6view_global_cam(stage1_model, s1_inp, target_hw=(h, w))
+                q_s1 = _cams_to_soft_probs(
+                    cam_ms=cam_ms,
+                    y_gt=y_gt,
+                    rgb_01=rgb_01,
+                    soft_mode=soft_mode_norm,
+                    soft_temp=soft_temp,
+                    sg_dap=sg_dap,
+                )
+            else:
+                q_s1 = uniform_gt
+
+            p_ens4 = torch.from_numpy(np.array(acc_mm[pos : pos + b], dtype=np.float32)).to(dev)
+            pos += b
+            if abs(temp_val - 1.0) > 1e-6:
+                p_ens4 = p_ens4.clamp(min=1e-8) ** (1.0 / temp_val)
+                p_ens4 = p_ens4 / p_ens4.sum(dim=1, keepdim=True).clamp(min=1e-8)
+
+            p_g = p_ens4 * gate
+            p_sum = p_g.sum(dim=1, keepdim=True)
+            tail_mask = p_sum < float(tail_noise_thresh)
+            p_ens4_ygated = torch.where(
+                tail_mask,
+                q_s1,
+                p_g / p_sum.clamp(min=float(tail_noise_thresh)),
+            )
+
+            q_r2 = (1.0 - alpha) * q_s1 + alpha * p_ens4_ygated
+            q_r2 = q_r2 * gate
+            r2_sum = q_r2.sum(dim=1, keepdim=True)
+            q_r2 = torch.where(r2_sum > 1e-6, q_r2 / r2_sum.clamp(min=1e-6), uniform_gt)
+
+            # Track p_sum tail-noise diagnostics strictly on multi-class valid pixels
+            # (split-level fallback to valid_fg only if n_val_multi == 0 across entire split)
+            p_sum_np = p_sum.squeeze(1).cpu().numpy()
+            if np.any(valid_fg):
+                psum_all_total_px += int(np.sum(valid_fg))
+                psum_all_lt_0_05_px += int(np.sum(p_sum_np[valid_fg] < float(p_sum_diag_thresh)))
+                psum_all_lt_0_01_px += int(np.sum(p_sum_np[valid_fg] < float(tail_noise_thresh)))
+            diag_mask = valid_fg & is_multi_np[:, None, None]
+            if np.any(diag_mask):
+                psum_diag_total_px += int(np.sum(diag_mask))
+                psum_lt_0_05_px += int(np.sum(p_sum_np[diag_mask] < float(p_sum_diag_thresh)))
+                psum_lt_0_01_px += int(np.sum(p_sum_np[diag_mask] < float(tail_noise_thresh)))
+
+            take_px = collected_px < max_ece_pixels and bool(np.any(valid_fg))
+            step = 1
+            if take_px:
+                gt_v = gt_np[valid_fg]
+                if gt_v.shape[0] > 900:
+                    step = max(1, gt_v.shape[0] // 900)
+                    gt_sub = gt_v[::step][:900]
+                else:
+                    gt_sub = gt_v
+                ece_gts.append(gt_sub)
+                collected_px += len(gt_sub)
+
+            cand_tensors = {
+                "q_s1_sgdap": q_s1,
+                "p_ens4_uncal_ygated": p_ens4_ygated,
+                "q_r2": q_r2,
+            }
+            if np.any(is_multi_np):
+                multi_valid_fg = valid_fg & is_multi_np[:, None, None]
+                multi_ent_px += int(np.sum(multi_valid_fg))
+
+            for cname, c_tensor in cand_tensors.items():
+                pred = torch.argmax(c_tensor, dim=1).cpu().numpy()
+                overall_acc[cname].update(pred, gt_np, valid_fg)
+                if np.any(is_multi_np):
+                    multi_acc[cname].update(pred, gt_np, valid_fg & is_multi_np[:, None, None])
+                    c_np_full = np.transpose(c_tensor.cpu().numpy(), (0, 2, 3, 1))
+                    m_probs = np.clip(c_np_full[valid_fg & is_multi_np[:, None, None]], 1e-6, 1.0)
+                    if m_probs.shape[0] > 0:
+                        multi_ent_sum[cname] += float(-np.sum(m_probs * np.log(m_probs)))
+                if take_px:
+                    q_np = np.transpose(c_tensor.cpu().numpy(), (0, 2, 3, 1))[valid_fg]
+                    if step > 1:
+                        q_np = q_np[::step]
+                    ece_probs[cname].append(q_np[:900])
+
+        gt_cat = np.concatenate(ece_gts, axis=0) if ece_gts else np.zeros((0,), dtype=np.int64)
+        candidates_report: Dict[str, Any] = {}
+        for cname in cand_names:
+            ov = overall_acc[cname].summary()
+            mv = multi_acc[cname].summary()
+            p_cat = (
+                np.concatenate(ece_probs[cname], axis=0)
+                if ece_probs[cname]
+                else np.zeros((0, NUM_FOREGROUND), dtype=np.float32)
+            )
+            ece, ent = _compute_ece_and_entropy(p_cat, gt_cat)
+            multi_ent = (
+                round(float(multi_ent_sum[cname] / float(multi_ent_px)), 4)
+                if multi_ent_px > 0
+                else ent
+            )
+            candidates_report[cname] = {
+                **ov,
+                "multiclass_mIoU": mv["mIoU"],
+                "multiclass_mDice": mv["mDice"],
+                "multiclass_per_class_iou": mv["per_class_iou"],
+                "multiclass_class_ious": mv["class_ious"],
+                "ECE": ece,
+                "entropy": ent,
+                "multiclass_entropy": multi_ent,
+            }
+
+        if n_val_multi > 0:
+            eff_diag_total = psum_diag_total_px
+            eff_lt_0_05 = psum_lt_0_05_px
+            eff_lt_0_01 = psum_lt_0_01_px
+        else:
+            eff_diag_total = psum_all_total_px
+            eff_lt_0_05 = psum_all_lt_0_05_px
+            eff_lt_0_01 = psum_all_lt_0_01_px
+
+        frac_005 = (
+            round(float(eff_lt_0_05) / float(eff_diag_total), 6)
+            if eff_diag_total > 0
+            else 0.0
+        )
+        frac_001 = (
+            round(float(eff_lt_0_01) / float(eff_diag_total), 6)
+            if eff_diag_total > 0
+            else 0.0
+        )
+        q_r2_miou = float(candidates_report["q_r2"]["mIoU"])
+        q_r2_lym = float(candidates_report["q_r2"]["per_class_iou"]["lym"])
+        s1_lym = float(candidates_report["q_s1_sgdap"]["per_class_iou"]["lym"])
+        ceiling_gate_pass = bool(q_r2_miou >= float(ceiling_gate_thresh))
+        go_decision = bool(ceiling_gate_pass and q_r2_lym >= s1_lym)
+
+        report: Dict[str, Any] = {
+            "step": "diag_r2_val",
+            "split": "val_only",
+            "num_val_patches": n_val,
+            "num_multiclass_val_patches": n_val_multi,
+            "track": track_norm,
+            "soft_mode": soft_mode_norm,
+            "soft_temp": float(soft_temp),
+            "blend": alpha,
+            "r2_temp": temp_val,
+            "tail_noise_thresh": float(tail_noise_thresh),
+            "stage1_norm_mode": stage1_norm_mode,
+            "stage1_sha256": stage1_sha256,
+            "teacher_sha256s": teacher_sha256s,
+            "frac_psum_lt_0_05": frac_005,
+            "frac_psum_lt_0_01": frac_001,
+            "candidates": candidates_report,
+            "ceiling_gate_thresh": float(ceiling_gate_thresh),
+            "ceiling_gate_pass": ceiling_gate_pass,
+            "go_decision": go_decision,
+        }
+
+        if output_json_path is not None:
+            out_p = Path(output_json_path)
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            serialized = json.dumps(report, indent=2)
+            tmp_p = out_p.with_suffix(out_p.suffix + ".tmp")
+            tmp_p.write_text(serialized, encoding="utf-8")
+            os.replace(tmp_p, out_p)
+            diag_sidecar = out_p.parent / "STAGE2_R2_VAL_DIAGNOSTIC.json"
+            if diag_sidecar.resolve() != out_p.resolve():
+                tmp_sidecar = diag_sidecar.with_suffix(".json.tmp")
+                tmp_sidecar.write_text(serialized, encoding="utf-8")
+                os.replace(tmp_sidecar, diag_sidecar)
+
+        return report
+    finally:
+        _close_memmap(acc_mm)
+        del acc_mm
+        if tmp_acc_path is not None:
+            try:
+                tmp_acc_path.unlink(missing_ok=True)
+            except OSError:
+                pass

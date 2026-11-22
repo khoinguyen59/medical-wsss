@@ -18,7 +18,7 @@ import contextlib
 import math
 from itertools import chain
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -70,6 +70,8 @@ class BaseStage2DualHead(nn.Module):
     num_classes: int = 4
     input_norm: str = "imagenet"
     has_cls_head: bool = True
+    track: str = "track_a_clean"
+    tcga_pretrained: bool = False
 
     def forward_logits(self, x: torch.Tensor) -> torch.Tensor:
         """Return only dense segmentation logits (B, num_classes, H, W)."""
@@ -101,18 +103,28 @@ class BaseStage2DualHead(nn.Module):
             "num_classes": int(self.num_classes),
             "input_norm": self.input_norm,
             "has_cls_head": bool(self.has_cls_head),
+            "track": str(self.track),
+            "tcga_pretrained": bool(self.tcga_pretrained),
         }
 
 
 class DeepLabV3PlusDualHead(BaseStage2DualHead):
-    """Arm 1: DeepLabV3+ ResNet-101 (OS=16) with decoupled GAP classification head."""
+    """Arm 1 / Arm 8: DeepLabV3+ ResNet-101 (OS=16) with decoupled GAP classification head."""
 
-    def __init__(self, num_classes: int = 4, pretrained: bool = True) -> None:
+    def __init__(
+        self,
+        num_classes: int = 4,
+        pretrained: bool = True,
+        track: str = "track_a_clean",
+        tcga_pretrained: bool = False,
+    ) -> None:
         super().__init__()
         self.arch = "deeplabv3plus_r101"
         self.backbone_id = "resnet101"
         self.num_classes = int(num_classes)
         self.pretrained_init = bool(pretrained)
+        self.track = str(track)
+        self.tcga_pretrained = bool(tcga_pretrained)
 
         self.seg_net = DeepLabV3Plus(num_classes=self.num_classes, output_stride=16)
         self._init_head_weights()
@@ -156,12 +168,16 @@ class DeepLabV3PlusDualHead(BaseStage2DualHead):
 
     def model_metadata(self) -> Dict[str, Any]:
         meta = super().model_metadata()
-        meta["model_kwargs"] = {"num_classes": self.num_classes}
+        meta["model_kwargs"] = {
+            "num_classes": self.num_classes,
+            "track": self.track,
+            "tcga_pretrained": self.tcga_pretrained,
+        }
         return meta
 
 
 class SegFormerDualHead(BaseStage2DualHead):
-    """Arm 2: SegFormer-B3 (MiT-B3) with stage-4 GAP classification head."""
+    """Arm 2 / Arm 6: SegFormer (MiT-B3 / MiT-B5) with stage-4 GAP classification head."""
 
     def __init__(
         self,
@@ -169,19 +185,31 @@ class SegFormerDualHead(BaseStage2DualHead):
         num_classes: int = 4,
         pretrained: bool = True,
         tiny_offline_config: bool = False,
+        arch: str = "segformer_b3",
+        drop_path_rate: Optional[float] = None,
+        track: str = "track_a_clean",
+        tcga_pretrained: bool = False,
     ) -> None:
         super().__init__()
-        self.arch = "segformer_b3"
+        self.arch = str(arch)
         self.backbone_id = str(backbone_id)
         self.num_classes = int(num_classes)
         self.tiny_offline_config = bool(tiny_offline_config or not pretrained)
+        self.drop_path_rate = float(drop_path_rate) if drop_path_rate is not None else None
+        self.track = str(track)
+        self.tcga_pretrained = bool(tcga_pretrained)
 
         if pretrained:
+            fp_kwargs: Dict[str, Any] = {
+                "num_labels": self.num_classes,
+                "ignore_mismatched_sizes": True,
+                "output_loading_info": True,
+            }
+            if self.drop_path_rate is not None:
+                fp_kwargs["drop_path_rate"] = self.drop_path_rate
             model_and_info = SegformerForSemanticSegmentation.from_pretrained(
                 self.backbone_id,
-                num_labels=self.num_classes,
-                ignore_mismatched_sizes=True,
-                output_loading_info=True,
+                **fp_kwargs,
             )
             if isinstance(model_and_info, tuple):
                 self.segformer, loading_info = model_and_info
@@ -198,14 +226,17 @@ class SegFormerDualHead(BaseStage2DualHead):
                     f"(expected >= 300) for {self.backbone_id}."
                 )
         else:
-            cfg = SegformerConfig(
-                num_labels=self.num_classes,
-                depths=[1, 1, 1, 1],
-                hidden_sizes=[16, 32, 64, 128],
-                decoder_hidden_size=32,
-                num_attention_heads=[1, 2, 4, 8],
-                sr_ratios=[8, 4, 2, 1],
-            )
+            cfg_kwargs: Dict[str, Any] = {
+                "num_labels": self.num_classes,
+                "depths": [1, 1, 1, 1],
+                "hidden_sizes": [16, 32, 64, 128],
+                "decoder_hidden_size": 32,
+                "num_attention_heads": [1, 2, 4, 8],
+                "sr_ratios": [8, 4, 2, 1],
+            }
+            if self.drop_path_rate is not None:
+                cfg_kwargs["drop_path_rate"] = self.drop_path_rate
+            cfg = SegformerConfig(**cfg_kwargs)
             self.segformer = SegformerForSemanticSegmentation(cfg)
 
         c4 = int(self.segformer.config.hidden_sizes[-1])
@@ -230,31 +261,60 @@ class SegFormerDualHead(BaseStage2DualHead):
     def model_metadata(self) -> Dict[str, Any]:
         meta = super().model_metadata()
         meta["model_kwargs"] = {
+            "arch": self.arch,
             "backbone_id": self.backbone_id,
             "num_classes": self.num_classes,
             "tiny_offline_config": self.tiny_offline_config,
+            "drop_path_rate": self.drop_path_rate,
+            "track": self.track,
+            "tcga_pretrained": self.tcga_pretrained,
         }
         return meta
 
 
 class ConvNeXtFPNDualHead(BaseStage2DualHead):
-    """Arm 3: ConvNeXt-Base (stochastic_depth_prob=0.2) + GroupNorm FPN + GAP cls_head."""
+    """Arm 3 / Arm 7: ConvNeXt-Base/Large + GroupNorm FPN + GAP cls_head."""
 
-    def __init__(self, num_classes: int = 4, pretrained: bool = True) -> None:
+    def __init__(
+        self,
+        num_classes: int = 4,
+        pretrained: bool = True,
+        arch: str = "convnext_base_fpn",
+        backbone_id: str = "convnext_base",
+        stochastic_depth_prob: float = 0.2,
+        track: str = "track_a_clean",
+        tcga_pretrained: bool = False,
+    ) -> None:
         super().__init__()
-        self.arch = "convnext_base_fpn"
-        self.backbone_id = "convnext_base"
+        self.arch = str(arch)
+        self.backbone_id = str(backbone_id)
         self.num_classes = int(num_classes)
-        self.stochastic_depth_prob = 0.2
+        self.stochastic_depth_prob = float(stochastic_depth_prob)
+        self.track = str(track)
+        self.tcga_pretrained = bool(tcga_pretrained)
 
-        weights = tv_models.ConvNeXt_Base_Weights.IMAGENET1K_V1 if pretrained else None
-        backbone = tv_models.convnext_base(
-            weights=weights,
-            stochastic_depth_prob=self.stochastic_depth_prob,
-        )
+        bb = self.backbone_id.strip().lower()
+        if bb == "convnext_base":
+            weights = tv_models.ConvNeXt_Base_Weights.IMAGENET1K_V1 if pretrained else None
+            backbone = tv_models.convnext_base(
+                weights=weights,
+                stochastic_depth_prob=self.stochastic_depth_prob,
+            )
+            in_channels_list = [128, 256, 512, 1024]
+        elif bb == "convnext_large":
+            weights = tv_models.ConvNeXt_Large_Weights.IMAGENET1K_V1 if pretrained else None
+            backbone = tv_models.convnext_large(
+                weights=weights,
+                stochastic_depth_prob=self.stochastic_depth_prob,
+            )
+            in_channels_list = [192, 384, 768, 1536]
+        else:
+            raise ValueError(f"Unsupported ConvNeXt backbone_id: {backbone_id!r}.")
+
+        self.in_channels_list: List[int] = list(in_channels_list)
         self.features = backbone.features
         self.fpn = FeaturePyramidNetwork(
-            in_channels_list=[128, 256, 512, 1024],
+            in_channels_list=self.in_channels_list,
             out_channels=256,
         )
         self.decode_head = nn.Sequential(
@@ -267,7 +327,7 @@ class ConvNeXtFPNDualHead(BaseStage2DualHead):
             nn.Dropout2d(0.1),
             nn.Conv2d(256, self.num_classes, kernel_size=1),
         )
-        self.cls_head = nn.Linear(1024, self.num_classes)
+        self.cls_head = nn.Linear(self.in_channels_list[-1], self.num_classes)
         nn.init.normal_(self.cls_head.weight, mean=0.0, std=0.01)
         nn.init.zeros_(self.cls_head.bias)
 
@@ -309,7 +369,15 @@ class ConvNeXtFPNDualHead(BaseStage2DualHead):
 
     def model_metadata(self) -> Dict[str, Any]:
         meta = super().model_metadata()
-        meta["model_kwargs"] = {"num_classes": self.num_classes}
+        meta["model_kwargs"] = {
+            "arch": self.arch,
+            "backbone_id": self.backbone_id,
+            "num_classes": self.num_classes,
+            "stochastic_depth_prob": self.stochastic_depth_prob,
+            "in_channels_list": list(self.in_channels_list),
+            "track": self.track,
+            "tcga_pretrained": self.tcga_pretrained,
+        }
         return meta
 
 
@@ -328,7 +396,7 @@ def _compute_evenly_spaced_stages(num_layers: int) -> Tuple[int, int, int, int]:
 
 
 class DINOv2AdapterDualHead(BaseStage2DualHead):
-    """Arm 4: DINOv2 ViT-B/14 with Spatial Prior Stem, Per-Stage LayerNorm FPN & GAP cls_head."""
+    """Arm 4 / 5 / 9: DINOv2 ViT with Spatial Prior Stem, Per-Stage LayerNorm FPN & GAP cls_head."""
 
     def __init__(
         self,
@@ -337,18 +405,36 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
         pretrained: bool = True,
         unfreeze_last_n_blocks: int = 4,
         tiny_offline_config: bool = False,
+        arch: str = "dinov2_vitb14_adapter",
+        fpn_dim: int = 128,
+        internal_scale: float = 1.0,
+        drop_path_rate: Optional[float] = None,
+        track: str = "track_a_clean",
+        tcga_pretrained: bool = False,
     ) -> None:
         super().__init__()
-        self.arch = "dinov2_vitb14_adapter"
+        if float(internal_scale) <= 0.0:
+            raise ValueError(f"internal_scale must be > 0, got {internal_scale}.")
+        if int(fpn_dim) <= 0 or int(fpn_dim) % 16 != 0:
+            raise ValueError(f"fpn_dim must be a positive multiple of 16, got {fpn_dim}.")
+        self.arch = str(arch)
         self.backbone_id = str(backbone_id)
         self.num_classes = int(num_classes)
         self.unfreeze_last_n_blocks = int(unfreeze_last_n_blocks)
         self.tiny_offline_config = bool(tiny_offline_config or not pretrained)
+        self.fpn_dim = int(fpn_dim)
+        self.internal_scale = float(internal_scale)
+        self.drop_path_rate = float(drop_path_rate) if drop_path_rate is not None else None
+        self.track = str(track)
+        self.tcga_pretrained = bool(tcga_pretrained)
 
         if pretrained:
+            fp_kwargs: Dict[str, Any] = {"output_loading_info": True}
+            if self.drop_path_rate is not None:
+                fp_kwargs["drop_path_rate"] = self.drop_path_rate
             model_and_info = Dinov2Model.from_pretrained(
                 self.backbone_id,
-                output_loading_info=True,
+                **fp_kwargs,
             )
             if isinstance(model_and_info, tuple):
                 self.backbone, loading_info = model_and_info
@@ -363,14 +449,18 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
                     f"(expected >= 200) for {self.backbone_id}."
                 )
         else:
-            cfg = Dinov2Config(
-                hidden_size=64,
-                num_hidden_layers=4,
-                num_attention_heads=4,
-                intermediate_size=128,
-                image_size=224,
-                patch_size=14,
-            )
+            patch_sz = 16 if ("vitl16" in self.arch.lower() or "phikon" in self.backbone_id.lower()) else 14
+            cfg_kwargs: Dict[str, Any] = {
+                "hidden_size": 64,
+                "num_hidden_layers": 4,
+                "num_attention_heads": 4,
+                "intermediate_size": 128,
+                "image_size": 224,
+                "patch_size": patch_sz,
+            }
+            if self.drop_path_rate is not None:
+                cfg_kwargs["drop_path_rate"] = self.drop_path_rate
+            cfg = Dinov2Config(**cfg_kwargs)
             self.backbone = Dinov2Model(cfg)
 
         self.patch_size = int(getattr(self.backbone.config, "patch_size", 14))
@@ -383,7 +473,6 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
 
         self._apply_freeze_policy()
 
-        self.fpn_dim = 128
         self.stage_norms = nn.ModuleList([nn.LayerNorm(self.hidden_size) for _ in range(4)])
         self.stage_projs = nn.ModuleList(
             [nn.Conv2d(self.hidden_size, self.fpn_dim, kernel_size=1, bias=False) for _ in range(4)]
@@ -422,7 +511,12 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
 
     def _probe_interp_pos_support(self) -> bool:
         """Probe runtime support for interpolate_pos_encoding without inspect.signature."""
-        probe = torch.zeros(1, 3, self.patch_size * 2, self.patch_size * 2)
+        first_param = next(self.backbone.parameters(), None)
+        probe_dtype = first_param.dtype if first_param is not None else torch.float32
+        probe_device = first_param.device if first_param is not None else torch.device("cpu")
+        probe = torch.zeros(
+            1, 3, self.patch_size * 2, self.patch_size * 2, dtype=probe_dtype, device=probe_device
+        )
         with torch.no_grad():
             try:
                 self.backbone(pixel_values=probe, interpolate_pos_encoding=True)
@@ -464,7 +558,17 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
         return x_pad, h, w
 
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        x_pad, orig_h, orig_w = self._pad_to_patch_multiple(x)
+        orig_h, orig_w = x.shape[2:]
+        scale_f = float(self.internal_scale)
+        do_scale = abs(scale_f - 1.0) > 1e-6
+        if do_scale:
+            scaled_h = max(1, int(round(orig_h * scale_f)))
+            scaled_w = max(1, int(round(orig_w * scale_f)))
+            x_work = F.interpolate(x, size=(scaled_h, scaled_w), mode="bilinear", align_corners=False)
+        else:
+            scaled_h, scaled_w = orig_h, orig_w
+            x_work = x
+        x_pad, _, _ = self._pad_to_patch_multiple(x_work)
         b, _, pad_h, pad_w = x_pad.shape
         h_tok = pad_h // self.patch_size
         w_tok = pad_w // self.patch_size
@@ -517,7 +621,16 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
             mode="bilinear",
             align_corners=False,
         )
-        seg_logits = logits_pad[:, :, :orig_h, :orig_w]
+        logits_scaled = logits_pad[:, :, :scaled_h, :scaled_w]
+        if do_scale:
+            seg_logits = F.interpolate(
+                logits_scaled,
+                size=(orig_h, orig_w),
+                mode="bilinear",
+                align_corners=False,
+            )
+        else:
+            seg_logits = logits_scaled
         return {"seg_logits": seg_logits, "cls_logits": cls_logits}
 
     def backbone_parameters(self) -> Iterable[nn.Parameter]:
@@ -536,10 +649,16 @@ class DINOv2AdapterDualHead(BaseStage2DualHead):
     def model_metadata(self) -> Dict[str, Any]:
         meta = super().model_metadata()
         meta["model_kwargs"] = {
+            "arch": self.arch,
             "backbone_id": self.backbone_id,
             "num_classes": self.num_classes,
             "unfreeze_last_n_blocks": self.unfreeze_last_n_blocks,
             "tiny_offline_config": self.tiny_offline_config,
+            "fpn_dim": self.fpn_dim,
+            "internal_scale": self.internal_scale,
+            "drop_path_rate": self.drop_path_rate,
+            "track": self.track,
+            "tcga_pretrained": self.tcga_pretrained,
         }
         return meta
 
@@ -553,6 +672,7 @@ class Stage2ModelEMA:
 
     def __init__(self, model: nn.Module, decay: float = 0.995) -> None:
         self.decay = float(decay)
+        self.trainable_names = {n for n, p in model.named_parameters() if p.requires_grad}
         self.shadow: Dict[str, torch.Tensor] = {
             k: v.detach().clone() for k, v in model.state_dict().items()
         }
@@ -560,6 +680,7 @@ class Stage2ModelEMA:
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
         trainable_names = {n for n, p in model.named_parameters() if p.requires_grad}
+        self.trainable_names = trainable_names
         d = self.decay
         for k, v in model.state_dict().items():
             v_det = v.detach()
@@ -589,16 +710,64 @@ class Stage2ModelEMA:
     def clean_model_state_dict(self) -> Dict[str, torch.Tensor]:
         return {k: v.detach().cpu().clone() for k, v in self.shadow.items()}
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(
+        self,
+        trainable_only: bool = False,
+        model: Optional[nn.Module] = None,
+    ) -> Dict[str, Any]:
+        if trainable_only:
+            t_names = (
+                {n for n, p in model.named_parameters() if p.requires_grad}
+                if model is not None
+                else self.trainable_names
+            )
+            shadow_out = {
+                k: v.detach().cpu().clone()
+                for k, v in self.shadow.items()
+                if k in t_names
+            }
+            return {
+                "decay": self.decay,
+                "trainable_only": True,
+                "shadow": shadow_out,
+            }
         return {
             "decay": self.decay,
+            "trainable_only": False,
             "shadow": self.clean_model_state_dict(),
         }
 
-    def load_state_dict(self, state: Dict[str, Any]) -> None:
+    def sync_non_loaded_from_model(
+        self,
+        model: nn.Module,
+        loaded_keys: Optional[Iterable[str]] = None,
+    ) -> None:
+        loaded_set = set(loaded_keys) if loaded_keys is not None else set()
+        for k, v in model.state_dict().items():
+            if k in loaded_set:
+                continue
+            v_det = v.detach()
+            if k in self.shadow:
+                self.shadow[k].copy_(
+                    v_det.to(device=self.shadow[k].device, dtype=self.shadow[k].dtype)
+                )
+            else:
+                self.shadow[k] = v_det.clone()
+
+    def load_state_dict(
+        self,
+        state: Dict[str, Any],
+        model: Optional[nn.Module] = None,
+    ) -> None:
+        if bool(state.get("trainable_only", False)) and model is None:
+            raise ValueError(
+                "Stage2ModelEMA.load_state_dict requires model=... when loading a trainable_only=True EMA state."
+            )
         if "decay" in state:
             self.decay = float(state["decay"])
         loaded_shadow = state.get("shadow", state)
+        if model is not None:
+            self.sync_non_loaded_from_model(model, loaded_keys=loaded_shadow.keys())
         for k, v in loaded_shadow.items():
             if k in self.shadow:
                 self.shadow[k].copy_(
@@ -615,23 +784,46 @@ def build_stage2_v2_model(
     """Instantiate the Stage-2 v2 dual-head model specified by cfg."""
     arch = str(cfg.arch).strip().lower()
     if arch == "deeplabv3plus_r101":
-        return DeepLabV3PlusDualHead(num_classes=cfg.num_classes, pretrained=pretrained)
-    if arch == "segformer_b3":
+        return DeepLabV3PlusDualHead(
+            num_classes=cfg.num_classes,
+            pretrained=pretrained,
+            track=cfg.track,
+            tcga_pretrained=cfg.tcga_pretrained,
+        )
+    if arch in ("segformer_b3", "segformer_b5"):
         return SegFormerDualHead(
             backbone_id=cfg.backbone_id,
             num_classes=cfg.num_classes,
             pretrained=pretrained,
             tiny_offline_config=not pretrained,
+            arch=arch,
+            drop_path_rate=cfg.drop_path_rate,
+            track=cfg.track,
+            tcga_pretrained=cfg.tcga_pretrained,
         )
-    if arch == "convnext_base_fpn":
-        return ConvNeXtFPNDualHead(num_classes=cfg.num_classes, pretrained=pretrained)
-    if arch == "dinov2_vitb14_adapter":
+    if arch in ("convnext_base_fpn", "convnext_large_fpn"):
+        return ConvNeXtFPNDualHead(
+            num_classes=cfg.num_classes,
+            pretrained=pretrained,
+            arch=arch,
+            backbone_id=cfg.backbone_id,
+            stochastic_depth_prob=cfg.stochastic_depth_prob,
+            track=cfg.track,
+            tcga_pretrained=cfg.tcga_pretrained,
+        )
+    if arch in ("dinov2_vitb14_adapter", "dinov2_vitl14_adapter", "dinov2_vitl16_adapter"):
         return DINOv2AdapterDualHead(
             backbone_id=cfg.backbone_id,
             num_classes=cfg.num_classes,
             pretrained=pretrained,
             unfreeze_last_n_blocks=cfg.unfreeze_last_n_blocks,
             tiny_offline_config=not pretrained,
+            arch=arch,
+            fpn_dim=cfg.fpn_dim,
+            internal_scale=cfg.internal_scale,
+            drop_path_rate=cfg.drop_path_rate,
+            track=cfg.track,
+            tcga_pretrained=cfg.tcga_pretrained,
         )
     raise ValueError(f"Unsupported Stage-2 v2 arch: {cfg.arch!r}.")
 
@@ -658,55 +850,112 @@ def load_stage2_v2_checkpoint(
     num_classes = int(payload.get("num_classes", 4))
     model_kwargs = dict(payload.get("model_kwargs") or {})
     tiny_cfg = bool(model_kwargs.get("tiny_offline_config", False))
+    track = str(model_kwargs.get("track") or payload.get("track") or "track_a_clean")
+    tcga_pretrained = bool(model_kwargs.get("tcga_pretrained", payload.get("tcga_pretrained", False)))
 
     if arch == "deeplabv3plus_r101":
         model: BaseStage2DualHead = DeepLabV3PlusDualHead(
             num_classes=num_classes,
             pretrained=False,
+            track=track,
+            tcga_pretrained=tcga_pretrained,
         )
-    elif arch == "segformer_b3":
+    elif arch in ("segformer_b3", "segformer_b5"):
+        bb_default = "nvidia/mit-b5" if arch == "segformer_b5" else "nvidia/mit-b3"
+        bb_resolved = str(model_kwargs.get("backbone_id") or backbone_id or bb_default)
+        dp_raw = model_kwargs.get("drop_path_rate", None)
+        dp_rate = float(dp_raw) if dp_raw is not None else None
         if tiny_cfg:
             model = SegFormerDualHead(
-                backbone_id=backbone_id or "nvidia/mit-b3",
+                backbone_id=bb_resolved,
                 num_classes=num_classes,
                 pretrained=False,
                 tiny_offline_config=True,
+                arch=arch,
+                drop_path_rate=dp_rate,
+                track=track,
+                tcga_pretrained=tcga_pretrained,
             )
         else:
-            cfg = SegformerConfig.from_pretrained(
-                backbone_id or "nvidia/mit-b3",
-                num_labels=num_classes,
-            )
+            fp_cfg_kw: Dict[str, Any] = {"num_labels": num_classes}
+            if dp_rate is not None:
+                fp_cfg_kw["drop_path_rate"] = dp_rate
+            cfg_s = SegformerConfig.from_pretrained(bb_resolved, **fp_cfg_kw)
             model = SegFormerDualHead.__new__(SegFormerDualHead)
             BaseStage2DualHead.__init__(model)
-            model.arch = "segformer_b3"
-            model.backbone_id = backbone_id or "nvidia/mit-b3"
+            model.arch = arch
+            model.backbone_id = bb_resolved
             model.num_classes = num_classes
             model.tiny_offline_config = False
-            model.segformer = SegformerForSemanticSegmentation(cfg)
+            model.drop_path_rate = dp_rate
+            model.track = track
+            model.tcga_pretrained = tcga_pretrained
+            model.segformer = SegformerForSemanticSegmentation(cfg_s)
             c4 = int(model.segformer.config.hidden_sizes[-1])
             model.cls_head = nn.Linear(c4, num_classes)
-    elif arch == "convnext_base_fpn":
-        model = ConvNeXtFPNDualHead(num_classes=num_classes, pretrained=False)
-    elif arch == "dinov2_vitb14_adapter":
-        unfreeze_n = int(model_kwargs.get("unfreeze_last_n_blocks", 4))
+    elif arch in ("convnext_base_fpn", "convnext_large_fpn"):
+        bb_default = "convnext_large" if arch == "convnext_large_fpn" else "convnext_base"
+        bb_id = str(model_kwargs.get("backbone_id") or backbone_id or bb_default)
+        sd_prob = float(model_kwargs.get("stochastic_depth_prob", 0.2))
+        model = ConvNeXtFPNDualHead(
+            num_classes=num_classes,
+            pretrained=False,
+            arch=arch,
+            backbone_id=bb_id,
+            stochastic_depth_prob=sd_prob,
+            track=track,
+            tcga_pretrained=tcga_pretrained,
+        )
+        if "in_channels_list" in model_kwargs:
+            expected_ch = [int(c) for c in model_kwargs["in_channels_list"]]
+            if expected_ch != list(model.in_channels_list):
+                raise RuntimeError(
+                    f"ConvNeXt channel mismatch in {ckpt_p}: {expected_ch} vs {model.in_channels_list}"
+                )
+    elif arch in ("dinov2_vitb14_adapter", "dinov2_vitl14_adapter", "dinov2_vitl16_adapter"):
+        bb_map = {
+            "dinov2_vitb14_adapter": "facebook/dinov2-base",
+            "dinov2_vitl14_adapter": "facebook/dinov2-large",
+            "dinov2_vitl16_adapter": "owkin/phikon-v2",
+        }
+        bb_resolved = str(model_kwargs.get("backbone_id") or backbone_id or bb_map[arch])
+        unfreeze_default = 8 if "vitl" in arch else 4
+        unfreeze_n = int(model_kwargs.get("unfreeze_last_n_blocks", unfreeze_default))
+        fpn_dim = int(model_kwargs.get("fpn_dim", 128))
+        internal_scale = float(model_kwargs.get("internal_scale", 1.0))
+        dp_raw = model_kwargs.get("drop_path_rate", None)
+        dp_rate = float(dp_raw) if dp_raw is not None else None
         if tiny_cfg:
             model = DINOv2AdapterDualHead(
-                backbone_id=backbone_id or "facebook/dinov2-base",
+                backbone_id=bb_resolved,
                 num_classes=num_classes,
                 pretrained=False,
                 unfreeze_last_n_blocks=unfreeze_n,
                 tiny_offline_config=True,
+                arch=arch,
+                fpn_dim=fpn_dim,
+                internal_scale=internal_scale,
+                drop_path_rate=dp_rate,
+                track=track,
+                tcga_pretrained=tcga_pretrained,
             )
         else:
-            cfg_d = Dinov2Config.from_pretrained(backbone_id or "facebook/dinov2-base")
+            cfg_d_kw: Dict[str, Any] = {}
+            if dp_rate is not None:
+                cfg_d_kw["drop_path_rate"] = dp_rate
+            cfg_d = Dinov2Config.from_pretrained(bb_resolved, **cfg_d_kw)
             model = DINOv2AdapterDualHead.__new__(DINOv2AdapterDualHead)
             BaseStage2DualHead.__init__(model)
-            model.arch = "dinov2_vitb14_adapter"
-            model.backbone_id = backbone_id or "facebook/dinov2-base"
+            model.arch = arch
+            model.backbone_id = bb_resolved
             model.num_classes = num_classes
             model.unfreeze_last_n_blocks = unfreeze_n
             model.tiny_offline_config = False
+            model.fpn_dim = fpn_dim
+            model.internal_scale = internal_scale
+            model.drop_path_rate = dp_rate
+            model.track = track
+            model.tcga_pretrained = tcga_pretrained
             model.backbone = Dinov2Model(cfg_d)
             model.patch_size = int(getattr(cfg_d, "patch_size", 14))
             model.hidden_size = int(cfg_d.hidden_size)
@@ -715,7 +964,6 @@ def load_stage2_v2_checkpoint(
             model.stage_indices = _compute_evenly_spaced_stages(int(cfg_d.num_hidden_layers))
             model._supports_interp_pos = model._probe_interp_pos_support()
             model._apply_freeze_policy()
-            model.fpn_dim = 128
             model.stage_norms = nn.ModuleList([nn.LayerNorm(model.hidden_size) for _ in range(4)])
             model.stage_projs = nn.ModuleList(
                 [nn.Conv2d(model.hidden_size, model.fpn_dim, 1, bias=False) for _ in range(4)]
@@ -767,11 +1015,16 @@ def load_stage2_v2_checkpoint(
 
     meta = {
         "arch": arch,
-        "backbone_id": backbone_id,
+        "backbone_id": model.backbone_id,
         "num_classes": num_classes,
         "input_norm": payload.get("input_norm", "imagenet"),
         "has_cls_head": bool(payload.get("has_cls_head", True)),
         "stage1_sha256": payload.get("stage1_sha256", ""),
+        "memmap_source": payload.get("memmap_source", ""),
+        "r2_manifest_sha256": payload.get("r2_manifest_sha256", ""),
+        "track": track,
+        "tcga_pretrained": tcga_pretrained,
+        "model_kwargs": model.model_metadata().get("model_kwargs", {}),
         "seed": payload.get("seed"),
         "preset": payload.get("preset"),
         "selected_weights": payload.get("selected_weights"),

@@ -54,6 +54,11 @@ def test_stage2_v2_presets_and_env_resolution() -> None:
         "arm2_segformer_oeem",
         "arm3_convnext_selftrain",
         "arm4_dinov2_adapter",
+        "arm5_dinov2_large_r2",
+        "arm6_segformer_b5_r2",
+        "arm7_convnext_large_r2",
+        "arm8_deeplab_r101_r2",
+        "arm9_phikon_v2_r2",
     }
     assert set(STAGE2_V2_PRESETS.keys()) == expected
     cfg_default = get_stage2_v2_preset("arm1_deeplab_cleankd")

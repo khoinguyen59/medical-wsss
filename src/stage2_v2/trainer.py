@@ -31,7 +31,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
-from src.stage2_v2.config import Stage2V2Config
+from src.stage2_v2.config import Stage2V2Config, validate_track_name
 from src.stage2_v2.evaluator import (
     calibrate_cgm_thresholds_val_only,
     evaluate_stage2_v2_model,
@@ -47,6 +47,7 @@ from src.stage2_v2.models import (
     load_stage2_v2_checkpoint,
 )
 from src.training.dataset_loader import NUM_FOREGROUND
+from src.training.eval_stage1_full import compute_file_sha256
 
 
 def _atomic_torch_save(payload: Dict[str, Any], target_path: Path) -> None:
@@ -61,6 +62,53 @@ def _atomic_write_json(payload: Dict[str, Any], target_path: Path) -> None:
     tmp_path = target_path.with_suffix(target_path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(tmp_path, target_path)
+
+
+def _resolve_memmap_source(
+    cfg: Stage2V2Config,
+    memmap_path: Union[str, Path],
+    manifest_path: Union[str, Path],
+) -> tuple[Path, Path, str, str]:
+    memmap_source = str(getattr(cfg, "memmap_source", "stage1")).strip().lower()
+    if memmap_source not in ("stage1", "ens4_r2"):
+        raise ValueError(f"Unsupported memmap_source={memmap_source!r}. Expected 'stage1' or 'ens4_r2'.")
+    track_norm = validate_track_name(str(getattr(cfg, "track", "track_a_clean")))
+    is_track_a = track_norm == "track_a_clean"
+    mm_p = Path(memmap_path)
+    man_p = Path(manifest_path)
+    if memmap_source == "ens4_r2":
+        if cfg.self_train_round2_start_epoch is not None:
+            raise ValueError(
+                "memmap_source='ens4_r2' is incompatible with self_train_round2_start_epoch != None."
+            )
+        target_dat = "pm_soft_ens4_r2.dat" if is_track_a else "pm_soft_ens4_r2_trackb.dat"
+        target_man = (
+            "pm_soft_ens4_r2_manifest.json"
+            if is_track_a
+            else "pm_soft_ens4_r2_trackb_manifest.json"
+        )
+        if is_track_a:
+            if mm_p.name == "pm_soft_s1.dat":
+                mm_p = mm_p.parent / target_dat
+            if man_p.name == "pm_soft_manifest.json":
+                man_p = man_p.parent / target_man
+        else:
+            if mm_p.name in ("pm_soft_s1.dat", "pm_soft_ens4_r2.dat"):
+                mm_p = mm_p.parent / target_dat
+            if man_p.name in ("pm_soft_manifest.json", "pm_soft_ens4_r2_manifest.json"):
+                man_p = man_p.parent / target_man
+        r2_sha = ""
+        if man_p.is_file():
+            man_obj = json.loads(man_p.read_text(encoding="utf-8"))
+            if is_track_a:
+                man_track = str(man_obj.get("track", "")).strip().lower()
+                if man_track != "track_a_clean":
+                    raise ValueError(
+                        f"[TRACK A QUARANTINE] Memmap manifest {man_p} has track={man_obj.get('track')!r}; expected 'track_a_clean'."
+                    )
+            r2_sha = compute_file_sha256(man_p)
+        return mm_p, man_p, memmap_source, r2_sha
+    return mm_p, man_p, memmap_source, ""
 
 
 def _build_train_loader(
@@ -208,8 +256,9 @@ def train_stage2_v2(
     use_scaler = use_amp and (amp_dtype == torch.float16)
     scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
 
-    active_memmap = Path(memmap_path)
-    active_manifest = Path(manifest_path)
+    active_memmap, active_manifest, memmap_source, r2_manifest_sha256 = _resolve_memmap_source(
+        cfg, memmap_path, manifest_path
+    )
     train_loader = _build_train_loader(
         cfg=cfg,
         img_dir=train_img_dir,
@@ -266,7 +315,7 @@ def train_stage2_v2(
             if "optimizer" in r_obj:
                 optimizer.load_state_dict(r_obj["optimizer"])
             if ema is not None and "ema_state_dict" in r_obj and r_obj["ema_state_dict"]:
-                ema.load_state_dict(r_obj["ema_state_dict"])
+                ema.load_state_dict(r_obj["ema_state_dict"], model=model)
             start_epoch = int(r_obj.get("epoch", 0)) + 1
             best_val_miou = float(r_obj.get("best_val_miou", -1.0))
             best_selected_weights = str(r_obj.get("selected_weights", "raw"))
@@ -517,12 +566,18 @@ def train_stage2_v2(
                     run_ms_tta=False,
                     amp_dtype=amp_dtype,
                 )
-            ema_miou = float(ema_res["raw"]["mIoU"])
+            ema_miou: Optional[float] = float(ema_res["raw"]["mIoU"])
         else:
             ema_res = raw_res
-            ema_miou = raw_miou
+            ema_miou = None
 
-        if ema is not None and ema_miou >= raw_miou:
+        force_ema_only = bool(
+            bool(cfg.use_ema)
+            and ema is not None
+            and bool(getattr(cfg, "ema_only_best_selection", False))
+            and ema_miou is not None
+        )
+        if ema is not None and ema_miou is not None and (force_ema_only or ema_miou >= raw_miou):
             sel_tag = "ema"
             ep_res = ema_res
             ep_miou = ema_miou
@@ -533,10 +588,11 @@ def train_stage2_v2(
             ep_miou = raw_miou
             export_sd = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
+        ema_miou_log = ema_miou if ema_miou is not None else raw_miou
         history["epoch"].append(epoch)
         history["train_loss"].append(round(avg_train_loss, 5))
         history["val_raw_miou"].append(round(raw_miou, 4))
-        history["val_ema_miou"].append(round(ema_miou, 4))
+        history["val_ema_miou"].append(round(ema_miou_log, 4))
         history["val_cgm_s1_miou"].append(
             float(ep_res["cgm_s1"]["mIoU"]) if "cgm_s1" in ep_res else None
         )
@@ -559,12 +615,15 @@ def train_stage2_v2(
                 "selected_weights": sel_tag,
                 "val_miou": round(float(best_val_miou), 4),
                 "stage1_sha256": str(stage1_sha256),
+                "memmap_source": memmap_source,
+                "r2_manifest_sha256": r2_manifest_sha256,
                 "state_dict": export_sd,
             }
             _atomic_torch_save(best_payload, best_ckpt_path)
         else:
             no_improve += 1
 
+        has_frozen_params = any(not p.requires_grad for p in model.parameters())
         latest_payload: Dict[str, Any] = {
             **model_meta,
             "preset": cfg.preset_name,
@@ -577,16 +636,22 @@ def train_stage2_v2(
             "round2_step": int(round2_step),
             "global_step": int(global_step),
             "stage1_sha256": str(stage1_sha256),
+            "memmap_source": memmap_source,
+            "r2_manifest_sha256": r2_manifest_sha256,
             "history": history,
             "state_dict": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
             "optimizer": optimizer.state_dict(),
-            "ema_state_dict": ema.state_dict() if ema is not None else None,
+            "ema_state_dict": (
+                ema.state_dict(trainable_only=has_frozen_params, model=model)
+                if ema is not None
+                else None
+            ),
         }
         _atomic_torch_save(latest_payload, latest_ckpt_path)
 
         print(
             f"[EPOCH {epoch:02d}] Train Loss={avg_train_loss:.4f} | Val_mIoU={ep_miou:.4f} | "
-            f"Raw_mIoU={raw_miou:.4f} | EMA_mIoU={ema_miou:.4f} | Best={best_val_miou:.4f} | "
+            f"Raw_mIoU={raw_miou:.4f} | EMA_mIoU={ema_miou_log:.4f} | Best={best_val_miou:.4f} | "
             f"Selected={sel_tag}",
             flush=True,
         )
@@ -681,6 +746,8 @@ def train_stage2_v2(
         "stop_reason": stop_reason,
         "stage1_sha256": str(stage1_sha256),
         "stage1_norm_mode": stage1_norm_mode,
+        "memmap_source": memmap_source,
+        "r2_manifest_sha256": r2_manifest_sha256,
         "history": history,
         "val_eval_fixed_0_10": val_fixed,
         "val_cgm_calibration": cal_info,

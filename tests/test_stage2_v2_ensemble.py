@@ -521,12 +521,18 @@ def test_02c_notebook_validity_and_64patch_cpu_e2e_dryrun(tmp_path: Path) -> Non
     assert "primary_4arm_no_cgm_vs_best_single_no_cgm" in report["test_pure_ensemble_diagnostic"]
 
     json_p = out_dir / "STAGE2_TRAINING_METRICS.json"
+    pp_json_p = out_dir / "per_patient_class_ious.json"
     png_p = out_dir / "stage2_training_loss.png"
-    assert json_p.is_file() and png_p.is_file() and zip_path.is_file()
+    assert json_p.is_file() and pp_json_p.is_file() and png_p.is_file() and zip_path.is_file()
     assert zip_path.stat().st_size < 1_000_000
     with zipfile.ZipFile(zip_path, "r") as zf:
         names = set(zf.namelist())
-        assert names == {"STAGE2_TRAINING_METRICS.json", "per_patient_test_metrics.csv", "stage2_training_loss.png"}
+        assert names == {
+            "STAGE2_TRAINING_METRICS.json",
+            "per_patient_class_ious.json",
+            "per_patient_test_metrics.csv",
+            "stage2_training_loss.png",
+        }
 
     # Verify INVARIANT-24 monochrome compliance on generated plot
     auditor = DeliverableAuditor(str(PROJECT_ROOT))

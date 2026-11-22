@@ -15,12 +15,15 @@ Features:
 Pure ASCII hyphen '-' only (Invariant 12).
 """
 
+import gc
 import json
 import os
 import random
+import re
 import shutil
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -31,16 +34,23 @@ from torch.utils.data import Dataset
 from torchvision.transforms import functional as TF
 
 from src.models.sg_dap import StainGuidedAffinityRefiner
-from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
-from src.stage2_v2.config import VALID_SOFT_MODES
+from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM, safe_torch_load
+from src.stage2_v2.config import VALID_SOFT_MODES, validate_track_name
 from src.training.dataset_loader import (
     IMAGENET_MEAN,
     IMAGENET_STD,
     NUM_FOREGROUND,
     extract_patient_id,
+    load_bcss_patient_splits,
     parse_patch_filename,
 )
+from src.training.eval_stage1_full import compute_file_sha256
 from src.training.train_stage2 import prepare_stage1_input
+
+TRACK_B_DENY_REGEX = re.compile(
+    r"(phikon|(?:^|[^a-z0-9])uni(?:$|[^a-z0-9])|gigapath|virchow|conch)",
+    re.IGNORECASE,
+)
 
 
 def _discover_pngs(img_dir: Path) -> List[Path]:
@@ -81,6 +91,67 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def _close_memmap(mm: Any) -> None:
+    """Flush and close numpy memmap handle cleanly for Windows file-unlink safety."""
+    if mm is None:
+        return
+    try:
+        mm.flush()
+    except Exception:
+        pass
+    inner = getattr(mm, "_mmap", None)
+    if inner is not None:
+        try:
+            inner.close()
+        except Exception:
+            pass
+
+
+def validate_track_a_teacher_checkpoint(
+    ckpt_path: Union[str, Path],
+    payload_meta: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Enforce Track A (0% TCGA pretraining) guard on a teacher checkpoint."""
+    ckpt_p = Path(ckpt_path)
+    if TRACK_B_DENY_REGEX.search(ckpt_p.name):
+        raise RuntimeError(
+            f"[TRACK A QUARANTINE ERROR] Forbidden Track B teacher checkpoint filename: {ckpt_p}"
+        )
+    if payload_meta is None:
+        if not ckpt_p.is_file():
+            raise FileNotFoundError(f"Teacher checkpoint not found: {ckpt_p}")
+        loaded = safe_torch_load(ckpt_p, device=torch.device("cpu"))
+        meta: Mapping[str, Any] = loaded if isinstance(loaded, Mapping) else {}
+    else:
+        meta = payload_meta
+
+    mk = meta.get("model_kwargs") if isinstance(meta.get("model_kwargs"), Mapping) else {}
+    if bool(meta.get("tcga_pretrained", False)) or bool(mk.get("tcga_pretrained", False)):
+        raise RuntimeError(
+            f"[TRACK A QUARANTINE ERROR] Teacher {ckpt_p} has tcga_pretrained=True."
+        )
+    for trk_val in (meta.get("track", ""), mk.get("track", "")):
+        trk_s = str(trk_val or "").strip().lower()
+        if trk_s and trk_s not in ("track_a_clean", "track_a"):
+            raise RuntimeError(
+                f"[TRACK A QUARANTINE ERROR] Teacher {ckpt_p} belongs to non-Track-A track={trk_val!r}."
+            )
+    ident = " ".join(
+        str(x)
+        for x in (
+            meta.get("arch", ""),
+            meta.get("backbone_id", ""),
+            meta.get("preset", ""),
+            mk.get("arch", ""),
+            mk.get("backbone_id", ""),
+        )
+    )
+    if TRACK_B_DENY_REGEX.search(ident):
+        raise RuntimeError(
+            f"[TRACK A QUARANTINE ERROR] Teacher {ckpt_p} uses quarantined backbone metadata: {ident!r}."
+        )
 
 
 @torch.no_grad()
@@ -128,7 +199,9 @@ def _cams_to_soft_probs(
 ) -> torch.Tensor:
     """Convert raw multi-scale bn7 CAMs to label-gated soft probabilities (B, 4, H, W)."""
     b = cam_ms.size(0)
-    gate = (y_gt.float() > 0.5).float().view(b, NUM_FOREGROUND, 1, 1)
+    raw_gate = (y_gt.float() > 0.5).float().view(b, NUM_FOREGROUND, 1, 1)
+    has_any_active = raw_gate.any(dim=1, keepdim=True)
+    gate = torch.where(has_any_active, raw_gate, torch.ones_like(raw_gate))
     cam_gated = torch.clamp(cam_ms.float(), min=0.0) * gate
     gmin = cam_gated.view(b, -1).min(dim=-1)[0].view(b, 1, 1, 1)
     gmax = cam_gated.view(b, -1).max(dim=-1)[0].view(b, 1, 1, 1)
@@ -136,6 +209,11 @@ def _cams_to_soft_probs(
     uniform_gt = gate / gate.sum(dim=1, keepdim=True).clamp(min=1.0)
 
     mode = str(soft_mode).strip().lower()
+    if mode == "ens4_r2_soft":
+        raise ValueError(
+            "soft_mode='ens4_r2_soft' is not a valid Stage-1 CAM soft_mode; "
+            "use soft_mode='sg_dap_soft' with generate_cross_family_r2_memmap()."
+        )
     if mode == "raw_l1":
         cam_sum = cam_norm.sum(dim=1, keepdim=True)
         q_soft = torch.where(
@@ -179,6 +257,7 @@ def _cams_to_soft_probs(
     else:
         raise ValueError(f"Unsupported soft_mode: {soft_mode!r}. Expected one of {VALID_SOFT_MODES}.")
 
+    q_soft = torch.where(has_any_active, q_soft, uniform_gt)
     return q_soft.clamp(0.0, 1.0)
 
 
@@ -203,6 +282,11 @@ def generate_bn7_soft_memmap(
 ) -> Tuple[Path, Path, Dict[str, Any]]:
     """Generate uint8 memmap (N, 4, 224, 224) + manifest JSON using bn7 6-view MS-TTA."""
     mode = str(soft_mode).strip().lower()
+    if mode == "ens4_r2_soft":
+        raise ValueError(
+            "soft_mode='ens4_r2_soft' is invalid for generate_bn7_soft_memmap(); "
+            "use soft_mode='sg_dap_soft' and generate_cross_family_r2_memmap()."
+        )
     if mode not in VALID_SOFT_MODES:
         raise ValueError(f"Unsupported soft_mode={soft_mode!r}. Valid: {VALID_SOFT_MODES}.")
 
@@ -367,7 +451,9 @@ def generate_round2_ema_memmap(
             y_gt = torch.from_numpy(
                 np.stack([parse_patch_filename(fn)[3] for fn in batch_fns], axis=0)
             ).float().to(dev)
-            gate = (y_gt > 0.5).float().view(-1, NUM_FOREGROUND, 1, 1)
+            raw_gate = (y_gt > 0.5).float().view(-1, NUM_FOREGROUND, 1, 1)
+            has_any_active = raw_gate.any(dim=1, keepdim=True)
+            gate = torch.where(has_any_active, raw_gate, torch.ones_like(raw_gate))
 
             # 4-view D4 TTA: orig, hflip, vflip, rot90
             views = (
@@ -402,6 +488,7 @@ def generate_round2_ema_memmap(
             q_r2 = q_r2 * gate
             r2_sum = q_r2.sum(dim=1, keepdim=True)
             q_r2 = torch.where(r2_sum > 1e-6, q_r2 / r2_sum.clamp(min=1e-6), uniform_gt)
+            q_r2 = torch.where(has_any_active, q_r2, uniform_gt)
 
             mm_r2[start:end] = np.clip(np.rint(q_r2.cpu().numpy() * 255.0), 0, 255).astype(np.uint8)
 
@@ -416,6 +503,406 @@ def generate_round2_ema_memmap(
     out_man_p = Path(output_manifest_path)
     _atomic_write_json(out_man_p, r2_manifest)
     return out_dat_p, out_man_p, r2_manifest
+
+
+@torch.no_grad()
+def generate_cross_family_r2_memmap(
+    teacher_ckpt_paths: Sequence[Union[str, Path]],
+    train_img_dir: Union[str, Path],
+    s1_memmap_path: Union[str, Path],
+    s1_manifest_path: Union[str, Path],
+    output_dir: Union[str, Path],
+    patient_ids: Optional[Sequence[str]] = None,
+    weights: Optional[Sequence[float]] = None,
+    blend: float = 0.5,
+    r2_temp: float = 1.0,
+    tail_noise_thresh: float = 1e-2,
+    track: str = "track_a_clean",
+    batch_size: int = 16,
+    device: Optional[torch.device] = None,
+    amp_dtype: Optional[torch.dtype] = None,
+    max_samples: Optional[int] = None,
+    strict_patient_filter: bool = True,
+    min_free_gb: float = 24.0,
+    dat_filename: Optional[str] = None,
+    manifest_filename: Optional[str] = None,
+    force: bool = False,
+) -> Tuple[Path, Path, Dict[str, Any]]:
+    """Generate isolated Gate-7 Track A Round-2 cross-family soft memmap (pm_soft_ens4_r2.dat)."""
+    track_norm = validate_track_name(track)
+    enforce_track_a = track_norm == "track_a_clean"
+    if dat_filename is None:
+        dat_filename = "pm_soft_ens4_r2.dat" if enforce_track_a else "pm_soft_ens4_r2_trackb.dat"
+    if manifest_filename is None:
+        manifest_filename = (
+            "pm_soft_ens4_r2_manifest.json"
+            if enforce_track_a
+            else "pm_soft_ens4_r2_trackb_manifest.json"
+        )
+    if len(teacher_ckpt_paths) == 0:
+        raise ValueError("teacher_ckpt_paths must contain at least 1 teacher checkpoint.")
+    n_teachers = len(teacher_ckpt_paths)
+    if weights is None:
+        w_list = [1.0 / float(n_teachers)] * n_teachers
+    else:
+        if len(weights) != n_teachers:
+            raise ValueError(
+                f"weights length {len(weights)} != teacher_ckpt_paths length {n_teachers}."
+            )
+        w_list = [float(w) for w in weights]
+    if any(w < 0.0 for w in w_list) or abs(sum(w_list) - 1.0) > 1e-5:
+        raise ValueError(f"weights must be non-negative and sum to 1.0, got {w_list}.")
+    alpha = float(blend)
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError(f"blend must be in [0, 1], got {blend}.")
+    temp_val = float(r2_temp)
+    if temp_val <= 0.0:
+        raise ValueError(f"r2_temp must be > 0, got {r2_temp}.")
+    tail_thresh = float(tail_noise_thresh)
+
+    out_dir_p = Path(output_dir)
+    out_dir_p.mkdir(parents=True, exist_ok=True)
+    out_dat_p = (out_dir_p / dat_filename).resolve()
+    out_man_p = out_dir_p / manifest_filename
+    s1_dat_p = Path(s1_memmap_path).resolve()
+    s1_man_p = Path(s1_manifest_path)
+
+    if out_dat_p == s1_dat_p or out_dat_p.name in ("pm_soft_s1.dat", "pm_soft_r2.dat"):
+        raise ValueError(
+            f"Isolated Gate-7 R2 output memmap must differ from Stage-1/Arm-3 memmaps, got {out_dat_p}."
+        )
+
+    teacher_paths = [Path(p) for p in teacher_ckpt_paths]
+    teacher_sha256s: List[str] = []
+    for p in teacher_paths:
+        if not p.is_file():
+            raise FileNotFoundError(f"Teacher checkpoint not found: {p}")
+        if enforce_track_a:
+            validate_track_a_teacher_checkpoint(p)
+        teacher_sha256s.append(compute_file_sha256(p))
+
+    splits = load_bcss_patient_splits()
+    val_test_pids = {str(p).upper() for p in splits["val"]} | {str(p).upper() for p in splits["test"]}
+    eff_patient_ids: Optional[Sequence[str]] = patient_ids
+    if eff_patient_ids is None and strict_patient_filter:
+        eff_patient_ids = splits["train"]
+
+    allowed_upper: Optional[set[str]] = None
+    if eff_patient_ids is not None:
+        allowed_upper = {str(p).upper() for p in eff_patient_ids}
+        if not allowed_upper.isdisjoint(val_test_pids):
+            bad = sorted(allowed_upper & val_test_pids)
+            raise RuntimeError(
+                f"[STAGE2 ANTI-LEAKAGE ERROR] generate_cross_family_r2_memmap received val/test patients: {bad[:5]}"
+            )
+
+    s1_man = json.loads(s1_man_p.read_text(encoding="utf-8"))
+    filenames: List[str] = list(s1_man.get("filenames", []))
+    if max_samples is not None:
+        filenames = filenames[: int(max_samples)]
+    n_patches = len(filenames)
+    if n_patches == 0:
+        raise RuntimeError("Empty Stage-1 manifest for generate_cross_family_r2_memmap.")
+
+    expected_s1_bytes = n_patches * NUM_FOREGROUND * 224 * 224
+    if not s1_dat_p.is_file() or s1_dat_p.stat().st_size < expected_s1_bytes:
+        raise RuntimeError(
+            f"Stage-1 memmap {s1_dat_p} missing or smaller than expected {expected_s1_bytes} bytes."
+        )
+
+    for fn in filenames:
+        pid = extract_patient_id(fn).upper()
+        if pid in val_test_pids:
+            raise RuntimeError(
+                f"[STAGE2 ANTI-LEAKAGE ERROR] Patch {fn!r} belongs to val/test patient {pid!r}."
+            )
+        if strict_patient_filter and allowed_upper is not None and pid not in allowed_upper:
+            raise RuntimeError(
+                f"[STAGE2 ANTI-LEAKAGE ERROR] Patch {fn!r} (patient {pid!r}) is not in allowed train patients."
+            )
+
+    file_lookup = {p.name: p for p in _discover_pngs(Path(train_img_dir))}
+    missing_files = [fn for fn in filenames if fn not in file_lookup]
+    if missing_files:
+        raise RuntimeError(
+            f"generate_cross_family_r2_memmap missing {len(missing_files)} PNGs, e.g. {missing_files[0]}"
+        )
+
+    s1_memmap_sha256 = compute_file_sha256(s1_dat_p)
+    s1_manifest_sha256 = compute_file_sha256(s1_man_p)
+    stage1_sha256 = str(s1_man.get("stage1_sha256", ""))
+    expected_bytes = n_patches * NUM_FOREGROUND * 224 * 224
+
+    if not force and out_dat_p.is_file() and out_man_p.is_file():
+        try:
+            cached = json.loads(out_man_p.read_text(encoding="utf-8"))
+            if (
+                cached.get("teacher_sha256s") == teacher_sha256s
+                and cached.get("s1_memmap_sha256") == s1_memmap_sha256
+                and cached.get("s1_manifest_sha256") == s1_manifest_sha256
+                and int(cached.get("num_patches", -1)) == n_patches
+                and cached.get("filenames") == filenames
+                and abs(float(cached.get("blend", -1.0)) - alpha) < 1e-6
+                and abs(float(cached.get("r2_temp", -1.0)) - temp_val) < 1e-6
+                and abs(float(cached.get("tail_noise_thresh", -1.0)) - tail_thresh) < 1e-9
+                and cached.get("weights") == w_list
+                and str(cached.get("track", "")) == track_norm
+                and out_dat_p.stat().st_size == expected_bytes
+            ):
+                return out_dat_p, out_man_p, cached
+        except Exception:
+            pass
+
+    if n_patches > 256:
+        free_gb = shutil.disk_usage(out_dir_p).free / float(1024**3)
+        if free_gb < float(min_free_gb):
+            raise RuntimeError(
+                f"[STAGE2 ERROR] Insufficient NVMe disk space in {out_dir_p}: "
+                f"{free_gb:.2f} GB free (< {min_free_gb:.1f} GB required)."
+            )
+
+    dev = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = dev.type == "cuda" and amp_dtype is not None
+    mean_t = torch.tensor(IMAGENET_MEAN, device=dev, dtype=torch.float32).view(1, 3, 1, 1)
+    std_t = torch.tensor(IMAGENET_STD, device=dev, dtype=torch.float32).view(1, 3, 1, 1)
+
+    out_man_p.unlink(missing_ok=True)
+    mm_r2 = np.memmap(out_dat_p, dtype=np.uint8, mode="w+", shape=(n_patches, NUM_FOREGROUND, 224, 224))
+    mm_s1: Optional[np.memmap] = None
+    acc_mm: Optional[np.memmap] = None
+    tmp_acc_path: Optional[Path] = None
+
+    multi_indices: List[int] = []
+    multi_labels: List[np.ndarray] = []
+    single_count = 0
+    zero_label_count = 0
+    teacher_infos: List[Dict[str, Any]] = []
+    tail_noise_fallback_pixels = 0
+    total_multi_pixels = 0
+    ent_p_ens4_sum = 0.0
+    ent_q_r2_sum = 0.0
+    disagree_pixels = 0
+
+    try:
+        for idx, fn in enumerate(filenames):
+            _, _, _, y_gt = parse_patch_filename(fn)
+            y_sum = int((y_gt > 0.5).sum())
+            if y_sum == 1:
+                y_norm = y_gt / max(float(y_gt.sum()), 1.0)
+                one_hot = np.clip(np.rint(y_norm * 255.0), 0, 255).astype(np.uint8)
+                mm_r2[idx] = np.broadcast_to(one_hot[:, None, None], (NUM_FOREGROUND, 224, 224))
+                single_count += 1
+            elif y_sum == 0:
+                mm_r2[idx] = np.full((NUM_FOREGROUND, 224, 224), 64, dtype=np.uint8)
+                zero_label_count += 1
+            else:
+                multi_indices.append(idx)
+                multi_labels.append(y_gt)
+
+        bs = max(1, int(batch_size))
+        n_multi = len(multi_indices)
+
+        if n_multi > 0:
+            from src.stage2_v2.models import load_stage2_v2_checkpoint
+
+            with tempfile.NamedTemporaryFile(
+                dir=out_dir_p,
+                prefix=".tmp_ens4_r2_fp32_",
+                suffix=".dat",
+                delete=False,
+            ) as tfp:
+                tmp_acc_path = Path(tfp.name)
+
+            acc_mm = np.memmap(
+                tmp_acc_path,
+                dtype=np.float32,
+                mode="w+",
+                shape=(n_multi, NUM_FOREGROUND, 224, 224),
+            )
+            acc_mm[:] = 0.0
+
+            for t_idx, (ckpt_p, t_sha) in enumerate(zip(teacher_paths, teacher_sha256s)):
+                teacher_model = None
+                try:
+                    teacher_model, t_meta = load_stage2_v2_checkpoint(
+                        ckpt_p, device=dev, strict=True
+                    )
+                    if enforce_track_a:
+                        validate_track_a_teacher_checkpoint(ckpt_p, payload_meta=t_meta)
+                    teacher_model.eval()
+                    teacher_infos.append(
+                        {
+                            "path": str(ckpt_p),
+                            "name": ckpt_p.name,
+                            "sha256": t_sha,
+                            "arch": str(t_meta.get("arch", "")),
+                            "backbone_id": str(t_meta.get("backbone_id", "")),
+                            "weight": w_list[t_idx],
+                        }
+                    )
+
+                    w_t = float(w_list[t_idx])
+                    for m_start in range(0, n_multi, bs):
+                        m_end = min(n_multi, m_start + bs)
+                        b_idxs = multi_indices[m_start:m_end]
+                        rgb_01 = torch.stack(
+                            [_load_rgb_01(file_lookup[filenames[i]]) for i in b_idxs], dim=0
+                        ).to(dev)
+                        imgs_norm = (rgb_01 - mean_t) / std_t
+
+                        views = (
+                            imgs_norm,
+                            torch.flip(imgs_norm, dims=[-1]),
+                            torch.flip(imgs_norm, dims=[-2]),
+                            torch.rot90(imgs_norm, k=1, dims=[-2, -1]),
+                        )
+                        probs_sum = torch.zeros(
+                            (imgs_norm.size(0), NUM_FOREGROUND, 224, 224),
+                            device=dev,
+                            dtype=torch.float32,
+                        )
+                        for v_idx, x_v in enumerate(views):
+                            with torch.amp.autocast(
+                                device_type=dev.type, dtype=amp_dtype, enabled=use_amp
+                            ):
+                                out_v = teacher_model(x_v)
+                            lg_v = out_v["seg_logits"] if isinstance(out_v, dict) else out_v
+                            pr_v = torch.softmax(lg_v[:, :NUM_FOREGROUND].float(), dim=1)
+                            if v_idx == 1:
+                                pr_v = torch.flip(pr_v, dims=[-1])
+                            elif v_idx == 2:
+                                pr_v = torch.flip(pr_v, dims=[-2])
+                            elif v_idx == 3:
+                                pr_v = torch.rot90(pr_v, k=3, dims=[-2, -1])
+                            probs_sum = probs_sum + pr_v
+
+                        p_d4 = (probs_sum / 4.0).cpu().numpy()
+                        acc_mm[m_start:m_end] = acc_mm[m_start:m_end] + w_t * p_d4
+                finally:
+                    del teacher_model
+                    gc.collect()
+                    if dev.type == "cuda":
+                        torch.cuda.empty_cache()
+
+            acc_mm.flush()
+            mm_s1 = np.memmap(
+                s1_dat_p, dtype=np.uint8, mode="r", shape=(n_patches, NUM_FOREGROUND, 224, 224)
+            )
+            for m_start in range(0, n_multi, bs):
+                m_end = min(n_multi, m_start + bs)
+                b_idxs = multi_indices[m_start:m_end]
+                b_lbls = multi_labels[m_start:m_end]
+
+                p_ens4 = torch.from_numpy(np.array(acc_mm[m_start:m_end], dtype=np.float32))
+                q_s1 = torch.from_numpy(np.array(mm_s1[b_idxs], dtype=np.float32) / 255.0)
+                y_batch = torch.from_numpy(np.stack(b_lbls, axis=0)).float()
+
+                if abs(temp_val - 1.0) > 1e-6:
+                    p_ens4 = p_ens4.clamp(min=1e-8) ** (1.0 / temp_val)
+                    p_ens4 = p_ens4 / p_ens4.sum(dim=1, keepdim=True).clamp(min=1e-8)
+
+                raw_gate = (y_batch > 0.5).float().view(-1, NUM_FOREGROUND, 1, 1)
+                has_any = raw_gate.any(dim=1, keepdim=True)
+                gate = torch.where(has_any, raw_gate, torch.ones_like(raw_gate))
+                uniform_gt = gate / gate.sum(dim=1, keepdim=True).clamp(min=1.0)
+
+                q_s1_g = q_s1 * gate
+                q_s1_sum = q_s1_g.sum(dim=1, keepdim=True)
+                q_s1_norm = torch.where(
+                    q_s1_sum > 1e-6, q_s1_g / q_s1_sum.clamp(min=1e-6), uniform_gt
+                )
+
+                # Average 4 teachers FIRST (p_ens4), gate by y_gt SECOND (p_g), guard tail noise
+                p_g = p_ens4 * gate
+                p_sum = p_g.sum(dim=1, keepdim=True)
+                tail_mask = p_sum < tail_thresh
+                tail_noise_fallback_pixels += int(tail_mask.sum().item())
+                p_ens4_norm = torch.where(
+                    tail_mask,
+                    q_s1_norm,
+                    p_g / p_sum.clamp(min=tail_thresh),
+                )
+
+                q_r2 = (1.0 - alpha) * q_s1_norm + alpha * p_ens4_norm
+                q_r2 = q_r2 * gate
+                r2_sum = q_r2.sum(dim=1, keepdim=True)
+                q_r2 = torch.where(r2_sum > 1e-6, q_r2 / r2_sum.clamp(min=1e-6), uniform_gt)
+
+                # Multi-class pixel statistics
+                px_count = int(p_ens4.size(0) * p_ens4.size(2) * p_ens4.size(3))
+                total_multi_pixels += px_count
+                p_u_clip = p_ens4.clamp(min=1e-7, max=1.0)
+                ent_p_ens4_sum += float(-(p_u_clip * torch.log(p_u_clip)).sum(dim=1).sum().item())
+                q_r2_clip = q_r2.clamp(min=1e-7, max=1.0)
+                ent_q_r2_sum += float(-(q_r2_clip * torch.log(q_r2_clip)).sum(dim=1).sum().item())
+                disagree_pixels += int(
+                    (p_ens4.argmax(dim=1) != q_s1_norm.argmax(dim=1)).sum().item()
+                )
+
+                q_u8 = np.clip(np.rint(q_r2.numpy() * 255.0), 0, 255).astype(np.uint8)
+                for local_i, mem_i in enumerate(b_idxs):
+                    mm_r2[mem_i] = q_u8[local_i]
+
+        mm_r2.flush()
+    finally:
+        _close_memmap(acc_mm)
+        del acc_mm
+        if tmp_acc_path is not None:
+            try:
+                tmp_acc_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        _close_memmap(mm_s1)
+        del mm_s1
+        _close_memmap(mm_r2)
+        del mm_r2
+
+    mean_ent_p_ens4 = round(
+        ent_p_ens4_sum / float(max(1, total_multi_pixels)), 6
+    ) if total_multi_pixels > 0 else 0.0
+    mean_ent_q_r2 = round(
+        ent_q_r2_sum / float(max(1, total_multi_pixels)), 6
+    ) if total_multi_pixels > 0 else 0.0
+    argmax_disagree = round(
+        float(disagree_pixels) / float(max(1, total_multi_pixels)), 6
+    ) if total_multi_pixels > 0 else 0.0
+    frac_psum_lt = round(
+        float(tail_noise_fallback_pixels) / float(max(1, total_multi_pixels)), 6
+    ) if total_multi_pixels > 0 else 0.0
+
+    memmap_sha256 = compute_file_sha256(out_dat_p)
+    train_pid_count = len({extract_patient_id(fn) for fn in filenames})
+    manifest: Dict[str, Any] = {
+        "filenames": filenames,
+        "num_patches": n_patches,
+        "shape": [n_patches, NUM_FOREGROUND, 224, 224],
+        "dtype": "uint8",
+        "memmap_sha256": memmap_sha256,
+        "s1_memmap_sha256": s1_memmap_sha256,
+        "s1_manifest_sha256": s1_manifest_sha256,
+        "stage1_sha256": stage1_sha256,
+        "teacher_sha256s": teacher_sha256s,
+        "teacher_checkpoints": teacher_infos,
+        "track": track_norm,
+        "fusion_mode": "uncal_linear",
+        "beta": 1.0,
+        "weights": w_list,
+        "r2_temp": temp_val,
+        "blend": alpha,
+        "tail_noise_thresh": tail_thresh,
+        "tta_views": ["orig", "hflip", "vflip", "rot90"],
+        "train_patient_count": train_pid_count,
+        "single_label_short_circuit": single_count,
+        "zero_label_patches": zero_label_count,
+        "multi_label_computed": len(multi_indices),
+        "tail_noise_fallback_pixels": tail_noise_fallback_pixels,
+        "mean_entropy_p_ens4_uncal": mean_ent_p_ens4,
+        "mean_entropy_q_r2": mean_ent_q_r2,
+        "argmax_disagreement_p_ens4_vs_s1": argmax_disagree,
+        "frac_pixels_psum_lt_0_01": frac_psum_lt,
+    }
+    _atomic_write_json(out_man_p, manifest)
+    return out_dat_p, out_man_p, manifest
 
 
 class BCSSSoftMemmapDataset(Dataset):
@@ -550,11 +1037,17 @@ class BCSSSoftMemmapDataset(Dataset):
                 img_01 = TF.gaussian_blur(img_01, kernel_size=[3, 3], sigma=[0.1, 1.0]).clamp(0.0, 1.0)
 
         # Re-mask and re-normalize q_soft strictly onto active GT classes
-        gate = (y_gt > 0.5).float().view(NUM_FOREGROUND, 1, 1)
+        raw_gate = (y_gt > 0.5).float().view(NUM_FOREGROUND, 1, 1)
+        has_any_active = bool(raw_gate.any().item())
+        gate = raw_gate if has_any_active else torch.ones_like(raw_gate)
         q_soft = q_soft * gate
         q_sum = q_soft.sum(dim=0, keepdim=True)
         uniform_gt = gate / gate.sum(dim=0, keepdim=True).clamp(min=1.0)
-        q_soft = torch.where(q_sum > 1e-6, q_soft / q_sum.clamp(min=1e-6), uniform_gt)
+        q_soft = (
+            torch.where(q_sum > 1e-6, q_soft / q_sum.clamp(min=1e-6), uniform_gt)
+            if has_any_active
+            else uniform_gt
+        )
 
         mean_t = torch.tensor(IMAGENET_MEAN, dtype=torch.float32).view(3, 1, 1)
         std_t = torch.tensor(IMAGENET_STD, dtype=torch.float32).view(3, 1, 1)

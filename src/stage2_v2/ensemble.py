@@ -26,6 +26,7 @@ import gc
 import json
 import math
 import os
+import re
 import tempfile
 import zipfile
 from pathlib import Path
@@ -47,6 +48,7 @@ from src.models.wsss_inference_methods import (
     WSSSTissueStage1NetCAM,
     build_and_load_deeplabv3plus,
 )
+from src.stage2_v2.config import STAGE2_V2_PRESETS, validate_track_name
 from src.stage2_v2.evaluator import (
     _apply_logit_cgm,
     _apply_prob_cgm,
@@ -55,6 +57,7 @@ from src.stage2_v2.evaluator import (
     _make_cgm_gate,
     _ms_tta_probs,
 )
+from src.stage2_v2.memmap_dataset import validate_track_a_teacher_checkpoint
 from src.stage2_v2.models import BaseStage2DualHead, load_stage2_v2_checkpoint
 from src.training.dataset_loader import FOREGROUND_CLASSES, NUM_FOREGROUND, extract_patient_id
 from src.training.eval_stage1_full import compute_file_sha256, load_stage1_strict
@@ -97,7 +100,76 @@ DEFAULT_ARM_FAMILIES: Dict[str, str] = {
     "arm2_segformer_oeem": "vit",
     "arm3_convnext_selftrain": "cnn",
     "arm4_dinov2_adapter": "vit",
+    "arm5_dinov2_large_r2": "vit",
+    "arm6_segformer_b5_r2": "vit",
+    "arm7_convnext_large_r2": "cnn",
+    "arm8_deeplab_r101_r2": "cnn",
+    "arm9_phikon_v2_r2": "vit",
 }
+
+TRACK_B_DENY_REGEX = re.compile(
+    r"(phikon|(?:^|[^a-z0-9])uni(?:$|[^a-z0-9])|gigapath|virchow|conch)",
+    re.IGNORECASE,
+)
+
+
+def validate_track_a_arm_spec(
+    arm_meta: Mapping[str, Any],
+    track: str = "track_a_clean",
+) -> None:
+    """Enforce Track A (0% TCGA pretraining) quarantine guard on arm specs and loaded metadata."""
+    track_norm = validate_track_name(track)
+    if track_norm != "track_a_clean":
+        return
+
+    mk = arm_meta.get("model_kwargs") if isinstance(arm_meta.get("model_kwargs"), Mapping) else {}
+    arm_name = str(arm_meta.get("name", "")).strip().lower()
+    preset_cfg = STAGE2_V2_PRESETS.get(arm_name)
+    model_obj = arm_meta.get("model")
+
+    tcga_flags = [
+        bool(arm_meta.get("tcga_pretrained", False)),
+        bool(mk.get("tcga_pretrained", False)),
+        bool(getattr(preset_cfg, "tcga_pretrained", False)) if preset_cfg is not None else False,
+        bool(getattr(model_obj, "tcga_pretrained", False)) if model_obj is not None else False,
+    ]
+    if any(tcga_flags):
+        raise ValueError(
+            f"[TRACK A QUARANTINE] Arm {arm_meta.get('name', '<unknown>')!r} has tcga_pretrained=True under {track_norm!r}."
+        )
+
+    track_vals = [
+        arm_meta.get("track", ""),
+        mk.get("track", ""),
+        getattr(preset_cfg, "track", "") if preset_cfg is not None else "",
+        getattr(model_obj, "track", "") if model_obj is not None else "",
+    ]
+    for tv in track_vals:
+        tv_s = str(tv or "").strip().lower()
+        if tv_s and tv_s not in ("track_a_clean", "track_a"):
+            raise ValueError(
+                f"[TRACK A QUARANTINE] Arm {arm_meta.get('name', '<unknown>')!r} has non-Track-A track={tv!r}."
+            )
+
+    ckpt_name = Path(str(arm_meta.get("ckpt_path", ""))).name if arm_meta.get("ckpt_path") else ""
+    ident_tokens = [
+        str(arm_meta.get("name", "")),
+        str(arm_meta.get("preset", "")),
+        str(arm_meta.get("arch", "")),
+        str(arm_meta.get("backbone_id", "")),
+        str(mk.get("arch", "")),
+        str(mk.get("backbone_id", "")),
+        ckpt_name,
+        str(getattr(preset_cfg, "arch", "")) if preset_cfg is not None else "",
+        str(getattr(preset_cfg, "backbone_id", "")) if preset_cfg is not None else "",
+        str(getattr(model_obj, "arch", "")) if model_obj is not None else "",
+        str(getattr(model_obj, "backbone_id", "")) if model_obj is not None else "",
+    ]
+    ident = " ".join(ident_tokens)
+    if TRACK_B_DENY_REGEX.search(ident):
+        raise ValueError(
+            f"[TRACK A QUARANTINE] Arm {arm_meta.get('name', '<unknown>')!r} matched Track B deny-list: {ident!r}."
+        )
 
 SHA256_STAGE1_BEST_CLS = "e1a88293aff0a0e3b8422b08140346464ea4c95fddb301aac71ad5a860c7dfb2"
 SHA256_STAGE1_RETRAINED = "a182d8890c09d7b88ee06810769ed7ac1bd84280df0beddb7898d5a43125de0b"
@@ -1939,8 +2011,17 @@ def save_ensemble_comparison_plot(
     err_lo = np.maximum(0.0, pts - np.asarray([e[2] for e in entries], dtype=np.float64))
     err_hi = np.maximum(0.0, np.asarray([e[3] for e in entries], dtype=np.float64) - pts)
 
-    shades = ["#B8B8B8", "#909090", "#707070", "#555555", "#383838", "#000000"]
-    hatches = ["", "//", "\\\\", "xx", "..", ""]
+    shades = [
+        "#E0E0E0",
+        "#C4C4C4",
+        "#A8A8A8",
+        "#8C8C8C",
+        "#707070",
+        "#545454",
+        "#343434",
+        "#000000",
+    ]
+    hatches = ["", "//", "\\\\", "xx", "..", "++", "--", ""]
     n = len(labels)
 
     fig, ax = plt.subplots(figsize=(10.5, 4.8), dpi=300, facecolor="#FFFFFF")
@@ -2018,8 +2099,10 @@ def _stream_split_models(
     amp_dtype: Optional[torch.dtype] = None,
     select_tta_on_split: bool = False,
     include_d4_cls: bool = False,
+    track: str = "track_a_clean",
 ) -> Dict[str, Any]:
     """Stream 1 arm at a time on GPU -> centered float16 log-prob memmaps + cls probs + gt/y_gt."""
+    track_norm = validate_track_name(track)
     n_patches = len(loader.dataset)  # type: ignore[arg-type]
     gt_all: Optional[np.ndarray] = None
     h = 0
@@ -2054,26 +2137,40 @@ def _stream_split_models(
 
     for m_idx, spec in enumerate(arm_specs):
         arm_name = str(spec["name"])
-        mm_path = memmap_dir / f"{split_tag}_{m_idx}_{arm_name}.dat"
-        mm = np.memmap(mm_path, dtype=np.float16, mode="w+", shape=(n_patches, NUM_FOREGROUND, h, w))
+        validate_track_a_arm_spec(spec, track=track_norm)
+        if track_norm == "track_a_clean" and spec.get("ckpt_path") and Path(str(spec["ckpt_path"])).is_file():
+            validate_track_a_teacher_checkpoint(spec["ckpt_path"])
 
-        model_obj: Optional[BaseStage2DualHead] = spec.get("model")
+        mm_path = memmap_dir / f"{split_tag}_{m_idx}_{arm_name}.dat"
+        mm: Optional[np.memmap] = None
+        model_obj: Optional[BaseStage2DualHead] = None
         loaded_here = False
-        if model_obj is None:
-            model_obj, ck_meta = load_stage2_v2_checkpoint(spec["ckpt_path"], device=device, strict=True)
-            ck_meta["ckpt_sha256"] = compute_file_sha256(spec["ckpt_path"])
-            loaded_here = True
-        else:
-            model_obj = model_obj.to(device).eval()
-            ck_meta = model_obj.model_metadata()
-            ck_meta["ckpt_sha256"] = ""
-        arm_metas.append({"name": arm_name, "family": spec.get("family", "unknown"), **ck_meta})
 
         cls_1x_arr = np.zeros((n_patches, NUM_FOREGROUND), dtype=np.float32)
         cls_d4_arr = np.zeros((n_patches, NUM_FOREGROUND), dtype=np.float32)
         cls_tta_arr = np.zeros((n_patches, NUM_FOREGROUND), dtype=np.float32)
 
         try:
+            spec_model = spec.get("model")
+            if spec_model is None:
+                model_obj, ck_meta = load_stage2_v2_checkpoint(spec["ckpt_path"], device=device, strict=True)
+                ck_meta["ckpt_sha256"] = compute_file_sha256(spec["ckpt_path"])
+                loaded_here = True
+            else:
+                model_obj = spec_model.to(device).eval()
+                ck_meta = model_obj.model_metadata()
+                ck_meta["ckpt_sha256"] = ""
+            validate_track_a_arm_spec(
+                {
+                    "name": arm_name,
+                    **ck_meta,
+                    "ckpt_path": spec.get("ckpt_path", ""),
+                    "model": model_obj,
+                },
+                track=track_norm,
+            )
+            arm_metas.append({"name": arm_name, "family": spec.get("family", "unknown"), **ck_meta})
+            mm = np.memmap(mm_path, dtype=np.float16, mode="w+", shape=(n_patches, NUM_FOREGROUND, h, w))
             if select_tta_on_split:
                 cand_inter = {t: np.zeros(NUM_FOREGROUND, dtype=np.int64) for t in TTA_CANDIDATES}
                 cand_union = {t: np.zeros(NUM_FOREGROUND, dtype=np.int64) for t in TTA_CANDIDATES}
@@ -2175,12 +2272,14 @@ def _stream_split_models(
                         pos += b
                 mm.flush()
         finally:
-            _close_memmap(mm)
-            del mm
-            if loaded_here:
-                del model_obj
-            else:
-                model_obj.cpu()
+            if mm is not None:
+                _close_memmap(mm)
+                del mm
+            if model_obj is not None:
+                if loaded_here:
+                    del model_obj
+                else:
+                    model_obj.cpu()
             if loaded_here and device.type == "cuda":
                 gc.collect()
             if device.type == "cuda":
@@ -2278,10 +2377,19 @@ def run_stage2_v2_ensemble_eval(
     val_patient_ids: Optional[Sequence[str]] = None,
     test_patient_ids: Optional[Sequence[str]] = None,
     before_test_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+    track: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run complete zero-leakage 4-arm cross-family ensemble evaluation and export artifacts."""
     if len(arm_specs) != 4:
         raise ValueError(f"Expected exactly 4 Stage-2 arms, got {len(arm_specs)}")
+    raw_track = (
+        track if track is not None else (os.environ.get("STAGE2_TRACK", "").strip() or "track_a_clean")
+    )
+    track_norm = validate_track_name(raw_track)
+    for s in arm_specs:
+        validate_track_a_arm_spec(s, track=track_norm)
+        if track_norm == "track_a_clean" and s.get("ckpt_path") and Path(str(s["ckpt_path"])).is_file():
+            validate_track_a_teacher_checkpoint(s["ckpt_path"])
     dev = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -2322,6 +2430,7 @@ def run_stage2_v2_ensemble_eval(
             split_tag="val",
             amp_dtype=amp_dtype,
             select_tta_on_split=True,
+            track=track_norm,
         )
         val_unique_pids, val_pidx, val_folds = build_patient_folds(
             v_pids, val_stream["nec_pixels"], n_folds=5
@@ -2556,6 +2665,7 @@ def run_stage2_v2_ensemble_eval(
             amp_dtype=amp_dtype,
             select_tta_on_split=False,
             include_d4_cls=(val_protocol_selection["selected_cls_source"] == "cls_d4"),
+            track=track_norm,
         )
         test_unique_pids, test_pidx, _ = build_patient_folds(
             t_pids, test_stream["nec_pixels"], n_folds=5
@@ -2939,6 +3049,80 @@ def run_stage2_v2_ensemble_eval(
         plot_path = out_dir / "stage2_training_loss.png"
         save_ensemble_comparison_plot(plot_entries, plot_path)
 
+        def _build_patient_class_iou_entry(
+            inter_p: np.ndarray,
+            union_p: np.ndarray,
+        ) -> Dict[str, Any]:
+            inter_a = np.asarray(inter_p, dtype=np.int64)
+            union_a = np.asarray(union_p, dtype=np.int64)
+            n_pat = int(inter_a.shape[0])
+            pp_class_ious: List[List[Optional[float]]] = []
+            for p in range(n_pat):
+                row_ious: List[Optional[float]] = []
+                for c in range(NUM_FOREGROUND):
+                    u_val = int(union_a[p, c])
+                    if u_val > 0:
+                        row_ious.append(round(float(inter_a[p, c]) / float(u_val), 6))
+                    else:
+                        row_ious.append(None)
+                pp_class_ious.append(row_ious)
+            pp_miou = [round(float(x), 6) for x in compute_per_patient_miou(inter_a, union_a)]
+            tot_i = inter_a.sum(axis=0)
+            tot_u = union_a.sum(axis=0)
+            pooled_miou = round(compute_macro_miou_from_iu(tot_i, tot_u), 6)
+            pooled_cls = [
+                round(float(tot_i[c]) / float(tot_u[c]), 6) if int(tot_u[c]) > 0 else None
+                for c in range(NUM_FOREGROUND)
+            ]
+            return {
+                "inter_p": inter_a.tolist(),
+                "union_p": union_a.tolist(),
+                "per_patient_class_ious": pp_class_ious,
+                "per_patient_miou": pp_miou,
+                "pooled_miou": pooled_miou,
+                "pooled_class_ious": pooled_cls,
+            }
+
+        per_patient_class_ious_payload: Dict[str, Any] = {
+            "patient_ids": list(test_unique_pids),
+            "class_names": list(FOREGROUND_CLASSES),
+            "class_keys": list(_CLS_LOWER),
+            "primary_4arm": _build_patient_class_iou_entry(
+                primary_entry["inter_p"], primary_entry["union_p"]
+            ),
+            "equal_4arm": _build_patient_class_iou_entry(
+                equal_entry["inter_p"], equal_entry["union_p"]
+            ),
+            "simplex_cv_4arm": _build_patient_class_iou_entry(
+                simplex_4arm_res[primary_mode_key]["inter_p"],
+                simplex_4arm_res[primary_mode_key]["union_p"],
+            ),
+            "individual_arms": {
+                a_name: _build_patient_class_iou_entry(
+                    indiv_results[a_name]["inter_p"], indiv_results[a_name]["union_p"]
+                )
+                for a_name in arm_names
+            },
+            "val_best_cnn_vit_pair": {
+                "pair_name": best_cnn_vit_pair_name,
+                **_build_patient_class_iou_entry(
+                    best_pair_entry["inter_p"], best_pair_entry["union_p"]
+                ),
+            },
+            "author_anchors": {
+                ak: {
+                    "mode": "ms_tta_cgm_neg1e4",
+                    **_build_patient_class_iou_entry(
+                        av["ms_tta_cgm_neg1e4"]["inter_p"], av["ms_tta_cgm_neg1e4"]["union_p"]
+                    ),
+                    "cgm_author_mul0": _build_patient_class_iou_entry(
+                        av["cgm_author_mul0"]["inter_p"], av["cgm_author_mul0"]["union_p"]
+                    ),
+                }
+                for ak, av in author_anchors.items()
+            },
+        }
+
         # Recursively strip raw numpy inter_p/union_p arrays before JSON serialization
         def _strip_iu(obj: Any) -> Any:
             if isinstance(obj, dict):
@@ -2965,6 +3149,7 @@ def run_stage2_v2_ensemble_eval(
 
         report: Dict[str, Any] = {
             "pipeline": "stage2_v2_4arm_cross_family_ensemble",
+            "track": track_norm,
             "anti_leakage": {
                 "val_patches": int(val_stream["shape"][0]),
                 "val_patients": n_val_pat,
@@ -3018,8 +3203,13 @@ def run_stage2_v2_ensemble_eval(
         tmp_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
         os.replace(tmp_json, json_path)
 
+        pp_class_json_path = out_dir / "per_patient_class_ious.json"
+        tmp_pp = pp_class_json_path.with_suffix(".json.tmp")
+        tmp_pp.write_text(json.dumps(per_patient_class_ious_payload, indent=2), encoding="utf-8")
+        os.replace(tmp_pp, pp_class_json_path)
+
         with zipfile.ZipFile(zip_p, "w", zipfile.ZIP_DEFLATED) as zf:
-            for artifact in (json_path, csv_path, plot_path):
+            for artifact in (json_path, pp_class_json_path, csv_path, plot_path):
                 if artifact.is_file():
                     zf.write(artifact, arcname=artifact.name)
 

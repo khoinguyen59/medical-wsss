@@ -12,11 +12,16 @@ All hyphens strictly use standard ASCII 0x2D ('-').
 
 from src.stage2_v2.config import (
     STAGE2_V2_PRESETS,
+    VALID_MEMMAP_SOURCES,
+    VALID_SOFT_MODES,
+    VALID_TRACKS,
     Stage2V2Config,
     get_stage2_v2_preset,
     resolve_stage2_v2_config_from_env,
+    validate_track_name,
 )
 from src.stage2_v2.ensemble import (
+    DEFAULT_ARM_FAMILIES,
     DEFAULT_ARM_NAMES,
     ENSEMBLE_CGM_GRID,
     TTA_CANDIDATES,
@@ -36,9 +41,11 @@ from src.stage2_v2.ensemble import (
     run_stage2_v2_ensemble_eval,
     run_val_cv_and_lopocv,
     save_ensemble_comparison_plot,
+    validate_track_a_arm_spec,
 )
 from src.stage2_v2.evaluator import (
     calibrate_cgm_thresholds_val_only,
+    evaluate_r2_pseudo_mask_val_diagnostic,
     evaluate_stage2_v2_model,
     run_step0_calibration_and_author_anchor,
 )
@@ -53,9 +60,12 @@ from src.stage2_v2.losses import (
 from src.stage2_v2.memmap_dataset import (
     BCSSSoftMemmapDataset,
     generate_bn7_soft_memmap,
+    generate_cross_family_r2_memmap,
     generate_round2_ema_memmap,
+    validate_track_a_teacher_checkpoint,
 )
 from src.stage2_v2.models import (
+    BaseStage2DualHead,
     ConvNeXtFPNDualHead,
     DeepLabV3PlusDualHead,
     DINOv2AdapterDualHead,
@@ -68,9 +78,14 @@ from src.stage2_v2.trainer import train_stage2_v2
 
 __all__ = [
     "STAGE2_V2_PRESETS",
+    "VALID_MEMMAP_SOURCES",
+    "VALID_SOFT_MODES",
+    "VALID_TRACKS",
     "Stage2V2Config",
     "get_stage2_v2_preset",
     "resolve_stage2_v2_config_from_env",
+    "validate_track_name",
+    "BaseStage2DualHead",
     "DeepLabV3PlusDualHead",
     "SegFormerDualHead",
     "ConvNeXtFPNDualHead",
@@ -86,11 +101,15 @@ __all__ = [
     "Stage2V2CompositeLoss",
     "BCSSSoftMemmapDataset",
     "generate_bn7_soft_memmap",
+    "generate_cross_family_r2_memmap",
     "generate_round2_ema_memmap",
+    "validate_track_a_teacher_checkpoint",
     "evaluate_stage2_v2_model",
+    "evaluate_r2_pseudo_mask_val_diagnostic",
     "calibrate_cgm_thresholds_val_only",
     "run_step0_calibration_and_author_anchor",
     "train_stage2_v2",
+    "DEFAULT_ARM_FAMILIES",
     "DEFAULT_ARM_NAMES",
     "ENSEMBLE_CGM_GRID",
     "TTA_CANDIDATES",
@@ -110,4 +129,5 @@ __all__ = [
     "run_stage2_v2_ensemble_eval",
     "run_val_cv_and_lopocv",
     "save_ensemble_comparison_plot",
+    "validate_track_a_arm_spec",
 ]
