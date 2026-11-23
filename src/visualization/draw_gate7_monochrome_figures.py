@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyBboxPatch, Patch
+from PIL import Image
 from scipy import stats
 
 EVIDENCE_PATHS = {
@@ -44,6 +45,30 @@ def configure_monochrome_style() -> None:
     })
 
 
+def _load_true_test_gt_counts(repo_root: Path, patient_ids: list[str], expected_total: int | None = None) -> np.ndarray | None:
+    """Counts per-patient foreground GT pixels across all raw test masks when complete on disk."""
+    test_root = repo_root / "data" / "BCSS-WSSS" / "test"
+    mask_files = [p for p in sorted(test_root.rglob("*.png")) if "mask" in p.parts] if test_root.is_dir() else []
+    if not mask_files or (expected_total is not None and len(mask_files) != expected_total):
+        return None
+    pid_to_idx = {pid: idx for idx, pid in enumerate(patient_ids)}
+    gt_counts, seen = np.zeros((len(patient_ids), 4), dtype=np.int64), np.zeros(len(patient_ids), dtype=np.int64)
+    for mf in mask_files:
+        idx = pid_to_idx.get("-".join(mf.name.split("-")[:3]))
+        if idx is None:
+            return None
+        seen[idx] += 1
+        with Image.open(mf) as im:
+            if im.mode in ("P", "L"):
+                gt_counts[idx, :4] += im.histogram()[:4]
+            else:
+                arr = np.asarray(im)
+                if arr.ndim != 2:
+                    return None
+                gt_counts[idx] += [int(np.sum(arr == c)) for c in range(4)]
+    return gt_counts if (bool(np.all(seen > 0)) and (expected_total is None or int(seen.sum()) == expected_total)) else None
+
+
 def load_evidence(repo_root: Path) -> dict[str, Any]:
     """Loads verified JSON/CSV artifacts and asserts CSV-vs-JSON patient alignment."""
     data: dict[str, Any] = {}
@@ -51,22 +76,17 @@ def load_evidence(repo_root: Path) -> dict[str, Any]:
         path = repo_root / rel_path
         if not path.is_file():
             raise FileNotFoundError(f"Missing verified evidence file: {path}")
-        if path.suffix == ".json":
-            data[key] = json.loads(path.read_text(encoding="utf-8"))
-        else:
-            with path.open("r", encoding="utf-8", newline="") as f:
-                data[key] = list(csv.DictReader(f))
+        txt = path.read_text(encoding="utf-8")
+        data[key] = json.loads(txt) if path.suffix == ".json" else list(csv.DictReader(txt.splitlines()))
     pjson = data["patient_json"]
     csv_map = {r["patient_id"]: float(r["primary_4arm_miou"]) for r in data["patient_csv"]}
     for pid, val in zip(pjson["patient_ids"], pjson["primary_4arm"]["per_patient_miou"], strict=True):
         if abs(csv_map[pid] - float(val)) > 1e-5:
             raise ValueError(f"CSV/JSON mismatch for {pid}: {csv_map[pid]} vs {val}")
     sha_path = repo_root / "checkpoints/vps_evidence/SHA256SUMS.txt"
-    data["sha256_count"] = (
-        sum(1 for ln in sha_path.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.lstrip().startswith("#"))
-        if sha_path.is_file()
-        else None
-    )
+    data["sha256_count"] = sum(1 for ln in sha_path.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.lstrip().startswith("#")) if sha_path.is_file() else None
+    exp_test_n = int(data["g7"].get("anti_leakage", {}).get("test_patches", 0)) or None
+    data["true_gt_counts"] = _load_true_test_gt_counts(repo_root, pjson["patient_ids"], expected_total=exp_test_n)
     return data
 
 
@@ -184,43 +204,63 @@ def draw_fig2_per_class_evolution(ev: dict[str, Any], out_dir: Path) -> tuple[Pa
     return save_figure(fig, out_dir, "fig2_gate7_per_class_evolution_bw")
 
 
-def _compute_patient_sensitivity(pjson: dict[str, Any]) -> dict[str, Any]:
-    """Detects exact 8 GT==0 cells and raw vs GT-active per-patient deltas from JSON."""
+def _compute_patient_sensitivity(pjson: dict[str, Any], true_gt_counts: np.ndarray | None = None) -> dict[str, Any]:
+    """Detects 8 asymmetric GT==0 cells across all 12 JSON records and optional all-11 true on-disk cells."""
     pids, classes = pjson["patient_ids"], pjson["class_names"]
-    models: dict[str, Any] = {k: pjson[k] for k in ("primary_4arm", "equal_4arm", "simplex_cv_4arm", "val_best_cnn_vit_pair")}
-    models.update({f"arm:{k}": v for k, v in pjson["individual_arms"].items()})
-    models.update({f"auth:{k}": v for k, v in pjson["author_anchors"].items()})
-    min_union = np.minimum.reduce([np.asarray(r["union_p"], dtype=float) for r in models.values()])
+    all_recs: list[dict[str, Any]] = []
+    stack: list[Any] = [pjson]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            if "union_p" in cur:
+                all_recs.append(cur)
+            stack.extend(cur.values())
+    asym_mask = np.minimum.reduce([np.asarray(r["union_p"], dtype=float) for r in all_recs]) == 0
 
-    def active_miou(rec: dict[str, Any], exclude_gt0: bool) -> np.ndarray:
+    def active_miou(rec: dict[str, Any], excl_mask: np.ndarray | None) -> np.ndarray:
         inter, union = np.asarray(rec["inter_p"], dtype=float), np.asarray(rec["union_p"], dtype=float)
-        return np.asarray([float(np.mean([inter[i, c] / union[i, c] for c in range(4) if union[i, c] > 0 and not (exclude_gt0 and min_union[i, c] == 0)])) for i in range(len(pids))])
+        return np.asarray([float(np.mean([inter[i, c] / union[i, c] for c in range(4) if union[i, c] > 0 and not (excl_mask is not None and bool(excl_mask[i, c]))])) for i in range(len(pids))])
 
-    prim, auth, arm5 = models["primary_4arm"], models["auth:author_step0_anchor_7043"], models["arm:arm5_dinov2_large_r2"]
-    raw_d = (active_miou(prim, False) - active_miou(auth, False)) * 100.0
-    gt_d = (active_miou(prim, True) - active_miou(auth, True)) * 100.0
-    arm5_d = (active_miou(arm5, False) - active_miou(auth, False)) * 100.0
-    gt0_cells = np.argwhere(min_union == 0)
-    gt0_info = {
-        int(i): (classes[int(c)], int(prim["union_p"][int(i)][int(c)]), int(arm5["union_p"][int(i)][int(c)]))
-        for i, c in gt0_cells
-    }
-    arm5_gt0_fp = {int(i) for i, c in gt0_cells if int(arm5["union_p"][int(i)][int(c)]) > 0}
+    prim, auth, arm5 = pjson["primary_4arm"], pjson["author_anchors"]["author_step0_anchor_7043"], pjson["individual_arms"]["arm5_dinov2_large_r2"]
+    arm5_u = np.asarray(arm5["union_p"], dtype=np.int64)
+    raw_d, gt_d = (active_miou(prim, None) - active_miou(auth, None)) * 100.0, (active_miou(prim, asym_mask) - active_miou(auth, asym_mask)) * 100.0
+    arm5_d, gt0_cells = (active_miou(arm5, None) - active_miou(auth, None)) * 100.0, np.argwhere(asym_mask)
+    gt0_info = {int(i): (classes[int(c)], int(prim["union_p"][int(i)][int(c)]), int(arm5_u[int(i), int(c)])) for i, c in gt0_cells}
+    arm5_gt0_fp = {int(i) for i, c in gt0_cells if int(arm5_u[int(i), int(c)]) > 0}
 
     def pstats(d: np.ndarray) -> tuple[float, float, int, int]:
         return float(np.mean(d) / np.std(d, ddof=1)), float(stats.wilcoxon(d).pvalue), int(np.sum(d > 0)), int(np.sum(d < 0))
 
-    return {"pids": pids, "raw_d": raw_d, "gt_d": gt_d, "arm5_d": arm5_d, "gt0_info": gt0_info, "arm5_gt0_fp": arm5_gt0_fp, "raw_stats": pstats(raw_d), "gt_stats": pstats(gt_d), "arm5_stats": pstats(arm5_d)}
+    def sids(m: np.ndarray) -> list[str]:
+        return [pids[int(i)].removeprefix("TCGA-") for i in np.flatnonzero(m)]
+
+    out: dict[str, Any] = {
+        "pids": pids, "n_json_records": len(all_recs), "raw_d": raw_d, "gt_d": gt_d, "arm5_d": arm5_d,
+        "gt0_info": gt0_info, "arm5_gt0_fp": arm5_gt0_fp, "raw_stats": pstats(raw_d), "gt_stats": pstats(gt_d),
+        "arm5_stats": pstats(arm5_d), "true_gt_stats": None,
+        "asym_nec_tot": int(np.sum(asym_mask[:, 3])), "asym_nec_clr": int(np.sum(asym_mask[:, 3] & (arm5_u[:, 3] == 0))),
+        "asym_lym_tot": int(np.sum(asym_mask[:, 2])), "asym_lym_fp": int(np.sum(asym_mask[:, 2] & (arm5_u[:, 2] > 0))),
+        "asym_lym_fp_ids": sids(asym_mask[:, 2] & (arm5_u[:, 2] > 0)),
+    }
+    if true_gt_counts is not None:
+        tm = np.asarray(true_gt_counts, dtype=np.int64) == 0
+        out.update({
+            "true_gt0_count": int(np.sum(tm)), "true_nec_absent": int(np.sum(tm[:, 3])), "true_lym_absent": int(np.sum(tm[:, 2])),
+            "arm5_true_nec_cleared": int(np.sum(tm[:, 3] & (arm5_u[:, 3] == 0))), "arm5_true_lym_fp": int(np.sum(tm[:, 2] & (arm5_u[:, 2] > 0))),
+            "true_nec_fp_ids": sids(tm[:, 3] & (arm5_u[:, 3] > 0)), "true_gt_stats": pstats((active_miou(prim, tm) - active_miou(auth, tm)) * 100.0),
+        })
+    return out
 
 
 def draw_fig3_patient_gt0_sensitivity(ev: dict[str, Any], out_dir: Path) -> tuple[Path, Path]:
-    """Fig 3: 23-Patient Delta-mIoU waterfall highlighting 8 GT==0 cells & CGM effect."""
-    res = _compute_patient_sensitivity(ev["patient_json"])
+    """Fig 3: 23-Patient Delta-mIoU waterfall distinguishing 8 asym vs 11 true GT==0 cells & CGM."""
+    res = _compute_patient_sensitivity(ev["patient_json"], ev.get("true_gt_counts"))
+    has_true = res["true_gt_stats"] is not None
     order, y = np.argsort(res["raw_d"]), np.arange(len(res["pids"]))
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14.0, 8.2), dpi=300, sharey=True, gridspec_kw={"width_ratios": [1.14, 1.08], "wspace": 0.07})
-    box_style = {"facecolor": "#FFFFFF", "edgecolor": "#000000", "linewidth": 1.0, "pad": 3.8}
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14.4, 8.3), dpi=300, sharey=True, gridspec_kw={"width_ratios": [1.12, 1.12], "wspace": 0.06})
+    box_style = {"facecolor": "#FFFFFF", "edgecolor": "#000000", "linewidth": 1.0, "pad": 3.6}
 
-    # Panel A: Primary 4-Arm (no-CGM) Raw vs GT-Active
+    # Panel A: Primary 4-Arm (no-CGM) Raw vs Asym-Free
     ax1.grid(axis="x", linestyle="--", linewidth=0.6, color="#D9D9D9", zorder=0)
     ax1.axvline(0.0, color="#000000", linewidth=1.0, zorder=3)
     for row, p_idx in enumerate(order):
@@ -235,16 +275,20 @@ def draw_fig3_patient_gt0_sensitivity(ev: dict[str, Any], out_dir: Path) -> tupl
             ax1.text(max(gv, rv, 0.0) + 0.65, row, f"{cname} FP:{fp_px:,}px -> {gv:+.2f}%", va="center", ha="left", fontsize=7.3, fontweight="bold", bbox={"facecolor": "#FFFFFF", "edgecolor": "none", "pad": 0.55}, zorder=7)
 
     ax1.set_yticks(y)
-    ax1.set_yticklabels([f"* {res['pids'][int(i)]} [GT=0 {res['gt0_info'][int(i)][0]}]" if int(i) in res["gt0_info"] else res["pids"][int(i)] for i in order], fontsize=8.1)
+    ax1.set_yticklabels([f"* {res['pids'][int(i)]} [Asym GT=0 {res['gt0_info'][int(i)][0]}]" if int(i) in res["gt0_info"] else res["pids"][int(i)] for i in order], fontsize=7.9)
     for row, p_idx in enumerate(order):
         if int(p_idx) in res["gt0_info"]:
             ax1.get_yticklabels()[row].set_fontweight("bold")
-    ax1.set_xlim(-21.2, 23.2)
+    ax1.set_xlim(-22.5, 23.2)
     ax1.set_xlabel("Per-Patient Delta-mIoU (%) vs Step-0 Author", fontsize=9.2, fontweight="bold")
-    ax1.set_title("(A) Primary 4-Arm (no-CGM): Raw vs GT-Active (-8 GT=0 Cells)", fontsize=10.1, fontweight="bold", pad=8)
+    ax1.set_title("(A) Primary 4-Arm (no-CGM): Raw vs Asym-Free (-8 Asym GT=0)", fontsize=9.7, fontweight="bold", pad=8)
     r_dz, r_p, r_w, r_l = res["raw_stats"]
     g_dz, g_p, g_w, g_l = res["gt_stats"]
-    ax1.text(0.02, 0.975, f"Raw Active-Union (all union>0):\n  d_z = {r_dz:+.4f} | p = {r_p:.4f} | {r_w}W/0T/{r_l}L\nGT-Active (excluding 8 GT=0):\n  d_z = {g_dz:+.4f} | p = {g_p:.1e} | {g_w}W/0T/{g_l}L", transform=ax1.transAxes, ha="left", va="top", fontsize=7.6, bbox=box_style, zorder=8)
+    box_a = f"Raw Active-Union (all union>0):\n  d_z = {r_dz:+.4f} | p = {r_p:.4f} | {r_w}W/0T/{r_l}L\nExcl. 8 Asym GT=0 (min union=0):\n  d_z = {g_dz:+.4f} | p = {g_p:.1e} | {g_w}W/0T/{g_l}L"
+    if has_true:
+        t_dz, t_p, t_w, t_l = res["true_gt_stats"]
+        box_a += f"\nExcl. All {res['true_gt0_count']} True GT=0 (on-disk):\n  d_z = {t_dz:+.4f} | p = {t_p:.1e} | {t_w}W/0T/{t_l}L"
+    ax1.text(0.02, 0.975, box_a, transform=ax1.transAxes, ha="left", va="top", fontsize=7.2, bbox=box_style, zorder=8)
 
     # Panel B: Arm 5 (+4-DoF CGM) vs Step-0 Author
     ax2.grid(axis="x", linestyle="--", linewidth=0.6, color="#D9D9D9", zorder=0)
@@ -258,20 +302,31 @@ def draw_fig3_patient_gt0_sensitivity(ev: dict[str, Any], out_dir: Path) -> tupl
             ax2.text(av + (0.55 if av >= 0 else -0.55), row, f"{av:+.2f}%", va="center", ha="left" if av >= 0 else "right", fontsize=7.5, fontweight="bold", bbox={"facecolor": "#FFFFFF", "edgecolor": "none", "pad": 0.55}, zorder=7)
 
     a_dz, a_p, a_w, a_l = res["arm5_stats"]
-    ax2.set_xlim(-28.0, 29.5)
+    ax2.set_xlim(-35.0, 29.5)
     ax2.set_xlabel("Per-Patient Delta-mIoU (%) vs Step-0 Author", fontsize=9.2, fontweight="bold")
-    ax2.set_title("(B) Arm 5 (+4-DoF CGM): Clears 7/7 GT=0 NEC Cells to 0 px", fontsize=10.1, fontweight="bold", pad=8)
-    ax2.text(0.02, 0.975, f"Arm 5 (+4-DoF CGM, t_NEC=0.65):\n  d_z = {a_dz:+.4f} | p = {a_p:.4f} | {a_w}W/0T/{a_l}L\n  Clears 7/7 GT=0 NEC (0 px)\n  1/1 GT=0 LYM left (EW-A3U0)", transform=ax2.transAxes, ha="left", va="top", fontsize=7.5, bbox=box_style, zorder=8)
+    an_clr, an_tot, al_fp, al_tot = res["asym_nec_clr"], res["asym_nec_tot"], res["asym_lym_fp"], res["asym_lym_tot"]
+    al_lbl = ", ".join(res["asym_lym_fp_ids"]) or "none"
+    if has_true:
+        n_clr, n_tot, l_fp, l_tot = res["arm5_true_nec_cleared"], res["true_nec_absent"], res["arm5_true_lym_fp"], res["true_lym_absent"]
+        tn_fp = ", ".join(res["true_nec_fp_ids"])
+        nec_note = f"{an_clr}/{an_tot} asym; {tn_fp} FP" if tn_fp else f"{an_clr}/{an_tot} asym"
+        ax2.set_title(f"(B) Arm 5 (+4-DoF CGM): Clears {n_clr}/{n_tot} NEC-Absent ({an_clr}/{an_tot} Asym) to 0 px", fontsize=9.7, fontweight="bold", pad=8)
+        box_b = f"Arm 5 (+4-DoF CGM, t_NEC=0.65):\n  d_z = {a_dz:+.4f} | p = {a_p:.4f} | {a_w}W/0T/{a_l}L\n  Clears {n_clr}/{n_tot} true NEC-absent ({nec_note})\n  {l_fp}/{l_tot} LYM-absent left (asym: {al_lbl})"
+    else:
+        ax2.set_title(f"(B) Arm 5 (+4-DoF CGM): Clears {an_clr}/{an_tot} Asym GT=0 NEC to 0 px", fontsize=9.7, fontweight="bold", pad=8)
+        box_b = f"Arm 5 (+4-DoF CGM, t_NEC=0.65):\n  d_z = {a_dz:+.4f} | p = {a_p:.4f} | {a_w}W/0T/{a_l}L\n  Clears {an_clr}/{an_tot} asym GT=0 NEC (0 px)\n  {al_fp}/{al_tot} asym GT=0 LYM left ({al_lbl})"
+    ax2.text(0.02, 0.975, box_b, transform=ax2.transAxes, ha="left", va="top", fontsize=7.0, bbox=box_style, zorder=8)
     handles = [
         Patch(facecolor="#E6E6E6", edgecolor="#000000", label="Positive Delta-mIoU (normal patient)"),
-        Patch(facecolor="#6E6E6E", edgecolor="#000000", hatch="///", label="Artificial drop from GT=0 micro-FP"),
-        Line2D([0], [0], marker="D", color="#000000", markerfacecolor="#FFFFFF", markersize=6, label="GT-Active Delta (excluding 8 GT=0 cells)"),
-        Patch(facecolor="#CCCCCC", edgecolor="#000000", hatch="///", label="GT=0 NEC cell cleared by 4-DoF CGM"),
+        Patch(facecolor="#6E6E6E", edgecolor="#000000", hatch="///", label="Artificial drop from asym GT=0 micro-FP"),
+        Line2D([0], [0], marker="D", color="#000000", markerfacecolor="#FFFFFF", markersize=6, label="Excl. 8 asym GT=0 cells (min union=0)"),
+        Patch(facecolor="#CCCCCC", edgecolor="#000000", hatch="///", label="Asym GT=0 NEC cell cleared by 4-DoF CGM"),
     ]
-    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.52, -0.02), ncol=2, frameon=True, edgecolor="#000000", facecolor="#FFFFFF", fontsize=8.3)
-    fig.suptitle("Per-Patient Sensitivity Analysis (n = 23 Held-Out Patients): GT = 0 Micro-FP Mechanism & CGM Impact", fontsize=11.8, fontweight="bold", y=0.985)
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.54, -0.02), ncol=2, frameon=True, edgecolor="#000000", facecolor="#FFFFFF", fontsize=8.2)
+    suffix = f"8 Asym / {res['true_gt0_count']} True GT = 0 Cells & CGM Impact" if has_true else "8 Asym GT = 0 Micro-FP & CGM Impact"
+    fig.suptitle(f"Per-Patient Sensitivity Analysis (n = 23 Held-Out Patients): {suffix}", fontsize=11.4, fontweight="bold", y=0.985)
     _clean_axes(ax1, ax2)
-    fig.subplots_adjust(top=0.91, bottom=0.12, left=0.19, right=0.98)
+    fig.subplots_adjust(top=0.91, bottom=0.12, left=0.205, right=0.98)
     return save_figure(fig, out_dir, "fig3_patient_gt0_sensitivity_bw")
 
 
@@ -293,8 +348,7 @@ def draw_fig4_pipeline_architecture(ev: dict[str, Any], out_dir: Path) -> tuple[
     ax.axis("off")
     ax.text(8.5, 7.56, "SE374.R11 Gate-7 Track A: End-to-End WSSS Distillation & Clinical Deployment Architecture", ha="center", va="center", fontsize=12.4, fontweight="bold")
     ax.text(8.5, 7.22, "BCSS-WSSS (TCGA-BRCA, 151 Patients: 106 Train / 22 Val / 23 Held-Out Test | 0% Patient Overlap | 0% TCGA-BRCA Pretraining Overlap)", ha="center", va="center", fontsize=8.9, color="#333333")
-    w, h1, h2 = 4.60, 2.38, 2.46
-    x1, x2, x3 = 0.35, 6.20, 12.05
+    w, h1, h2, x1, x2, x3 = 4.60, 2.38, 2.46, 0.35, 6.20, 12.05
     boxes = [
         (x1, 4.44, h1, "1. STAGE-1 CAM & SG-DAP (WEAK LABELS)", "#FAFAFA", "#262626", 1.4, [("- Input: 23,422 Train patches (weak y_cls only)", False), ("- ResNet-38d + PDA (Ep 5 EMA, LUAD init)", False), ("- Target: q_s1_sgdap (T = 0.25, y-gated masks)", False), (f"- VAL (3,418 patches): {s1['mIoU']*100:.2f}% | ECE {s1['ECE']:.4f}", True)]),
         (x2, 4.44, h1, "2. ROUND-1 4-ARM TEACHERS (GATE-6)", "#F2F2F2", "#404040", 1.4, [(f"- Arm 1 DeepLab R101: {r1_a['arm1_deeplab_cleankd']['mIoU']*100:.2f}% TEST", False), (f"- Arm 2 SegFormer MiT-B3: {r1_a['arm2_segformer_oeem']['mIoU']*100:.2f}% TEST", False), (f"- Arm 3 ConvNeXt-B {r1_a['arm3_convnext_selftrain']['mIoU']*100:.2f}% | Arm 4 DINOv2-B {r1_a['arm4_dinov2_adapter']['mIoU']*100:.2f}%", False), (f"- Gate-6 Primary 4-Arm (+CGM): {g6['test_primary_4arm']['mIoU']*100:.2f}% TEST", True)]),

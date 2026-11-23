@@ -504,7 +504,11 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
 
     ev = fig_mod.load_evidence(PROJECT_ROOT)
     assert ev["sha256_count"] == 123
-    sens = fig_mod._compute_patient_sensitivity(ev["patient_json"])
+    assert len((PROJECT_ROOT / "src" / "visualization" / "draw_gate7_monochrome_figures.py").read_text(encoding="utf-8").splitlines()) <= 400
+    sens = fig_mod._compute_patient_sensitivity(ev["patient_json"], ev.get("true_gt_counts"))
+    assert sens["n_json_records"] == 12
+    assert sens["asym_nec_clr"] == 7 and sens["asym_nec_tot"] == 7
+    assert sens["asym_lym_fp"] == 1 and sens["asym_lym_tot"] == 1 and sens["asym_lym_fp_ids"] == ["EW-A3U0"]
     assert len(sens["gt0_info"]) == 8
     d8_idx = sens["pids"].index("TCGA-D8-A27H")
     ew_idx = sens["pids"].index("TCGA-EW-A3U0")
@@ -521,6 +525,28 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
     svg4_txt = fig4_svg.read_text(encoding="utf-8")
     for bad in BAD_DASHES:
         assert bad not in svg3_txt and bad not in svg4_txt
+    for req3 in (
+        "Raw vs Asym-Free (-8 Asym GT=0)",
+        "Excl. 8 Asym GT=0 (min union=0)",
+        "Excl. 8 asym GT=0 cells (min union=0)",
+        "Asym GT=0 NEC cell cleared by 4-DoF CGM",
+    ):
+        assert req3 in svg3_txt, f"Missing {req3!r} in regenerated fig3 SVG"
+    for forb3 in ("Clears 7/7 GT=0 NEC", "1/1 GT=0 LYM left"):
+        assert forb3 not in svg3_txt, f"Stale D10 token {forb3!r} found in fig3 SVG"
+    if ev.get("true_gt_counts") is not None:
+        assert sens["true_gt0_count"] == 11
+        assert sens["true_nec_absent"] == 8 and sens["true_lym_absent"] == 3
+        assert sens["arm5_true_nec_cleared"] == 7 and sens["arm5_true_lym_fp"] == 3
+        assert sens["true_nec_fp_ids"] == ["E2-A573"]
+        assert sens["true_gt_stats"][0] == pytest.approx(0.9383, abs=1e-3)
+        for req3_true in (
+            "Clears 7/8 NEC-Absent (7/7 Asym) to 0 px",
+            "Excl. All 11 True GT=0 (on-disk)",
+            "Clears 7/8 true NEC-absent (7/7 asym; E2-A573 FP)",
+            "3/3 LYM-absent left (asym: EW-A3U0)",
+        ):
+            assert req3_true in svg3_txt, f"Missing {req3_true!r} in regenerated fig3 SVG"
     for required in (
         "0% TCGA-BRCA Pretraining Overlap",
         "4. GATE-7 TRACK A 4-ARM (R2 EMA-ONLY, 224/336px)",
@@ -533,7 +559,22 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
     for forbidden in ("p=0.0004", "sTILs", "0% TCGA Pretraining |"):
         assert forbidden not in svg4_txt, f"Stale token {forbidden!r} found in fig4 SVG"
 
-    # Safe fallback when SHA256SUMS.txt is absent
-    ev_no_sha = {**ev, "sha256_count": None}
-    _, fig4_fb_svg = fig_mod.draw_fig4_pipeline_architecture(ev_no_sha, tmp_path / "fallback")
+    # Safe fallback when SHA256SUMS.txt or raw test masks are absent, partial, or corrupted RGB
+    ev_fallback = {**ev, "sha256_count": None, "true_gt_counts": None}
+    fig3_fb_png, fig3_fb_svg = fig_mod.draw_fig3_patient_gt0_sensitivity(ev_fallback, tmp_path / "fallback")
+    _assert_monochrome_bw_png(fig3_fb_png, expected_dpi=300)
+    assert "Clears 7/7 Asym GT=0 NEC to 0 px" in fig3_fb_svg.read_text(encoding="utf-8")
+    _, fig4_fb_svg = fig_mod.draw_fig4_pipeline_architecture(ev_fallback, tmp_path / "fallback")
     assert "SHA256 Artifacts Verified (BAD = 0)" in fig4_fb_svg.read_text(encoding="utf-8")
+    partial_root = tmp_path / "partial_masks"
+    partial_dir = partial_root / "data" / "BCSS-WSSS" / "test" / "mask"
+    partial_dir.mkdir(parents=True)
+    for pid in sens["pids"]:
+        Image.fromarray(np.zeros((8, 8), dtype=np.uint8), mode="L").save(partial_dir / f"{pid}-DX1_0+0.png")
+    assert fig_mod._load_true_test_gt_counts(partial_root, sens["pids"], expected_total=4986) is None
+    rgb_root = tmp_path / "rgb_masks"
+    rgb_dir = rgb_root / "data" / "BCSS-WSSS" / "test" / "mask"
+    rgb_dir.mkdir(parents=True)
+    for pid in sens["pids"]:
+        Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8), mode="RGB").save(rgb_dir / f"{pid}-DX1_0+0.png")
+    assert fig_mod._load_true_test_gt_counts(rgb_root, sens["pids"], expected_total=len(sens["pids"])) is None

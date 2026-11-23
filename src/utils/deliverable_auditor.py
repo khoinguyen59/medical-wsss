@@ -509,12 +509,12 @@ class DeliverableAuditor:
     # -------------------------------------------------------------------------
     def _audit_typography(self, doc_path: str, lines: List[str]):
         """Audits typography compliance: ASCII hyphens, encoding corruption, and double punctuation."""
-        # Forbidden dashes: em-dash (\u2014), en-dash (\u2013), horizontal bar (\u2015)
-        forbidden_dash_pattern = re.compile(r"[\u2013\u2014\u2015]")
+        # Forbidden dashes: figure dash (\u2012), en-dash (\u2013), em-dash (\u2014), horizontal bar (\u2015), minus sign (\u2212)
+        forbidden_dash_pattern = re.compile(r"[\u2012\u2013\u2014\u2015\u2212]")
         # Mojibake or broken UTF-8 encoding markers (avoid false positive on uppercase Vietnamese letter Ã)
         mojibake_pattern = re.compile(r"(\ufffd|Ã[¡¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿]|â€[™œžŸ]|â€“|â€”)")
-        # Double punctuation typos (e.g., .., ,, ??) but excluding markdown ellipsis ...
-        double_punct_pattern = re.compile(r"(?<!\.)\.\.(?!\.)|,,|\?\?|::")
+        # Double punctuation typos (e.g., .., ,, ??) excluding ellipsis (...) and relative paths (../ or ..\)
+        double_punct_pattern = re.compile(r"(?<!\.)\.\.(?![./\\])|,,|\?\?|::")
 
         for line_idx, line in enumerate(lines, start=1):
             # Check forbidden dash
@@ -743,13 +743,17 @@ def run_audit(target_file: str) -> bool:
     return len(critical_issues) == 0
 
 
+DEFAULT_ALL_TARGETS: List[str] = [
+    os.path.join("product", "proposal", "SE374_MINI_PROPOSAL_WSSS_WSI.md"),
+    os.path.join("product", "reports", "SE374_FINAL_TECHNICAL_REPORT_WSSS.md"),
+    os.path.join("product", "slides", "SE374_PROPOSAL_SLIDES_WSSS_WSI.md"),
+    os.path.join("product", "slides", "SE374_FINAL_DEFENSE_SLIDES_WSSS_WSI.md"),
+]
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] in ("--all", "-a"):
-        targets = [
-            os.path.join("product", "proposal", "SE374_MINI_PROPOSAL_WSSS_WSI.md"),
-            os.path.join("product", "reports", "SE374_FINAL_TECHNICAL_REPORT_WSSS.md"),
-            os.path.join("product", "slides", "SE374_PROPOSAL_SLIDES_WSSS_WSI.md"),
-        ]
+        targets = list(DEFAULT_ALL_TARGETS)
     elif len(sys.argv) > 1:
         targets = sys.argv[1:]
     else:

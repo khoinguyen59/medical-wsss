@@ -13,7 +13,7 @@ import tempfile
 import pytest
 from PIL import Image
 
-from src.utils.deliverable_auditor import DeliverableAuditor
+from src.utils.deliverable_auditor import DEFAULT_ALL_TARGETS, DeliverableAuditor
 
 
 class TestDeliverableAuditor:
@@ -57,17 +57,34 @@ class TestDeliverableAuditor:
             assert len(caption_issues) == 1
 
     def test_blocks_forbidden_em_dash_and_en_dash(self):
-        """Auditor must enforce ASCII hyphen and block em-dash (\\u2014) and en-dash (\\u2013)."""
+        """Auditor must enforce ASCII hyphen and block all INVARIANT-12 forbidden dashes."""
         with tempfile.TemporaryDirectory() as tmpdir:
             bad_md = os.path.join(tmpdir, "bad_typography.md")
             with open(bad_md, "w", encoding="utf-8") as f:
-                f.write("# Báo cáo \u2014 Vi phạm\n\nKhoảng cách 10 \u2013 20px.\n")
+                f.write(
+                    "# Báo cáo \u2014 Vi phạm\n\n"
+                    "Khoảng cách 10 \u2013 20px.\n\n"
+                    "Mã số 12\u201234.\n\n"
+                    "Gạch ngang \u2015 dài.\n\n"
+                    "Hiệu số a \u2212 b.\n"
+                )
 
             auditor = DeliverableAuditor(workspace_root=tmpdir)
             issues = auditor.audit_markdown_file(bad_md)
 
             dash_issues = [i for i in issues if i.category == "TYPOGRAPHY" and "gạch ngang dài" in i.message]
-            assert len(dash_issues) >= 1
+            assert [i.line_num for i in dash_issues] == [1, 3, 5, 7, 9]
+
+    def test_default_all_targets_includes_final_defense_slides(self):
+        """CLI --all default targets must include final defense slides and pass audit cleanly."""
+        expected = os.path.join("product", "slides", "SE374_FINAL_DEFENSE_SLIDES_WSSS_WSI.md")
+        assert expected in DEFAULT_ALL_TARGETS
+        for target in DEFAULT_ALL_TARGETS:
+            assert os.path.exists(target), f"Missing default --all audit target: {target}"
+        auditor = DeliverableAuditor()
+        issues = auditor.audit_markdown_file(expected)
+        critical_issues = [i for i in issues if i.severity == "CRITICAL"]
+        assert critical_issues == [], f"Final defense slides have critical issues: {[str(i) for i in critical_issues]}"
 
     def test_blocks_dummy_metrics_and_mockup(self):
         """Auditor must catch lorem ipsum and dummy data."""
@@ -296,6 +313,28 @@ class TestDeliverableAuditor:
         issues = auditor.audit_markdown_file("README.md")
         critical_issues = [i for i in issues if i.severity == "CRITICAL"]
         assert len(critical_issues) == 0, f"README.md critical issues: {[str(i) for i in critical_issues]}"
+
+    def test_relative_parent_path_not_flagged_as_double_punctuation(self):
+        """Relative parent paths like '../reports/figures/fig1.png' must not trigger double-dot warnings."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sub = os.path.join(tmpdir, "slides")
+            figs = os.path.join(tmpdir, "reports", "figures")
+            os.makedirs(sub)
+            os.makedirs(figs)
+            Image.new("L", (900, 500), color=255).save(os.path.join(figs, "fig1.png"), dpi=(300, 300))
+            md_ok = os.path.join(sub, "deck.md")
+            with open(md_ok, "w", encoding="utf-8") as f:
+                f.write("# Slide\n\n![Bieu do khoa hoc](../reports/figures/fig1.png)\n\nKet qua on dinh...\n")
+            aud_ok = DeliverableAuditor(workspace_root=tmpdir)
+            assert aud_ok.audit_markdown_file(md_ok) == []
+
+            md_bad = os.path.join(sub, "typo.md")
+            with open(md_bad, "w", encoding="utf-8") as f:
+                f.write("# Slide\n\nCau nay bi lap dau cham.. rat ro.\n")
+            aud_bad = DeliverableAuditor(workspace_root=tmpdir)
+            bad_issues = aud_bad.audit_markdown_file(md_bad)
+            assert any(i.category == "TYPOGRAPHY" and i.severity == "WARNING" for i in bad_issues)
+
 
 
 

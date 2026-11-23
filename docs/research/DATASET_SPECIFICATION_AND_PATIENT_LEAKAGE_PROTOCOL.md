@@ -1,99 +1,168 @@
 # ĐẶC TẢ DỮ LIỆU Y KHOA & GIAO THỨC CHỐNG RÒ RỈ BỆNH NHÂN
-## Đồ án: Hệ Thống Phân Vùng Ngữ Nghĩa Giám Sát Yếu Trên Ảnh Tiêu Bản Mô Bệnh Học Toàn Phần (WSSS for WSI)
-### Môn học: SE374.R11 - Phát Triển Phần Mềm Xử Lý Ảnh Y Khoa (UIT 2026)
+## Đồ Án: Hệ Thống Phân Vùng Ngữ Nghĩa Giám Sát Yếu Trên Ảnh Tiêu Bản Mô Bệnh Học Toàn Phần (WSSS for WSI)
+### Môn Học: SE374.R11 - Phát Triển Phần Mềm Xử Lý Ảnh Y Khoa (UIT, ĐHQG-HCM, 2026)
 
-> **Cơ sở khoa học:** Chu Han et al. (*MedIA 2022*), Qingchen Tang et al. (*CVPR 2025*), Tan-Dung Pham et al. (*Springer 2026*)  
-> **Quy tắc bất biến:** Patient-Level Anti-Leakage Protocol & Resource Safeguard / Sanity Run  
+> **Giảng viên hướng dẫn:** TS. Bùi Cao Doanh  
+> **Cơ sở khoa học:** Amgad et al. (*Bioinformatics 2019*), Chu Han et al. (*MedIA 2022*, arXiv `2110.08048`)  
+> **Quy chuẩn bất biến:** Patient-Level Anti-Leakage (`INVARIANT-08`), Track A Purity (`0%` TCGA-BRCA overlap), Anti-Shallow-Glob Defensive Resolution (`INVARIANT-29`), Zero Mockup (`INVARIANT-07`)
 
 ---
 
-## 1. Khảo Sát Hai Bộ Dữ Liệu Tiêu Chuẩn Quốc Tế
+## 1. Khảo Sát Hai Bộ Dữ Liệu Mô Bệnh Học Tiêu Chuẩn Quốc Tế
 
-Đề tài sử dụng 2 bộ dữ liệu mô bệnh học chuẩn quốc tế được công bố công khai phục vụ nghiên cứu phân vùng giám sát yếu:
+Hệ thống SE374.R11 sử dụng 2 bộ dữ liệu mô bệnh học chuẩn quốc tế đã được đối soát trực tiếp giữa bài báo gốc Han et al. (*MedIA 2022*), kho mã nguồn tham chiếu `repos/WSSS-Tissue/`, khóa phân chia `src/config/bcss_patient_splits.json`, dữ liệu thực trên đĩa `data/BCSS-WSSS/` và bộ kiểm định chéo cơ quan `src/stage2_v2/gate7_clinical_bench.py`.
 
 ### 1.1 Bộ Dữ Liệu BCSS-WSSS (Breast Cancer Semantic Segmentation - Weakly Supervised)
 
-- **Nguồn gốc:** Trích xuất từ 151 vùng vi trường quan tâm (ROIs) của tiêu bản ung thư vú thuộc tập dữ liệu quốc gia Hoa Kỳ TCGA-BRCA (The Cancer Genome Atlas Breast Invasive Carcinoma), công bố bởi Amgad et al. (*Bioinformatics 2019*) và chuẩn hóa bởi Han et al. (*MedIA 2022*).
-- **Liên kết tải chính thức (Tác giả MedIA 2022 & CVPR 2025):**  
-  Google Drive: `https://drive.google.com/drive/folders/1iS2Z0DsbACqGp7m6VDJbAcgzeXNEFr77?usp=sharing`  
-  Checkpoints tiền huấn luyện: `https://drive.google.com/drive/folders/1pRsf-TulOARYN13J-_iJNw_VUa2d1NnZ?usp=sharing`
-- **Quy mô:** 17.286 patches ($224 \times 224$ pixels) quét ở độ phóng đại quang học $20\times$ (khoảng $0.5$ $\mu$m/pixel).
-- **Phân bổ phân chia gốc:**
-  - **Tập Huấn luyện (Train):** 106 bệnh nhân ($23.422$ patches cắt có overlap $50\%$). Chỉ có nhãn yếu đa nhãn cấp patch, không có mặt nạ vẽ tay.
-  - **Tập Kiểm định (Validation):** 20 bệnh nhân ($3.418$ patches). Có mặt nạ Ground Truth pixel-level hoàn chỉnh.
-  - **Tập Kiểm thử (Test):** 25 bệnh nhân ($4.986$ patches). Có mặt nạ Ground Truth pixel-level hoàn chỉnh.
-- **Danh mục 5 Phân lớp Mô học (Classes):**
-  1. `TUM` (Tumor Epithelial / Khối u biểu mô) - Mã lớp: `0` - Màu trực quan: Đỏ (Red)
-  2. `STR` (Tumor-Associated Stroma / Mô đệm liên kết) - Mã lớp: `1` - Màu trực quan: Xanh lá (Green)
-  3. `LYM` (Lymphocytic Infiltrate / Tế bào lympho xâm nhập) - Mã lớp: `2` - Màu trực quan: Xanh dương (Blue)
-  4. `NEC` (Necrosis / Mô hoại tử) - Mã lớp: `3` - Màu trực quan: Tím (Purple)
-  5. `BACK` (Background & Other / Kính trắng và mô nền khác) - Mã lớp: `4` - Màu trực quan: Trắng/Xám
+- **Nguồn gốc:** Trích xuất từ `151` vùng vi trường quan tâm (ROIs) của `151` bệnh nhân ung thư vú thuộc hệ thống quốc gia Hoa Kỳ **TCGA-BRCA** (The Cancer Genome Atlas Breast Invasive Carcinoma), công bố gốc bởi Amgad et al. (*Bioinformatics 2019*) và chuẩn hóa cho bài toán giám sát yếu bởi Han et al. (*MedIA 2022*).
+- **Liên kết tải chính thức:**
+  - Hugging Face Hub (trong `src/colab_pkg/downloader.py`): `https://huggingface.co/datasets/nttduc/wsss-pathology/resolve/main/BCSS-WSSS.zip`
+  - Google Drive Mirror ZIP (trong `src/colab_pkg/downloader.py`, `GDRIVE_DATASET_ID`): `https://drive.google.com/file/d/1sCK8Cqsf4yCHzzIx98vitocES2L_tkjn/view`
+  - Google Drive gốc của tác giả MedIA 2022 (`repos/WSSS-Tissue/README.md`): `https://drive.google.com/drive/folders/1iS2Z0DsbACqGp7m6VDJbAcgzeXNEFr77?usp=sharing`
+  - Checkpoints tiền huấn luyện tác giả (`repos/WSSS-Tissue/README.md`): `https://drive.google.com/drive/folders/1pRsf-TulOARYN13J-_iJNw_VUa2d1NnZ?usp=sharing`
+- **Quy mô chính xác (xác minh trên đĩa `data/BCSS-WSSS/` và `src/config/bcss_patient_splits.json`):** **`31,826` patches** kích thước `224 x 224` pixels (`50,176` pixels/patch), độ phóng đại quang học chuẩn lâm sàng **`40x` (`0.2500 MPP` - microns per pixel)**.
+- **Phân bổ phân chia cấp bệnh nhân (`151` bệnh nhân, `0%` chồng lấp):**
+  - **Tập Huấn luyện (`training/`):** **`106` bệnh nhân** (`23,422` patches). Chỉ có nhãn yếu đa nhãn cấp patch `y_cls` mã hóa trong tên tệp, hoàn toàn không có mặt nạ pixel vẽ tay.
+  - **Tập Kiểm định (`val/`):** **`22` bệnh nhân** (`3,418` patches trong `val/img/` và `val/mask/`, gồm `2,153` patches đa lớp). Có mặt nạ Ground Truth cấp điểm ảnh hoàn chỉnh (`{0, 1, 2, 3, 4}`), dùng cho dừng sớm, chọn TTA, hiệu chuẩn nhiệt độ `beta`, chọn công thức tổ hợp 5-fold CV và hiệu chuẩn ngưỡng CGM.
+  - **Tập Kiểm thử mù (`test/`):** **`23` bệnh nhân** (`4,986` patches trong `test/img/` và `test/mask/`). Có mặt nạ Ground Truth cấp điểm ảnh hoàn chỉnh (`{0, 1, 2, 3, 4}`), đóng băng tuyệt đối cho đánh giá cuối cùng và kiểm định thống kê.
+- **Danh mục 5 phân lớp mô học BCSS-WSSS (khớp `repos/WSSS-Tissue/2_generate_PM.py:29-34` và `src/training/dataset_loader.py:42-48`):**
+  1. `0: TUM` (Tumor Epithelium - Biểu mô khối u ác tính) - RGB `(255, 0, 0)` (Đỏ)
+  2. `1: STR` (Tumor-Associated Stroma - Mô đệm liên kết) - RGB `(0, 255, 0)` (Xanh lá)
+  3. `2: LYM` (Lymphocytic Infiltrate - Bạch huyết bào xâm nhập) - RGB `(0, 0, 255)` (Xanh dương)
+  4. `3: NEC` (Necrosis - Mô hoại tử) - RGB `(153, 0, 255)` (Tím)
+  5. `4: BACK` (Background / Optical White Glass / Outside ROI) - RGB `(255, 255, 255)` (Trắng). Ở pha suy luận, nền kính trắng được tách độc lập bằng `OtsuClinicalGating` + `Pure-Glass Guard` (`>= 512 px`), **tuyệt đối không sao chép hay tô đè nhãn GT `label == 4` vào dự đoán AI**.
 
 ### 1.2 Bộ Dữ Liệu LUAD-HistoSeg (Lung Adenocarcinoma Tissue Segmentation)
 
-- **Nguồn gốc:** Gồm 49 bệnh nhân ung thư biểu mô tuyến phổi (29 ca từ Bệnh viện Nhân dân tỉnh Quảng Đông - GDPH và 20 ca từ TCGA-LUAD).
-- **Liên kết tải chính thức:**  
-  Google Drive: `https://drive.google.com/drive/folders/1E3Yei3Or3xJXukHIybZAgochxfn6FJpr?usp=sharing`
-- **Quy mô:** 31.826 patches ($224 \times 224$ pixels) ở độ phóng đại $10\times$ (khoảng $1.0$ $\mu$m/pixel).
-- **Phân bổ phân chia:**
-  - **Tập Train:** 39 bệnh nhân ($16.678$ patches nhãn one-hot).
-  - **Tập Validation:** 5 bệnh nhân ($300$ patches có mask điểm chuẩn).
-  - **Tập Test:** 5 bệnh nhân ($307$ patches có mask kiểm thử độc lập).
-- **Danh mục 4 Phân lớp Mô học:**
-  1. `TE` (Tumor Epithelial) - Mã lớp: `0`
-  2. `TAS` (Tumor-Associated Stroma) - Mã lớp: `1`
-  3. `NEC` (Necrosis) - Mã lớp: `2`
-  4. `LYM` (Lymphocytes) - Mã lớp: `3`
+- **Nguồn gốc:** Gồm **`49` bệnh nhân** ung thư biểu mô tuyến phổi độc lập (`29` ca từ Bệnh viện Nhân dân tỉnh Quảng Đông - **GDPH** và `20` ca từ **TCGA-LUAD**), hoàn toàn **0% chồng lấp bệnh nhân** với quần thể ung thư vú TCGA-BRCA của BCSS-WSSS.
+- **Liên kết tải chính thức:**
+  - Hugging Face Hub (trong `src/colab_pkg/downloader.py`): `https://huggingface.co/datasets/nttduc/wsss-pathology/resolve/main/LUAD-HistoSeg.zip`
+  - Google Drive Mirror ZIP (trong `src/colab_pkg/downloader.py`, `GDRIVE_LUAD_DATASET_ID`): `https://drive.google.com/file/d/1WyWfv-JHjLwkHOiN8blINhBOkKi--iA1/view`
+  - Google Drive gốc của tác giả MedIA 2022 (`repos/WSSS-Tissue/README.md`): `https://drive.google.com/drive/folders/1E3Yei3Or3xJXukHIybZAgochxfn6FJpr?usp=sharing`
+- **Quy mô chính xác:** **`17,285` patches** kích thước `224 x 224` pixels ở độ phóng đại **`10x` (`1.0 MPP`)** trên **`49` bệnh nhân** (`29` GDPH + `20` TCGA-LUAD).
+- **Phân bổ phân chia theo patch (Han et al., *MedIA 2022*, `arXiv:2110.08048`):**
+  - **Tập Huấn luyện (`training/`):** **`16,678` patches** (chỉ có nhãn yếu đa nhãn cấp patch).
+  - **Tập Kiểm định (`val/`):** **`300` patches** (có dense pixel mask).
+  - **Tập Kiểm thử (`test/`):** **`307` patches** (có dense pixel mask).
+- **Danh mục 5 phân lớp mô học chính xác (xác minh trong `repos/WSSS-Tissue/2_generate_PM.py:21-27` và `src/stage2_v2/gate7_clinical_bench.py:34-35`):**
+  1. `0: TE` (Tumor Epithelial - Biểu mô u phổi) - RGB `(205, 51, 51)`
+  2. `1: NEC` (Necrosis - Mô hoại tử) - RGB `(0, 255, 0)`
+  3. `2: LYM` (Lymphocyte - Bạch huyết bào) - RGB `(65, 105, 225)`
+  4. `3: TAS` (Tumor-Associated Stroma - Mô đệm liên kết u) - RGB `(255, 165, 0)`
+  5. `4: BACK` (Background / Alveolar Air Sacs - Khoảng trắng phế nang và nền kính) - RGB `(255, 255, 255)`
+- **Ánh xạ lớp chéo cơ quan LUAD sang BCSS (`src/stage2_v2/gate7_clinical_bench.py:34-35`):**
+  Do thứ tự mã lớp `1` và `3` đảo ngược giữa hai bộ dữ liệu (`NEC` là lớp `1` trong LUAD nhưng là lớp `3` trong BCSS; `TAS/STR` là lớp `3` trong LUAD nhưng là lớp `1` trong BCSS), mọi đánh giá chéo cơ quan bắt buộc áp dụng bảng tra cố định:
+  ```python
+  # LUAD-HistoSeg [0:TE, 1:NEC, 2:LYM, 3:TAS, 4:BACK] -> BCSS [0:TUM, 1:STR, 2:LYM, 3:NEC, 4:BACK]
+  LUAD_TO_BCSS_LUT = [0, 3, 2, 1, 4]
+  ```
+  Hàm `remap_luad_mask_to_bcss()` bảo toàn nguyên vẹn giá trị bỏ qua `ignore_index = 255`.
+- **Vai trò kép trong dự án SE374.R11:**
+  1. Cung cấp trọng số khởi tạo miền mô học sạch (`stage1_checkpoint_trained_on_luad.pth`, 0% chồng lấp TCGA-BRCA) cho Stage-1 Champion `se374_arm_b_full`.
+  2. Làm bộ kiểm định tổng quát hóa chéo cơ quan (Cross-Organ Benchmark) qua lớp `LUADBCSSAlignedDataset` trong `src/stage2_v2/gate7_clinical_bench.py` và notebook `notebooks/04b_Stage2_Gate7_Clinical_LUAD_Bench_G4.ipynb`.
+
+### 1.3 Bảng Đối Chiếu Tổng Hợp Hai Bộ Dữ Liệu
+
+| Thuộc Tính | BCSS-WSSS (TCGA-BRCA) | LUAD-HistoSeg (GDPH + TCGA-LUAD) |
+| :--- | :--- | :--- |
+| **Cơ quan / Bệnh học** | Ung thư biểu mô vú xâm lấn (Breast) | Ung thư biểu mô tuyến phổi (Lung) |
+| **Tổng số bệnh nhân** | **151** (`106` Train / `22` Val / `23` Test) | **49** (`29` GDPH + `20` TCGA-LUAD) |
+| **Tổng số patches (`224x224`)** | **31,826** (`23,422 / 3,418 / 4,986`) | **17,285** (`16,678 / 300 / 307`) |
+| **Độ phóng đại / MPP** | **40x (`0.2500 MPP`)** | **10x (`1.0000 MPP`)** |
+| **Thứ tự mã lớp (`0-4`)** | `0:TUM, 1:STR, 2:LYM, 3:NEC, 4:BACK` | `0:TE, 1:NEC, 2:LYM, 3:TAS, 4:BACK` |
+| **Ánh xạ về không gian BCSS** | Đồng nhất `[0, 1, 2, 3, 4]` | `LUAD_TO_BCSS_LUT = [0, 3, 2, 1, 4]` |
+| **Rò rỉ bệnh nhân nội bộ / chéo tập** | `0%` (`patient_overlap_count = 0`) | `0%` chồng lấp với TCGA-BRCA |
 
 ---
 
-## 2. Quy Cách Cấu Trúc Tệp & Bóc Tách Metadata (File Naming Specification)
+## 2. Cấu Trúc Thư Mục Thực Tế, Bóc Tách Tên Tệp & Dò Tìm Đa Tầng
 
-### 2.1 Cấu Trúc Thư Mục Dữ Liệu Chuẩn
+### 2.1 Cấu Trúc Thư Mục Thực Tế Trên Đĩa (`data/BCSS-WSSS/`)
 
-```
+```text
 data/
-  BCSS-WSSS/
-    train/
-      TCGA-A2-A0T2_1024_2048_[1 0 0 1].png
-      TCGA-A2-A0T2_1248_2048_[1 1 0 0].png
-      ...
-    valid/
-      img/
-        TCGA-E2-A152_512_1024.png
-      mask/
-        TCGA-E2-A152_512_1024.png   # PNG 8-bit index (giá trị pixel 0 đến 4)
-    test/
-      img/
-        TCGA-BH-A0B8_2048_4096.png
-      mask/
-        TCGA-BH-A0B8_2048_4096.png  # PNG 8-bit index (giá trị pixel 0 đến 4)
-  sample_dataset/                   # Mini Sample dùng cho Sanity Run (Dry-Run)
-    train/
-    valid/
-    test/
+|-- BCSS-WSSS/
+|   |-- training/                    # 23,422 PNGs (106 bệnh nhân, chỉ có nhãn yếu [tsln])
+|   |   |-- TCGA-A1-A0SK-DX1_xmin45749_ymin25055_MPP-0.2500+0[1101].png
+|   |   `-- TCGA-A1-A0SK-DX1_xmin45749_ymin25055_MPP-0.2500+100[1100].png
+|   |-- val/
+|   |   |-- img/                     # 3,418 PNGs (22 bệnh nhân)
+|   |   |   `-- TCGA-EW-A1PB-DX1_xmin57214_ymin25940_MPP-0.2500+0.png
+|   |   `-- mask/                    # 3,418 PNGs 8-bit Palette mode "P" (giá trị 0-4)
+|   |       `-- TCGA-EW-A1PB-DX1_xmin57214_ymin25940_MPP-0.2500+0.png
+|   `-- test/
+|       |-- img/                     # 4,986 PNGs (23 bệnh nhân Held-Out Test)
+|       |   `-- TCGA-D8-A27F-DX1_xmin98787_ymin6725_MPP-0.2500+0.png
+|       `-- mask/                    # 4,986 PNGs 8-bit Palette mode "P" (giá trị 0-4)
+|           `-- TCGA-D8-A27F-DX1_xmin98787_ymin6725_MPP-0.2500+0.png
+`-- LUAD-HistoSeg/                   # Bộ dữ liệu phổi kiểm định chéo cơ quan (tùy chọn)
+    |-- training/                    # 16,678 PNGs (nhãn yếu [a b c d])
+    |-- val/                         # 300 PNGs (img/ + mask/)
+    `-- test/                        # 307 PNGs (img/ + mask/)
 ```
 
-### 2.2 Công Thức Bóc Tách Tên Tệp (Parsing Formula)
+### 2.2 Quy Cách Bóc Tách Metadata & Nhãn Yếu Từ Tên Tệp
 
-Đối với BCSS-WSSS, mỗi tệp ảnh trong tập huấn luyện có cấu trúc định dạng:
-$$\text{Filename} = \underbrace{\text{PatientID}}_{\text{Mã bệnh nhân}} \_ \underbrace{X}_{\text{Tọa độ X}} \_ \underbrace{Y}_{\text{Tọa độ Y}} \_ [ \underbrace{y_0 \quad y_1 \quad y_2 \quad y_3}_{\text{Vector nhãn nhị phân}} ].\text{png}$$
+Trong kho mã nguồn gốc `repos/WSSS-Tissue/tool/GenDataset.py:63-68`, định dạng nhãn trong dấu ngoặc vuông khác nhau giữa hai bộ dữ liệu:
+- **BCSS-WSSS (`data/BCSS-WSSS/training/`):** Vector 4 bit viết liền `[1101]` gắn sau chỉ số patch, ví dụ `TCGA-A1-A0SK-DX1_xmin45749_ymin25055_MPP-0.2500+0[1101].png`.
+- **LUAD-HistoSeg:** Vector 4 bit tách bởi khoảng trắng `[1 0 0 1]`.
 
-- **Trích xuất Patient ID:** Phần chuỗi ký tự đứng trước dấu gạch dưới đầu tiên `_` (hoặc tiền tố TCGA chuẩn `TCGA-XX-XXXX`).
-- **Trích xuất Tọa độ không gian:** Hai số nguyên $X, Y$ xác định vị trí mảng trên tiêu bản gigapixel toàn slide.
-- **Trích xuất Vector nhãn yếu:** Chuỗi nằm giữa cặp ngoặc vuông `[...]`:
+Các hàm `parse_patch_filename()` (`src/training/dataset_loader.py:75-114`) và `_extract_weak_label()` (`src/datasets/bcss_dataset.py:122-132`) dùng biểu thức chính quy chuẩn hóa để bóc tách an toàn cả hai định dạng (`[1101]`, `[1 0 0 1]`, `[1,0,0,1]`):
+- **Patient ID:** Bắt chuẩn tiền tố `TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}` (hoặc `GDPH[_-][A-Za-z0-9]+` trong `extract_luad_case_id()` tại `src/stage2_v2/gate7_clinical_bench.py:51-57`).
+- **Vector nhãn yếu đa nhãn:**
   $$\mathbf{y} = [y_{\text{TUM}}, y_{\text{STR}}, y_{\text{LYM}}, y_{\text{NEC}}] \in \{0, 1\}^4$$
+- **Đọc mặt nạ chế độ Palette (`mode == "P"`):** Mọi DataLoader đọc mặt nạ bằng `_load_mode_p_mask_array()` (`src/training/dataset_loader.py`), tuyệt đối giữ nguyên chỉ số lớp gốc `{0, 1, 2, 3, 4}` và giá trị bỏ qua `ignore_index = 255` (không chuyển đổi `.convert("L")` lên ảnh palette gây sai lệch nhãn màu).
+
+### 2.3 Giao Thức Dò Tìm Thư Mục Lồng Nhau & Phòng Thủ (`INVARIANT-29`)
+
+Do các gói nén trên Google Drive và Hugging Face có thể giải nén thành nhiều cấp thư mục khác nhau (`training/`, `train/`, `train/img/`, `BCSS-WSSS/training/`, `BCSS-WSSS/train/img/`, `valid/img/`), **nghiêm cấm giả định thư mục phẳng bằng `glob("*.png")`**. Toàn bộ hệ thống tuân thủ cơ chế phòng thủ 3 tầng:
+
+1. **Tự động phân giải đường dẫn đa tầng (`resolve_split_path` & `resolve_split_dirs`):**
+   - Trong các notebook huấn luyện (`notebooks/01_*`, `02_*`, `03_*`): hàm `resolve_split_path` dò tìm tuần tự mọi cấu trúc lồng nhau cho `train / val / test`.
+   - Trong gói điều phối (`src/colab_pkg/downloader.py:90-184`, `src/colab_pkg/evaluator.py`, và các notebook Gate-7 `02b`, `02c`, `02d`, `04b`): hàm `resolve_split_dirs()` quét đệ quy `**/{split}/img`, tự động bỏ qua `sample_dataset` và thư mục mã nguồn repo (`medical-wsss`, `repos`), đồng thời áp đặt ngưỡng kiểm chứng thực tế ở Pass 1 (`>= 10` ảnh và `>= 2` bệnh nhân độc lập) để chống ảo giác kiểm thử trên dữ liệu mẫu nhỏ.
+2. **Quét ảnh đệ quy `rglob("*.png")`:**
+   - Các bộ nạp dữ liệu lõi gồm `find_image_files()` (`src/training/dataset_loader.py:158-176`), `BCSSStage1TrainDataset` (`:435-443`), `BCSSStage1ValDataset` (`:504-506`), `memmap_dataset.py` (`:59`) và `LUADBCSSAlignedDataset` (`src/stage2_v2/gate7_clinical_bench.py:69-74`) đều tự động fallback sang `rglob("*.png")` nếu thư mục đầu vào chứa thư mục con `img/`.
+3. **Chặn sập DataLoader rỗng (`Zero-File Fail-Fast`):**
+   - `BCSSStage1TrainDataset` (`src/training/dataset_loader.py:440-443`) và `LUADBCSSAlignedDataset` (`src/stage2_v2/gate7_clinical_bench.py:73-74`) kiểm tra `len(files) == 0` ngay tại `__init__` và ném `FileNotFoundError` tường minh; `BCSSStage1ValDataset` (`src/training/dataset_loader.py:511-515`) ném `ValueError` khi bộ lọc bệnh nhân `strict_patient_filter=True` khớp `0` ảnh; và `SoftPseudoMaskMemmapDataset` (`src/stage2_v2/memmap_dataset.py:927-930`) ném `FileNotFoundError` ngay nếu thiếu tệp memmap hoặc manifest.
 
 ---
 
-## 3. Giao Thức Chống Rò Rỉ Bệnh Nhân Bất Biến (Patient-Level Anti-Leakage Protocol)
+## 3. Hợp Đồng Chuẩn Hóa Đầu Vào (`Input Normalization Contracts`)
 
-### 3.1 Vấn Đề Rò Rỉ Dữ Liệu Trong Ảnh Y Tế
-Một bệnh nhân ung thư cung cấp một hoặc nhiều slide WSI, từ đó cắt ra hàng trăm đến hàng nghìn patches.
-- **Rò rỉ ở cấp độ Patch (Patch-Level Leakage):** Nếu xáo trộn ngẫu nhiên toàn bộ patches và chia $80\% - 10\% - 10\%$, các patches của cùng một khối u bệnh nhân sẽ xuất hiện ở cả tập train và tập test. Do đặc trưng tế bào của cùng một người có mức độ tương đồng vi thể rất cao (cùng đột biến gen, cùng độ bắt màu nhuộm H&E), mô hình sẽ "học vẹt" kiểu hình của bệnh nhân đó thay vì học quy luật tổng quát, dẫn đến điểm kiểm thử cao ảo nhưng thất bại hoàn toàn khi ứng dụng trên bệnh nhân mới.
+Hệ thống quản lý nghiêm ngặt hai miền chuẩn hóa đầu vào tương ứng với nguồn gốc trọng số khởi tạo nhằm ngăn lệch phân phối BatchNorm/LayerNorm:
 
-### 3.2 Quy Trình Kiểm Soát Toán Học Chống Rò Rỉ
-Gọi $\mathcal{P}_{\text{train}}, \mathcal{P}_{\text{val}}, \mathcal{P}_{\text{test}}$ lần lượt là tập hợp các mã bệnh nhân (Patient IDs) tương ứng:
+| Miền Chuẩn Hóa | Công Thức Biến Đổi | Mô Hình / Checkpoint Áp Dụng | Tệp Khóa Hợp Đồng |
+| :--- | :--- | :--- | :--- |
+| **`zero_one` (`[0.0, 1.0]`)** | $x = \text{RGB} / 255.0$ (KHÔNG trừ `IMAGENET_MEAN/STD`) | Pretrained tác giả WSSS-Tissue (`stage1_checkpoint_trained_on_bcss.pth`, `stage2_checkpoint_trained_on_bcss.pth`, `stage1_checkpoint_trained_on_luad.pth`) và Stage-1 Champion `se374_arm_b_full` (`input_norm = "zero_one"`) | `src/colab_pkg/colab_runner.py`, `src/colab_pkg/evaluator.py`, `src/training/eval_stage1_full.py` (`load_stage1_strict`), `src/visualization/api_server.py` |
+| **`imagenet` (ImageNet Norm)** | $x = (\text{RGB}/255.0 - \mu_{\text{IN}}) / \sigma_{\text{IN}}$ với $\mu_{\text{IN}} = (0.485, 0.456, 0.406)$, $\sigma_{\text{IN}} = (0.229, 0.224, 0.225)$ | Toàn bộ backbone khởi tạo từ ImageNet-1K hoặc LVD-142M: `src/training/train_stage2.py`, toàn bộ hệ thống Stage-2 v2 Gate-6 / Gate-7 Track A (`DeepLabV3PlusDualHead`, `SegFormerDualHead`, `ConvNeXtFPNDualHead`, `DINOv2AdapterDualHead`), và `LUADBCSSAlignedDataset` | `src/training/dataset_loader.py`, `src/stage2_v2/models.py`, `src/stage2_v2/gate7_clinical_bench.py`, `src/visualization/api_server.py` |
+
+- Khi suy luận kết hợp Stage-1 (`zero_one`) với Stage-2 v2 (`imagenet`) trong `src/stage2_v2/ensemble.py` và `src/visualization/api_server.py`, tensor đầu vào được tự động phân nhánh đúng miền chuẩn hóa theo metadata `input_norm` lưu trong checkpoint (qua `load_stage1_strict`), đảm bảo nhất quán 100% giữa huấn luyện, đánh giá và triển khai lâm sàng.
+
+---
+
+## 4. Giao Thức Chống Rò Rỉ Bệnh Nhân & Tính Thuần Khiết Track A
+
+### 4.1 Vấn Đề Rò Rỉ Dữ Liệu Ở Cấp Patch Trong Ảnh Y Tế
+
+Một bệnh nhân ung thư cung cấp một hoặc nhiều tiêu bản WSI, từ đó cắt ra hàng trăm đến hàng nghìn patches `224 x 224`. Nếu xáo trộn ngẫu nhiên toàn bộ patches trước khi chia `train / val / test`, các lát cắt của cùng một khối u (cùng đột biến gen, cùng cấu trúc nền mô và cùng sắc độ thuốc nhuộm H&E) sẽ lọt vào cả tập huấn luyện và tập kiểm thử. Điều này tạo ra kết quả kiểm thử cao giả tạo nhưng thất bại trên bệnh nhân mới ngoài lâm sàng.
+
+### 4.2 Điều Kiện Toán Học & Cơ Chế Khóa Cứng (`INVARIANT-08`)
+
+Gọi $\mathcal{P}_{\text{train}}, \mathcal{P}_{\text{val}}, \mathcal{P}_{\text{test}}$ lần lượt là tập hợp các mã bệnh nhân (`Patient IDs`) thuộc ba phân tập:
+
 $$\mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{val}} = \emptyset, \quad \mathcal{P}_{\text{train}} \cap \mathcal{P}_{\text{test}} = \emptyset, \quad \mathcal{P}_{\text{val}} \cap \mathcal{P}_{\text{test}} = \emptyset$$
 
-The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.
+$$\left|\mathcal{P}_{\text{train}}\right| = 106, \quad \left|\mathcal{P}_{\text{val}}\right| = 22, \quad \left|\mathcal{P}_{\text{test}}\right| = 23, \quad \left|\mathcal{P}_{\text{train}} \cup \mathcal{P}_{\text{val}} \cup \mathcal{P}_{\text{test}}\right| = 151$$
+
+Hệ thống thực thi bảo đảm bất biến này ở 3 lớp kiểm soát độc lập:
+1. **Tệp kê khai bất biến (`src/config/bcss_patient_splits.json`):** Khóa tĩnh danh sách toàn bộ `151` mã bệnh nhân TCGA-BRCA (`106 / 22 / 23`), khớp 100% với phân vùng thực trên đĩa.
+2. **Kiểm định runtime tự động (`src/datasets/patient_split.py`):** Các hàm `verify_patient_leakage()` và `load_patient_splits()` kiểm tra giao tập ở mọi lần nạp dữ liệu và ném `ValueError` ngay lập tức nếu phát hiện dù chỉ 1 bệnh nhân trùng lặp. Mọi báo cáo thực nghiệm Gate-6 và Gate-7 trong `checkpoints/vps_evidence/` đều ghi nhận `patient_overlap_count = 0` và `non_finite_tensors = 0`.
+3. **Kiểm thử tự động liên tục (`tests/test_patient_split.py` & `.github/workflows/ci.yml`):** Chạy bắt buộc trong mọi chu trình CI/CD và trước mỗi đợt kiểm định.
+
+### 4.3 Nguyên Tắc Đóng Băng Tập Test & Độ Thuần Khiết Tiền Huấn Luyện Track A
+
+- **Đóng băng tuyệt đối `23` bệnh nhân Held-Out Test (`4,986` patches):** Mọi quyết định mô hình gồm dừng sớm (`ema_only_best_selection = True`), chọn ứng viên Round-2 (`blend = 1.0` vs `0.5` tại `se374_g7_diag_r2_val`), chọn TTA theo từng nhánh, hiệu chuẩn nhiệt độ `full_val_betas`, 5-fold CV / LOPOCV tìm trọng số tổ hợp, hiệu chuẩn ngưỡng CGM (`1-DoF` / `4-DoF`) và hiệu chuẩn prototype `MP-PPC` đều thực hiện 100% trên `train` hoặc `val` (`22` bệnh nhân), **tuyệt đối không chạm vào tập `test`**.
+- **Độ thuần khiết tiền huấn luyện Track A (`track_a_clean`, `0%` chồng lấp TCGA-BRCA):**
+  - Toàn bộ 4 nhánh Round-1 (`arm1-arm4`) và 4 nhánh Round-2 (`arm5-arm8`) gắn cờ kiểm chứng `track = "track_a_clean"`, `tcga_pretrained = False`. Các backbone chỉ khởi tạo từ ảnh tự nhiên **ImageNet-1K** (`resnet101`, `nvidia/mit-b3`, `nvidia/mit-b5`, `convnext_base`, `convnext_large`) hoặc **LVD-142M** (`facebook/dinov2-base`, `facebook/dinov2-large`).
+  - Các mô hình pathology foundation tiền huấn luyện trên dữ liệu TCGA (ví dụ `owkin/phikon-v2` trên PANCAN-XL) bị cách ly tuyệt đối sang Track B bằng `validate_track_a_arm_spec()` trong `src/stage2_v2/ensemble.py:116` (xuất lại tại `src/stage2_v2/__init__.py`) kết hợp `validate_track_name()` trong `src/stage2_v2/config.py:25`.
+  - Stage-1 Champion `se374_arm_b_full` khởi tạo từ trọng số mô phổi LUAD-HistoSeg (`stage1_checkpoint_trained_on_luad.pth`: `29` GDPH + `20` TCGA-LUAD), đảm bảo **0% chồng lấp bệnh nhân TCGA-BRCA**.
