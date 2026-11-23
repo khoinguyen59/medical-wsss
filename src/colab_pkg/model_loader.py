@@ -956,6 +956,27 @@ class MultiMethodWSSSEngine:
             return torch.amp.autocast(device_type="cuda", dtype=target_dtype, enabled=True)
         return contextlib.nullcontext()
 
+    @staticmethod
+    def _extract_seg_logits(out: Any) -> torch.Tensor:
+        """Unwraps segmentation logits from plain tensor, dict {'seg_logits': ...}, or tuple outputs."""
+        if isinstance(out, dict):
+            logits = out.get("seg_logits", out.get("out"))
+            if logits is None:
+                logits = next(iter(out.values()))
+            return logits
+        if isinstance(out, (tuple, list)):
+            return out[0]
+        return out
+
+    @staticmethod
+    def _prepare_model_input(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
+        """Applies ImageNet normalization without mutating x when model.input_norm == 'imagenet'."""
+        if str(getattr(model, "input_norm", "") or "").strip().lower() == "imagenet":
+            mean = torch.tensor(IMAGENET_MEAN, device=x.device, dtype=x.dtype).view(1, 3, 1, 1)
+            std = torch.tensor(IMAGENET_STD, device=x.device, dtype=x.dtype).view(1, 3, 1, 1)
+            return (x - mean) / std
+        return x
+
     @classmethod
     def forward_all_tta_views(
         cls,
@@ -973,21 +994,22 @@ class MultiMethodWSSSEngine:
           in batch 2 before inverting and averaging all 8 views.
         """
         with torch.no_grad():
-            dev = next(model.parameters()).device
-            if img_tensor.device != dev:
-                img_tensor = img_tensor.to(dev)
-            if img_tensor.dim() == 3:
-                img_tensor = img_tensor.unsqueeze(0)
+            first_param = next(model.parameters(), None)
+            dev = first_param.device if first_param is not None else img_tensor.device
+            x_in = img_tensor.to(dev) if img_tensor.device != dev else img_tensor
+            if x_in.dim() == 3:
+                x_in = x_in.unsqueeze(0)
+            x_in = cls._prepare_model_input(model, x_in)
 
-            h, w = img_tensor.shape[2], img_tensor.shape[3]
-            x_orig = img_tensor
-            x_hflip = torch.flip(img_tensor, dims=[3])
-            x_vflip = torch.flip(img_tensor, dims=[2])
-            x_hvflip = torch.flip(img_tensor, dims=[2, 3])
+            h, w = x_in.shape[2], x_in.shape[3]
+            x_orig = x_in
+            x_hflip = torch.flip(x_in, dims=[3])
+            x_vflip = torch.flip(x_in, dims=[2])
+            x_hvflip = torch.flip(x_in, dims=[2, 3])
 
             with cls._get_autocast_context(dev, use_amp=use_amp, amp_dtype=amp_dtype):
                 if full_d8:
-                    x_r90 = torch.rot90(img_tensor, k=1, dims=[2, 3])
+                    x_r90 = torch.rot90(x_in, k=1, dims=[2, 3])
                     x_r90_h = torch.flip(x_r90, dims=[3])
                     x_r90_v = torch.flip(x_r90, dims=[2])
                     x_r270 = torch.flip(x_r90, dims=[2, 3])
@@ -997,7 +1019,7 @@ class MultiMethodWSSSEngine:
                             [x_orig, x_hflip, x_vflip, x_hvflip, x_r90, x_r90_h, x_r90_v, x_r270],
                             dim=0,
                         )
-                        batch_probs = torch.softmax(model(batch_x)[:, :4].float(), dim=1)
+                        batch_probs = torch.softmax(cls._extract_seg_logits(model(batch_x))[:, :4].float(), dim=1)
 
                         p0 = batch_probs[0]
                         p1 = torch.flip(batch_probs[1], dims=[2])
@@ -1010,8 +1032,8 @@ class MultiMethodWSSSEngine:
                     else:
                         batch_reg = torch.cat([x_orig, x_hflip, x_vflip, x_hvflip], dim=0)
                         batch_rot = torch.cat([x_r90, x_r90_h, x_r90_v, x_r270], dim=0)
-                        probs_reg = torch.softmax(model(batch_reg)[:, :4].float(), dim=1)
-                        probs_rot = torch.softmax(model(batch_rot)[:, :4].float(), dim=1)
+                        probs_reg = torch.softmax(cls._extract_seg_logits(model(batch_reg))[:, :4].float(), dim=1)
+                        probs_rot = torch.softmax(cls._extract_seg_logits(model(batch_rot))[:, :4].float(), dim=1)
 
                         p0 = probs_reg[0]
                         p1 = torch.flip(probs_reg[1], dims=[2])
@@ -1027,7 +1049,7 @@ class MultiMethodWSSSEngine:
                     probs_d8 = 0.125 * (sum_d4 + p4 + p5 + p6 + p7)
                 else:
                     batch_x = torch.cat([x_orig, x_hflip, x_vflip, x_hvflip], dim=0)
-                    batch_probs = torch.softmax(model(batch_x)[:, :4].float(), dim=1)
+                    batch_probs = torch.softmax(cls._extract_seg_logits(model(batch_x))[:, :4].float(), dim=1)
 
                     p0 = batch_probs[0]
                     p1 = torch.flip(batch_probs[1], dims=[2])
@@ -1089,7 +1111,8 @@ class MultiMethodWSSSEngine:
             active_weights = tuple(1.0 / len(active_scales) for _ in active_scales)
 
         with torch.no_grad():
-            dev = next(model.parameters()).device
+            first_param = next(model.parameters(), None)
+            dev = first_param.device if first_param is not None else img_tensor.device
             x_base = img_tensor.to(dev) if img_tensor.device != dev else img_tensor
             if x_base.dim() == 3:
                 x_base = x_base.unsqueeze(0)
@@ -1121,8 +1144,9 @@ class MultiMethodWSSSEngine:
                     x_scaled = F.interpolate(
                         x_base, size=(sh, sw), mode="bilinear", align_corners=True
                     )
+                    x_scaled_in = self._prepare_model_input(model, x_scaled)
                     with self._get_autocast_context(dev, use_amp=self.use_amp, amp_dtype=self.amp_dtype):
-                        logits_s = model(x_scaled)[:, :4].float()
+                        logits_s = self._extract_seg_logits(model(x_scaled_in))[:, :4].float()
                     probs_batch_s = torch.softmax(logits_s, dim=1)
                     p_s_interp = F.interpolate(
                         probs_batch_s, size=(H, W), mode="bilinear", align_corners=True
@@ -1150,10 +1174,12 @@ class MultiMethodWSSSEngine:
             return None, None
 
         with torch.no_grad():
-            dev = next(model_stage1.parameters()).device
+            first_param = next(model_stage1.parameters(), None)
+            dev = first_param.device if first_param is not None else img_tensor.device
             x_in = img_tensor.to(dev) if img_tensor.device != dev else img_tensor
             if x_in.dim() == 3:
                 x_in = x_in.unsqueeze(0)
+            x_in = self._prepare_model_input(model_stage1, x_in)
 
             with self._get_autocast_context(dev, use_amp=self.use_amp, amp_dtype=self.amp_dtype):
                 if hasattr(model_stage1, "forward_cam"):
@@ -1199,10 +1225,12 @@ class MultiMethodWSSSEngine:
             return None, None, None
 
         with torch.no_grad():
-            dev = next(model_stage1.parameters()).device
+            first_param = next(model_stage1.parameters(), None)
+            dev = first_param.device if first_param is not None else img_tensor.device
             x_in = img_tensor.to(dev) if img_tensor.device != dev else img_tensor
             if x_in.dim() == 3:
                 x_in = x_in.unsqueeze(0)
+            x_in = self._prepare_model_input(model_stage1, x_in)
 
             x_hflip = torch.flip(x_in, dims=[3])
             x_vflip = torch.flip(x_in, dims=[2])
@@ -1520,6 +1548,51 @@ class MultiMethodWSSSEngine:
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(pure_glass, connectivity=8)
         for lbl in range(1, num_labels):
             if stats[lbl, cv2.CC_STAT_AREA] >= thresh_area:
+                gated[labels == lbl] = background_class_idx
+        return gated
+
+    @classmethod
+    def apply_bright_glass_guard(
+        cls,
+        pred_mask: np.ndarray,
+        raw_rgb: np.ndarray,
+        background_class_idx: int = 4,
+        gray_thresh: int = 235,
+        sat_thresh: int = 12,
+        min_glass_area: int = 256,
+    ) -> np.ndarray:
+        """GT-free Cand1 bright-glass detector (gray >= 235, sat <= 12, area >= 256 px).
+
+        Suppresses contiguous unstained white glass regions while preserving stained
+        histopathology tissue and small intracellular lumens (< min_glass_area px).
+        """
+        pred_arr = (
+            pred_mask.detach().cpu().numpy()
+            if isinstance(pred_mask, torch.Tensor)
+            else np.asarray(pred_mask)
+        )
+        rgb_u8 = np.asarray(raw_rgb)
+        if rgb_u8.size == 0:
+            return pred_arr.copy()
+        if rgb_u8.dtype != np.uint8:
+            if np.issubdtype(rgb_u8.dtype, np.floating) and float(rgb_u8.max()) <= 1.0:
+                rgb_u8 = np.clip(rgb_u8 * 255.0, 0, 255).astype(np.uint8)
+            else:
+                rgb_u8 = np.clip(rgb_u8, 0, 255).astype(np.uint8)
+        rgb_u8 = np.ascontiguousarray(rgb_u8)
+        hsv = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2HSV)
+        sat = hsv[:, :, 1]
+        gray = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2GRAY)
+
+        bright_glass = ((gray >= int(gray_thresh)) & (sat <= int(sat_thresh))).astype(np.uint8)
+        if not np.any(bright_glass):
+            return pred_arr.copy()
+
+        thresh_area = int(min_glass_area)
+        gated = pred_arr.copy()
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(bright_glass, connectivity=8)
+        for lbl in range(1, num_labels):
+            if int(stats[lbl, cv2.CC_STAT_AREA]) >= thresh_area:
                 gated[labels == lbl] = background_class_idx
         return gated
 

@@ -59,25 +59,41 @@ def compute_unified_patch_miou(
     gt_arr: np.ndarray,
 ) -> Dict[str, float]:
     """Computes unified patch IoU metrics matching clinical_viewer contract."""
-    valid_fg = (gt_arr >= 0) & (gt_arr < 4)
-    valid_all = (gt_arr >= 0) & (gt_arr <= 4)
+    pred_i = np.asarray(pred_arr, dtype=np.int64)
+    gt_i = np.asarray(gt_arr, dtype=np.int64)
+    valid_fg = (gt_i >= 0) & (gt_i < 4)
+    valid_all = (gt_i >= 0) & (gt_i <= 4)
     n_valid = int(np.sum(valid_all))
     min_px = 50 if n_valid >= 4096 else 1
-    pa_val = float((pred_arr[valid_fg] == gt_arr[valid_fg]).mean() * 100.0) if np.any(valid_fg) else 0.0
+    pa_val = float((pred_i[valid_fg] == gt_i[valid_fg]).mean() * 100.0) if np.any(valid_fg) else 0.0
 
     ious_present: List[float] = []
     ious_penalized: List[float] = []
     for c_idx in range(4):
-        g_cnt = int(np.sum(gt_arr == c_idx))
-        p_cnt = int(np.sum((pred_arr == c_idx) & valid_all))
-        inter = int(np.sum((pred_arr == c_idx) & (gt_arr == c_idx)))
-        union = int(np.sum(((pred_arr == c_idx) | (gt_arr == c_idx)) & valid_all))
-        iou_pct = (inter / union * 100.0) if union > 0 else 0.0
+        g_cnt = int(np.sum((gt_i == c_idx) & valid_fg))
+        p_cnt_all = int(np.sum((pred_i == c_idx) & valid_all))
+        inter_fg = int(np.sum((pred_i == c_idx) & (gt_i == c_idx) & valid_fg))
+        union_fg = int(np.sum(((pred_i == c_idx) | (gt_i == c_idx)) & valid_fg))
+        iou_fg = (inter_fg / union_fg * 100.0) if union_fg > 0 else 0.0
+
+        inter_all = int(np.sum((pred_i == c_idx) & (gt_i == c_idx) & valid_all))
+        union_all = int(np.sum(((pred_i == c_idx) | (gt_i == c_idx)) & valid_all))
+        iou_all = (inter_all / union_all * 100.0) if union_all > 0 else 0.0
+
         if g_cnt >= min_px:
-            ious_present.append(iou_pct)
-            ious_penalized.append(iou_pct)
-        elif p_cnt >= min_px:
+            ious_present.append(iou_fg)
+            ious_penalized.append(iou_all)
+        elif p_cnt_all >= min_px:
             ious_penalized.append(0.0)
+
+    if not ious_present and np.any(valid_fg):
+        for c_idx in range(4):
+            g_cnt = int(np.sum((gt_i == c_idx) & valid_fg))
+            if g_cnt >= 1:
+                inter_fg = int(np.sum((pred_i == c_idx) & (gt_i == c_idx) & valid_fg))
+                union_fg = int(np.sum(((pred_i == c_idx) | (gt_i == c_idx)) & valid_fg))
+                if union_fg > 0:
+                    ious_present.append(inter_fg / union_fg * 100.0)
 
     miou_gt_present = (
         float(np.mean(ious_present))
@@ -86,6 +102,7 @@ def compute_unified_patch_miou(
     )
     miou_penalized = float(np.mean(ious_penalized)) if ious_penalized else 0.0
     return {
+        "miou_4cls": miou_gt_present,
         "miou_gt_present": miou_gt_present,
         "miou_penalized": miou_penalized,
         "pa_4cls": pa_val,
@@ -157,7 +174,8 @@ def render_clinical_comparison_figure(
         return None, None
 
     if device is None:
-        dev = next(model.parameters()).device
+        first_param = next(model.parameters(), None)
+        dev = first_param.device if first_param is not None else torch.device("cpu")
     elif isinstance(device, str):
         dev = torch.device(device)
     else:
@@ -215,7 +233,10 @@ def render_clinical_comparison_figure(
         gt_colored = colorize_mask(gt)
         m1_colored = colorize_mask(pred_m1_display)
         pred_colored = colorize_mask(pred_best_display)
-        overlay = (0.60 * raw_np + 0.40 * pred_colored).astype(np.uint8)
+        overlay = raw_np.copy()
+        fg_ov = (pred_best_display >= 0) & (pred_best_display < 4)
+        if np.any(fg_ov):
+            overlay[fg_ov] = (0.60 * raw_np[fg_ov] + 0.40 * pred_colored[fg_ov]).astype(np.uint8)
         patient_id = extract_patient_id(img_p.name)
         best_short_tag = best_method_key.split("_")[0] if "_" in best_method_key else "M6"
 
@@ -760,10 +781,10 @@ def plot_whole_roi_ground_truth_comparison(
     h, w = rgb_np.shape[:2]
     # Resize masks if dimensions differ
     if pred_mask.shape[:2] != (h, w):
-        pred_p = Image.fromarray(pred_mask).resize((w, h), Image.Resampling.NEAREST)
+        pred_p = Image.fromarray(pred_mask.astype(np.uint8)).resize((w, h), Image.Resampling.NEAREST)
         pred_m = np.array(pred_p)
     else:
-        pred_m = pred_mask
+        pred_m = pred_mask.astype(np.uint8)
 
     if gt_mask.shape[:2] != (h, w):
         gt_p = Image.fromarray(gt_mask.astype(np.uint8)).resize((w, h), Image.Resampling.NEAREST)

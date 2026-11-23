@@ -48,14 +48,14 @@ except ImportError:
         compute_pixel_accuracy,
     )
 
-# BCSS tissue class constants & standard clinical palette
+# BCSS tissue class constants & standard clinical palette (IEEE / Springer / Clinical Workstation)
 CLASS_NAMES: List[str] = ["Tumor", "Stroma", "Lymphocyte", "Necrosis", "Background"]
 COLOR_PALETTE: Dict[int, Tuple[int, int, int]] = {
-    0: (220, 20, 60),    # Tumor: Crimson Red
-    1: (30, 144, 255),   # Stroma: Dodger Blue
-    2: (50, 205, 50),    # Lymphocyte: Lime Green
-    3: (255, 165, 0),    # Necrosis: Orange
-    4: (240, 240, 240),  # Background: Light Gray / White
+    0: (228, 26, 28),    # Tumor: Red
+    1: (77, 175, 74),    # Stroma: Green
+    2: (55, 126, 184),   # Lymphocyte: Blue
+    3: (255, 127, 0),    # Necrosis: Orange
+    4: (153, 153, 153),  # Background: Gray
 }
 
 
@@ -106,6 +106,7 @@ class WSILowMagHighMagPipeline:
         tissue_threshold: float = 0.15,
         engine: Optional[MultiMethodWSSSEngineV2] = None,
         device: Optional[Union[str, torch.device]] = None,
+        preserve_aspect_ratio: bool = False,
     ) -> None:
         """Initialize the WSI multi-resolution pipeline.
 
@@ -115,14 +116,39 @@ class WSILowMagHighMagPipeline:
             tissue_threshold: Minimum macro tissue score to retain a patch.
             engine: Pre-instantiated MultiMethodWSSSEngineV2 (optional).
             device: Compute device (cuda or cpu).
+            preserve_aspect_ratio: When True, scales overview within lowmag_target_size while preserving W:H ratio.
         """
         self.patch_size = patch_size
         self.lowmag_target_size = lowmag_target_size
         self.tissue_threshold = tissue_threshold
+        self.preserve_aspect_ratio = bool(preserve_aspect_ratio)
         self.device = torch.device(
             device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
         )
         self.engine = engine if engine is not None else MultiMethodWSSSEngineV2()
+
+    def _compute_overview_size(self, orig_w: int, orig_h: int) -> Tuple[int, int]:
+        """Computes overview (width, height), preserving slide aspect ratio when enabled."""
+        target_w, target_h = int(self.lowmag_target_size[0]), int(self.lowmag_target_size[1])
+        if not self.preserve_aspect_ratio or orig_w <= 0 or orig_h <= 0:
+            return target_w, target_h
+        scale = min(target_w / float(orig_w), target_h / float(orig_h))
+        mw = max(1, int(round(orig_w * scale)))
+        mh = max(1, int(round(orig_h * scale)))
+        return mw, mh
+
+    def _pad_crop_to_patch_size(self, crop_np: np.ndarray) -> np.ndarray:
+        """Reflect-pads edge crops smaller than patch_size without distorting 40x cell scale."""
+        ch, cw = crop_np.shape[:2]
+        if ch == self.patch_size and cw == self.patch_size:
+            return crop_np
+        if ch < self.patch_size or cw < self.patch_size:
+            pad_h = max(0, self.patch_size - ch)
+            pad_w = max(0, self.patch_size - cw)
+            pad_mode = "reflect" if (ch >= 2 and cw >= 2) else "edge"
+            padded = np.pad(crop_np, ((0, pad_h), (0, pad_w), (0, 0)), mode=pad_mode)
+            return padded[: self.patch_size, : self.patch_size]
+        return crop_np[: self.patch_size, : self.patch_size]
 
     def read_slide_overview(
         self,
@@ -146,7 +172,10 @@ class WSILowMagHighMagPipeline:
                     import openslide
                     slide = openslide.OpenSlide(str(p))
                     orig_w, orig_h = slide.dimensions
-                    overview = slide.get_thumbnail(self.lowmag_target_size).convert("RGB")
+                    target_sz = self._compute_overview_size(orig_w, orig_h)
+                    overview = slide.get_thumbnail(target_sz).convert("RGB")
+                    if overview.size != target_sz:
+                        overview = overview.resize(target_sz, Image.Resampling.BILINEAR)
                     return overview, (orig_w, orig_h)
                 except Exception:
                     pass
@@ -158,10 +187,11 @@ class WSILowMagHighMagPipeline:
                         if tif.series and len(tif.series[0].levels) > 0:
                             series = tif.series[0]
                             orig_h, orig_w = series.levels[0].shape[:2]
+                            target_sz = self._compute_overview_size(orig_w, orig_h)
                             # Use smallest downsampled overview level
                             smallest = series.levels[-1].asarray()
                             thumb = Image.fromarray(smallest).convert("RGB")
-                            overview = thumb.resize(self.lowmag_target_size, Image.Resampling.BILINEAR)
+                            overview = thumb.resize(target_sz, Image.Resampling.BILINEAR)
                             return overview, (orig_w, orig_h)
                 except Exception:
                     pass
@@ -171,20 +201,23 @@ class WSILowMagHighMagPipeline:
             with Image.open(p) as img:
                 img_rgb = img.convert("RGB")
                 orig_w, orig_h = img_rgb.size
-                overview = img_rgb.resize(self.lowmag_target_size, Image.Resampling.BILINEAR)
+                target_sz = self._compute_overview_size(orig_w, orig_h)
+                overview = img_rgb.resize(target_sz, Image.Resampling.BILINEAR)
                 return overview, (orig_w, orig_h)
 
         elif isinstance(slide_input, Image.Image):
             orig_w, orig_h = slide_input.size
+            target_sz = self._compute_overview_size(orig_w, orig_h)
             overview = slide_input.convert("RGB").resize(
-                self.lowmag_target_size, Image.Resampling.BILINEAR
+                target_sz, Image.Resampling.BILINEAR
             )
             return overview, (orig_w, orig_h)
 
         elif isinstance(slide_input, np.ndarray):
             orig_h, orig_w = slide_input.shape[:2]
+            target_sz = self._compute_overview_size(orig_w, orig_h)
             pil_img = Image.fromarray(slide_input).convert("RGB")
-            overview = pil_img.resize(self.lowmag_target_size, Image.Resampling.BILINEAR)
+            overview = pil_img.resize(target_sz, Image.Resampling.BILINEAR)
             return overview, (orig_w, orig_h)
 
         raise TypeError(f"Unsupported slide_input type: {type(slide_input)}")
@@ -218,13 +251,16 @@ class WSILowMagHighMagPipeline:
             # If Stage-1 Net_CAM is provided, run forward_cam on the downsampled overview
             model_stage1.eval()
             with torch.no_grad():
+                first_param = next(model_stage1.parameters(), None)
+                s1_dev = first_param.device if first_param is not None else self.device
                 tensor_in = (
                     torch.from_numpy(overview_np.transpose(2, 0, 1))
                     .float()
                     .div(255.0)
                     .unsqueeze(0)
-                    .to(self.device)
+                    .to(s1_dev)
                 )
+                tensor_in = self.engine._prepare_model_input(model_stage1, tensor_in)
                 cam, y_cls = model_stage1.forward_cam(tensor_in)
                 cam_up = F.interpolate(cam, size=(h, w), mode="bilinear", align_corners=False)
                 cam_np = cam_up.squeeze(0).cpu().numpy()
@@ -359,13 +395,7 @@ class WSILowMagHighMagPipeline:
                 crop = slide_obj.read_region(
                     (patch_info.x, patch_info.y), 0, (patch_info.width, patch_info.height)
                 ).convert("RGB")
-                crop_np = np.array(crop)
-                if crop_np.shape[0] != self.patch_size or crop_np.shape[1] != self.patch_size:
-                    crop_pil = Image.fromarray(crop_np).resize(
-                        (self.patch_size, self.patch_size), Image.Resampling.BILINEAR
-                    )
-                    crop_np = np.array(crop_pil)
-                return crop_np
+                return self._pad_crop_to_patch_size(np.array(crop))
 
             elif isinstance(slide_obj, Image.Image):
                 box = (
@@ -375,20 +405,12 @@ class WSILowMagHighMagPipeline:
                     patch_info.y + patch_info.height,
                 )
                 crop = slide_obj.crop(box).convert("RGB")
-                if crop.size != (self.patch_size, self.patch_size):
-                    crop = crop.resize((self.patch_size, self.patch_size), Image.Resampling.BILINEAR)
-                return np.array(crop)
+                return self._pad_crop_to_patch_size(np.array(crop))
 
             elif isinstance(slide_obj, np.ndarray):
                 box_y = slice(patch_info.y, patch_info.y + patch_info.height)
                 box_x = slice(patch_info.x, patch_info.x + patch_info.width)
-                crop_np = slide_obj[box_y, box_x]
-                if crop_np.shape[0] != self.patch_size or crop_np.shape[1] != self.patch_size:
-                    crop_pil = Image.fromarray(crop_np).resize(
-                        (self.patch_size, self.patch_size), Image.Resampling.BILINEAR
-                    )
-                    crop_np = np.array(crop_pil)
-                return crop_np
+                return self._pad_crop_to_patch_size(slide_obj[box_y, box_x])
 
         # Fallback if no pre-opened handle is provided
         if isinstance(slide_input, (str, Path)):
@@ -400,13 +422,7 @@ class WSILowMagHighMagPipeline:
                         crop = slide.read_region(
                             (patch_info.x, patch_info.y), 0, (patch_info.width, patch_info.height)
                         ).convert("RGB")
-                        crop_np = np.array(crop)
-                        if crop_np.shape[0] != self.patch_size or crop_np.shape[1] != self.patch_size:
-                            crop_pil = Image.fromarray(crop_np).resize(
-                                (self.patch_size, self.patch_size), Image.Resampling.BILINEAR
-                            )
-                            crop_np = np.array(crop_pil)
-                        return crop_np
+                        return self._pad_crop_to_patch_size(np.array(crop))
                 except Exception:
                     pass
 
@@ -419,9 +435,7 @@ class WSILowMagHighMagPipeline:
                     patch_info.y + patch_info.height,
                 )
                 crop = img.crop(box).convert("RGB")
-                if crop.size != (self.patch_size, self.patch_size):
-                    crop = crop.resize((self.patch_size, self.patch_size), Image.Resampling.BILINEAR)
-                return np.array(crop)
+                return self._pad_crop_to_patch_size(np.array(crop))
 
         elif isinstance(slide_input, (Image.Image, np.ndarray)):
             if isinstance(slide_input, Image.Image):
@@ -430,13 +444,7 @@ class WSILowMagHighMagPipeline:
                 arr = slide_input
             box_y = slice(patch_info.y, patch_info.y + patch_info.height)
             box_x = slice(patch_info.x, patch_info.x + patch_info.width)
-            crop_np = arr[box_y, box_x]
-            if crop_np.shape[0] != self.patch_size or crop_np.shape[1] != self.patch_size:
-                crop_pil = Image.fromarray(crop_np).resize(
-                    (self.patch_size, self.patch_size), Image.Resampling.BILINEAR
-                )
-                crop_np = np.array(crop_pil)
-            return crop_np
+            return self._pad_crop_to_patch_size(arr[box_y, box_x])
 
         raise TypeError(f"Unsupported slide_input type: {type(slide_input)}")
 
@@ -534,6 +542,10 @@ class WSILowMagHighMagPipeline:
                             model_stage2, img_tensor
                         )
 
+                    # Unpad border crops back to their true (height, width) before stitching
+                    if pred_mask.shape[0] != cand.height or pred_mask.shape[1] != cand.width:
+                        pred_mask = pred_mask[: cand.height, : cand.width]
+
                     cand.predicted_mask = pred_mask
                     cand.prediction_confidence = float(np.mean(pred_mask != 4))
 
@@ -571,11 +583,11 @@ class WSILowMagHighMagPipeline:
 
         # Step 4: Stitching Patch Predictions Back to Macro Coordinate Canvas
         # Initialize canvas with 100% tissue coverage from coarse low-mag predictions
-        stitched_mask = np.full(self.lowmag_target_size, 4, dtype=np.uint8)  # Class 4 = Background
+        macro_w, macro_h = overview_img.size
+        stitched_mask = np.full((macro_h, macro_w), 4, dtype=np.uint8)  # Class 4 = Background
         coarse_preds = np.argmax(macro_probs, axis=0).astype(np.uint8)
         stitched_mask[tissue_mask] = coarse_preds[tissue_mask]
 
-        macro_h, macro_w = self.lowmag_target_size
         scale_x = macro_w / float(orig_dims[0])
         scale_y = macro_h / float(orig_dims[1])
 
@@ -583,10 +595,10 @@ class WSILowMagHighMagPipeline:
             if cand.predicted_mask is None:
                 continue
 
-            mx_start = int(cand.x * scale_x)
-            mx_end = max(int((cand.x + cand.width) * scale_x), mx_start + 1)
-            my_start = int(cand.y * scale_y)
-            my_end = max(int((cand.y + cand.height) * scale_y), my_start + 1)
+            mx_start = min(macro_w - 1, max(0, int(cand.x * scale_x)))
+            mx_end = min(macro_w, max(int((cand.x + cand.width) * scale_x), mx_start + 1))
+            my_start = min(macro_h - 1, max(0, int(cand.y * scale_y)))
+            my_end = min(macro_h, max(int((cand.y + cand.height) * scale_y), my_start + 1))
 
             target_w = mx_end - mx_start
             target_h = my_end - my_start
@@ -608,7 +620,7 @@ class WSILowMagHighMagPipeline:
         report = WSIProcessingReport(
             slide_id=slide_id,
             original_dimensions=orig_dims,
-            macro_dimensions=self.lowmag_target_size,
+            macro_dimensions=(macro_w, macro_h),
             total_possible_patches=total_possible,
             selected_candidate_patches=len(candidates),
             compute_reduction_pct=round(reduction_pct, 2),
@@ -663,34 +675,16 @@ class WSILowMagHighMagPipeline:
         bcss_remapped[arr == 2] = 1
         bcss_remapped[(arr == 3) | (arr == 10) | (arr == 11)] = 2
         bcss_remapped[arr == 4] = 3
+        bcss_remapped[arr == 255] = 255
 
         if label_convention == "bcss_raw":
             return bcss_remapped
 
         unique_vals = set(np.unique(arr).tolist())
-        # Any code > 4 or presence of both 0 (outside_roi) and 4 (necrosis) in raw BCSS
-        if np.max(arr) > 4 or (0 in unique_vals and 4 in unique_vals):
+        # Only remap as raw 22-class BCSS when explicit BCSS raw class codes (5..21) are present.
+        # Never scramble WSSS {0..4, 255} masks containing TUM(0) + BACK(4) or ignore(255).
+        if any(5 <= int(v) <= 21 for v in unique_vals):
             return bcss_remapped
-
-        # Disambiguate masks with values in {0..4} using prediction concordance when available
-        if pred_mask is not None and any(v in unique_vals for v in (1, 2, 3, 4)):
-            pred_arr = np.asarray(pred_mask)
-            if pred_arr.shape[:2] != arr.shape[:2]:
-                pred_arr = np.array(
-                    Image.fromarray(pred_arr.astype(np.uint8)).resize(
-                        (arr.shape[1], arr.shape[0]), Image.Resampling.NEAREST
-                    )
-                )
-            valid_raw = (arr >= 0) & (arr < 4)
-            valid_remap = (bcss_remapped >= 0) & (bcss_remapped < 4)
-            acc_raw = float(np.mean(pred_arr[valid_raw] == arr[valid_raw])) if np.any(valid_raw) else 0.0
-            acc_remap = (
-                float(np.mean(pred_arr[valid_remap] == bcss_remapped[valid_remap]))
-                if np.any(valid_remap)
-                else 0.0
-            )
-            if acc_remap > acc_raw + 0.05:
-                return bcss_remapped
 
         return arr.copy()
 
@@ -703,7 +697,8 @@ class WSILowMagHighMagPipeline:
     ) -> Dict[str, Any]:
         """Evaluates whole-slide or whole-ROI segmentation against expert annotations.
 
-        Supports standard BCSS Whole-ROI annotations (PathologyDataScience/BCSS, nabil-m/bcss).
+        Supports both WSSS-Tissue indexed 'P'/uint8 masks ({0..4, 255}) and standard BCSS
+        Whole-ROI 22-class annotations (PathologyDataScience/BCSS, nabil-m/bcss).
         Maps BCSS standard GT codes per `meta/gtruth_codes.tsv`:
         1,19,20 -> 0 (TUM); 2 -> 1 (STR); 3,10,11 -> 2 (LYM); 4 -> 3 (NEC); 0 & others -> 4 (outside_roi).
 
@@ -718,10 +713,9 @@ class WSILowMagHighMagPipeline:
             per_class_iou, per_class_dice.
         """
         if isinstance(ground_truth_roi, (str, Path)):
-            gt_img = Image.open(ground_truth_roi)
-            gt_arr = np.array(gt_img)
-            if label_convention == "auto":
-                label_convention = "bcss_raw"
+            with Image.open(ground_truth_roi) as gt_img:
+                # Preserve indexed 'P' / grayscale 'L' class indices directly (never convert to RGB)
+                gt_arr = np.array(gt_img)
         else:
             gt_arr = np.array(ground_truth_roi)
 
@@ -747,9 +741,9 @@ class WSILowMagHighMagPipeline:
             cm5 = np.bincount(t_v * 5 + p_v, minlength=25).reshape((5, 5))
         cm4 = cm5[:4, :4]
 
-        # 4 foreground tissue classes: strictly preserve Class 4 Background false positives and false negatives
-        tp = np.diag(cm5[:4, :4]).astype(np.float64)
-        fp = cm5[:, :4].sum(axis=0).astype(np.float64) - tp
+        # Canonical valid_fg 4-class evaluation: gt in {0..3} only (outside-ROI gt==4 never pollutes FP)
+        tp = np.diag(cm4).astype(np.float64)
+        fp = cm4.sum(axis=0).astype(np.float64) - tp
         fn = cm5[:4, :].sum(axis=1).astype(np.float64) - tp
         denom_iou = tp + fp + fn
         denom_dice = 2.0 * tp + fp + fn

@@ -56,7 +56,9 @@ from src.models.wsss_inference_methods import (
 from src.models.wsss_tissue import WSSSBenchmarkingEngine
 from src.visualization.clinical_viewer import (
     CLASS_COLORS_HEX,
+    CLASS_COLORS_RGB,
     CLASS_NAMES,
+    _build_tile_feather_window,
     blend_overlay,
     compute_agreement_error_overlay,
     compute_blurred_dual_verification_overlay,
@@ -142,6 +144,40 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+GATE7_MODES = {
+    "gate7_arm5",
+    "gate7_arm5_tta",
+    "gate7_arm6",
+    "gate7_arm7",
+    "gate7_arm8",
+    "gate7_4arm",
+    "gate7_4arm_cgm",
+}
+
+GATE7_ARM_ORDER: Tuple[str, ...] = ("arm8", "arm6", "arm7", "arm5")
+GATE7_ARM_FULL_NAMES: Dict[str, str] = {
+    "arm5": "arm5_dinov2_large_r2",
+    "arm6": "arm6_segformer_b5_r2",
+    "arm7": "arm7_convnext_large_r2",
+    "arm8": "arm8_deeplab_r101_r2",
+}
+GATE7_ARM_TTAS: Dict[str, str] = {
+    "arm8": "ms_3_hflip",
+    "arm6": "d4_8view_1x",
+    "arm7": "ms_3_hflip",
+    "arm5": "ms_3_hflip",
+}
+GATE7_FULL_VAL_BETAS: Dict[str, float] = {
+    "arm8": 0.869,
+    "arm6": 0.6163,
+    "arm7": 0.6754,
+    "arm5": 0.6368,
+}
+GATE7_ARM5_SELF_CGM_THRESHOLDS: Tuple[float, float, float, float] = (0.50, 0.60, 0.05, 0.65)
+GATE7_4ARM_CGM_THRESHOLDS: Tuple[float, float, float, float] = (0.10, 0.10, 0.10, 0.10)
+IMAGENET_MEAN_T = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1)
+IMAGENET_STD_T = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1)
+
 REAL_SOTA_METHODS = {
     "proposed",
     "m6",
@@ -155,12 +191,67 @@ REAL_SOTA_METHODS = {
     "od_prior",
     "mpppc",
     "combined",
-}
+} | GATE7_MODES
 LEGACY_CAM_MODES = {"legacy_proposed", "relocalization", "classmix", "baseline"}
+
+_BCSS_RGB_PALETTE: Dict[int, Tuple[int, int, int]] = {
+    0: (255, 0, 0),
+    1: (0, 255, 0),
+    2: (0, 0, 255),
+    3: (153, 0, 255),
+    4: (255, 255, 255),
+}
+
+
+def _softmax_np_axis0(scores: np.ndarray) -> np.ndarray:
+    """Numerically stable softmax along class axis 0 for (C, H, W) arrays."""
+    arr = np.asarray(scores, dtype=np.float32)
+    shifted = arr - np.max(arr, axis=0, keepdims=True)
+    exp_s = np.exp(shifted)
+    return (exp_s / np.maximum(np.sum(exp_s, axis=0, keepdims=True), 1e-8)).astype(np.float32)
+
+
+def _apply_cgm_to_probs_np(
+    probs_chw: np.ndarray,
+    gate_probs: np.ndarray,
+    thresholds: Tuple[float, float, float, float],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Apply CGM bitmask (with top-1 fallback) to (4, H, W) probs and return (gated_probs, argmax_pred).
+
+    Guarantees both single-pass confidence/entropy maps and tiled probability blending
+    preserve CGM class suppression faithfully.
+    """
+    from src.stage2_v2.ensemble import _gate_masks_from_thresholds
+
+    gp = np.asarray(gate_probs, dtype=np.float64)
+    if gp.ndim == 1:
+        gp = gp.reshape(1, -1)
+    bm = int(_gate_masks_from_thresholds(gp, thresholds)[0])
+    active = np.asarray([(bm >> c) & 1 for c in range(4)], dtype=bool).reshape(4, 1, 1)
+    p_f = np.asarray(probs_chw, dtype=np.float32)
+    masked_p = np.where(active, p_f, np.float32(0.0))
+    denom = np.sum(masked_p, axis=0, keepdims=True)
+    # If all active classes had 0 probability at a pixel, fall back cleanly to uniform over active classes
+    active_f = active.astype(np.float32)
+    active_unif = active_f / max(float(active_f.sum()), 1.0)
+    gated_probs = np.where(denom > 1e-8, masked_p / np.maximum(denom, 1e-8), active_unif).astype(np.float32)
+    pred = np.argmax(np.where(active, p_f, np.float32(-np.inf)), axis=0).astype(np.uint8)
+    return gated_probs, pred
+
+
+def _compute_tile_starts(dim: int, tile_size: int, stride: int) -> List[int]:
+    """Build deterministic sliding-window start indices covering [0, dim] cleanly."""
+    if dim <= tile_size:
+        return [0]
+    starts = list(range(0, dim - tile_size + 1, max(1, stride)))
+    last_start = dim - tile_size
+    if starts[-1] != last_start:
+        starts.append(last_start)
+    return starts
 
 
 class ClinicalWorkstationInferenceManager:
-    """Thread-safe model registry serving verified Stage-1/Stage-2 checkpoints and multi-method inference."""
+    """Thread-safe model registry serving verified Stage-1/Stage-2 and Gate-7 Track A checkpoints."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -172,27 +263,99 @@ class ClinicalWorkstationInferenceManager:
         self.stage2_loaded = False
         self.stage1_ckpt_path: Optional[str] = None
         self.stage2_ckpt_path: Optional[str] = None
+        self.checkpoint_error: Optional[str] = None
+        self.gate7_ckpt_paths: Dict[str, Path] = {}
+        self.gate7_stage1_cls_path: Optional[Path] = None
+        self._gate7_models: Dict[str, Any] = {}
+        self._gate7_stage1_cls: Optional[WSSSTissueStage1NetCAM] = None
+        self._gate7_stage1_norm: str = "zero_one"
         self._legacy_engines: Dict[str, WSSSBenchmarkingEngine] = {}
         self._ablation_eval: Any = None
         self._ablation_lock = threading.Lock()
 
     @property
     def real_checkpoints_loaded(self) -> bool:
-        return bool(self.stage2_loaded)
+        return bool(self.stage2_loaded or self.gate7_ckpt_paths)
 
-    def _resolve_checkpoint_paths(self) -> Tuple[Optional[Path], Optional[Path]]:
-        s2_candidates = [
-            os.environ.get("WSSS_STAGE2_CKPT", ""),
-            str(PROJECT_ROOT / "checkpoints" / "stage2_checkpoint_trained_on_bcss.pth"),
-        ]
+    def _resolve_checkpoint_paths(self) -> Tuple[Optional[Path], Optional[Path], Optional[str]]:
+        env_s2 = os.environ.get("WSSS_STAGE2_CKPT", "").strip()
+        explicit_err: Optional[str] = None
+        if env_s2:
+            env_s2_p = Path(env_s2)
+            if not env_s2_p.is_file():
+                explicit_err = f"WSSS_STAGE2_CKPT not found: {env_s2}"
+                s2_p = None
+            else:
+                s2_p = env_s2_p
+        else:
+            default_s2 = PROJECT_ROOT / "checkpoints" / "stage2_checkpoint_trained_on_bcss.pth"
+            s2_p = default_s2 if default_s2.is_file() else None
+
         s1_candidates = [
-            os.environ.get("WSSS_STAGE1_CKPT", ""),
-            os.environ.get("WSSS_CHECKPOINT_PATH", ""),
+            os.environ.get("WSSS_STAGE1_CKPT", "").strip(),
+            os.environ.get("WSSS_CHECKPOINT_PATH", "").strip(),
             str(PROJECT_ROOT / "checkpoints" / "stage1_checkpoint_trained_on_bcss.pth"),
         ]
-        s2_p = next((Path(p) for p in s2_candidates if p and Path(p).is_file()), None)
         s1_p = next((Path(p) for p in s1_candidates if p and Path(p).is_file()), None)
-        return s2_p, s1_p
+        return s2_p, s1_p, explicit_err
+
+    def _discover_gate7_checkpoints(self) -> Tuple[Dict[str, Path], Optional[Path], Optional[str]]:
+        """Discover verified Gate-7 Track A arm checkpoints without touching broken root checkpoints."""
+        found: Dict[str, Path] = {}
+        err: Optional[str] = None
+
+        env_v2 = os.environ.get("WSSS_STAGE2_V2_CKPT", "").strip()
+        if env_v2:
+            env_v2_p = Path(env_v2)
+            if not env_v2_p.is_file():
+                err = f"WSSS_STAGE2_V2_CKPT not found: {env_v2}"
+            else:
+                found["arm5"] = env_v2_p
+
+        env_g7_dir = os.environ.get("WSSS_GATE7_DIR", "").strip()
+        search_roots: List[Path] = []
+        if env_g7_dir:
+            search_roots.append(Path(env_g7_dir))
+        search_roots.append(PROJECT_ROOT / "checkpoints" / "vps_evidence")
+
+        for root in search_roots:
+            if not root.is_dir():
+                continue
+            for arm_key in GATE7_ARM_ORDER:
+                if arm_key in found:
+                    continue
+                full_name = GATE7_ARM_FULL_NAMES[arm_key]
+                direct_cands = [
+                    root / f"{full_name}.pth",
+                    root / f"{arm_key}.pth",
+                    root / f"{arm_key}_best.pth",
+                ]
+                hit = next((c for c in direct_cands if c.is_file()), None)
+                if hit is None:
+                    glob_hits = sorted(root.glob(f"*_g7_{arm_key}_*/stage2_retrained_best.pth"))
+                    if glob_hits:
+                        hit = glob_hits[0]
+                if hit is not None:
+                    found[arm_key] = hit
+
+        s1_cls_p: Optional[Path] = None
+        env_s1_cls = os.environ.get("WSSS_STAGE1_CLS_CKPT", "").strip()
+        if env_s1_cls and Path(env_s1_cls).is_file():
+            s1_cls_p = Path(env_s1_cls)
+        else:
+            for root in search_roots:
+                if not root.is_dir():
+                    continue
+                direct_s1 = root / "stage1_best_cls.pth"
+                if direct_s1.is_file():
+                    s1_cls_p = direct_s1
+                    break
+                s1_globs = sorted(root.glob("*_arm_b_full/checkpoints/stage1_best_cls.pth"))
+                if s1_globs:
+                    s1_cls_p = s1_globs[0]
+                    break
+
+        return found, s1_cls_p, err
 
     def ensure_initialized(self) -> None:
         if self._initialized:
@@ -200,15 +363,19 @@ class ClinicalWorkstationInferenceManager:
         with self._lock:
             if self._initialized:
                 return
-            s2_p, s1_p = self._resolve_checkpoint_paths()
+            errors: List[str] = []
+            s2_p, s1_p, s2_env_err = self._resolve_checkpoint_paths()
+            if s2_env_err:
+                errors.append(s2_env_err)
             if s2_p is not None:
                 try:
                     self.model_stage2 = build_and_load_deeplabv3plus(s2_p, device=DEVICE, strict=True)
                     self.stage2_loaded = True
                     self.stage2_ckpt_path = str(s2_p)
-                except Exception:
+                except Exception as exc:
                     self.model_stage2 = None
                     self.stage2_loaded = False
+                    errors.append(f"Failed to load Stage-2 checkpoint ({s2_p}): {exc}")
 
             if s1_p is not None:
                 try:
@@ -219,10 +386,190 @@ class ClinicalWorkstationInferenceManager:
                     self.model_stage1 = None
                     self.stage1_loaded = False
 
+            g7_paths, g7_s1_p, g7_env_err = self._discover_gate7_checkpoints()
+            if g7_env_err:
+                errors.append(g7_env_err)
+            self.gate7_ckpt_paths = g7_paths
+            self.gate7_stage1_cls_path = g7_s1_p
+            self.checkpoint_error = "; ".join(errors) if errors else None
+
             self.sota_engine = MultiMethodWSSSEngineV2(model_stage1=self.model_stage1, use_amp=False)
             if self.stage2_loaded:
                 self._get_ablation_evaluator()
             self._initialized = True
+
+    def _get_gate7_model(self, arm_key: str) -> Any:
+        """Lazily load and cache a Gate-7 Track A Stage-2 v2 model with strict=True."""
+        if arm_key in self._gate7_models:
+            return self._gate7_models[arm_key]
+        with self._lock:
+            if arm_key in self._gate7_models:
+                return self._gate7_models[arm_key]
+            ckpt_p = self.gate7_ckpt_paths.get(arm_key)
+            if ckpt_p is None or not ckpt_p.is_file():
+                msg = f"Gate-7 Track A checkpoint for '{arm_key}' is missing."
+                self.checkpoint_error = msg
+                raise HTTPException(status_code=503, detail=msg)
+            try:
+                from src.stage2_v2.models import load_stage2_v2_checkpoint
+
+                model, _meta = load_stage2_v2_checkpoint(ckpt_p, device=DEVICE, strict=True)
+                self._gate7_models[arm_key] = model
+                return model
+            except HTTPException:
+                raise
+            except Exception as exc:
+                msg = f"Failed to load Gate-7 checkpoint '{arm_key}' from {ckpt_p}: {exc}"
+                self.checkpoint_error = msg
+                raise HTTPException(status_code=503, detail=msg)
+
+    def _get_gate7_stage1_cls(self) -> Optional[WSSSTissueStage1NetCAM]:
+        """Lazily load Gate-7 Stage-1 classifier checkpoint if available."""
+        if self._gate7_stage1_cls is not None:
+            return self._gate7_stage1_cls
+        if self.gate7_stage1_cls_path is None or not self.gate7_stage1_cls_path.is_file():
+            self._gate7_stage1_norm = "zero_one"
+            return self.model_stage1
+        with self._lock:
+            if self._gate7_stage1_cls is not None:
+                return self._gate7_stage1_cls
+            try:
+                from src.training.eval_stage1_full import load_stage1_strict
+
+                s1_mod = WSSSTissueStage1NetCAM(n_class=4)
+                s1_norm, _, _ = load_stage1_strict(s1_mod, self.gate7_stage1_cls_path)
+                self._gate7_stage1_norm = str(s1_norm or "zero_one").strip().lower()
+                self._gate7_stage1_cls = s1_mod.to(DEVICE).eval()
+            except Exception:
+                try:
+                    self._gate7_stage1_norm = "zero_one"
+                    self._gate7_stage1_cls = build_and_load_stage1_netcam(
+                        self.gate7_stage1_cls_path, device=DEVICE, strict=True
+                    )
+                except Exception:
+                    return self.model_stage1
+            return self._gate7_stage1_cls
+
+    def _fail_closed_env_triggered(self) -> bool:
+        return os.environ.get("WSSS_FAIL_CLOSED", "").strip().lower() in ("1", "true", "yes")
+
+    def _predict_gate7(
+        self,
+        down_np: np.ndarray,
+        method_key: str,
+        enforce_otsu: bool,
+        precomputed_cache: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, str, bool, Dict[str, Any]]:
+        """Run Gate-7 Track A Stage-2 v2 single-arm or 4-arm calibrated ensemble inference."""
+        from src.stage2_v2.ensemble import (
+            _combine_5_expert_probs,
+            apply_tta_probs,
+            encode_centered_logprobs_fp16,
+            reconstruct_probs_from_centered,
+        )
+
+        h, w = down_np.shape[:2]
+        img_01 = torch.from_numpy(down_np.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(DEVICE)
+        mean = IMAGENET_MEAN_T.to(device=DEVICE, dtype=img_01.dtype)
+        std = IMAGENET_STD_T.to(device=DEVICE, dtype=img_01.dtype)
+        img_imnet = (img_01 - mean) / std
+
+        cam_out: Optional[np.ndarray] = None
+        s1_for_cam = self._get_gate7_stage1_cls() or self.model_stage1
+        s1_inp = img_imnet if (self._gate7_stage1_cls is not None and self._gate7_stage1_norm == "imagenet") else img_01
+        if s1_for_cam is not None and self.sota_engine is not None:
+            cam_key = ("g7_cam", h, w)
+            if precomputed_cache is not None and cam_key in precomputed_cache:
+                cam_out = precomputed_cache[cam_key]
+            else:
+                try:
+                    with self._lock:
+                        cam_raw_t, _ = s1_for_cam.forward_cam(s1_inp)
+                    cam_up = F.interpolate(cam_raw_t.float(), size=(h, w), mode="bilinear", align_corners=False)
+                    cam_out = cam_up.squeeze(0).detach().cpu().numpy().astype(np.float32)
+                    if precomputed_cache is not None:
+                        precomputed_cache[cam_key] = cam_out
+                except Exception:
+                    cam_out = None
+
+        if method_key in ("gate7_arm5", "gate7_arm6", "gate7_arm7", "gate7_arm8"):
+            arm_key = method_key.replace("gate7_", "")
+            model = self._get_gate7_model(arm_key)
+            with self._lock:
+                out = model(img_imnet)
+            seg_lg = (out["seg_logits"] if isinstance(out, dict) else out)[:, :4].float()
+            probs_t = torch.softmax(seg_lg, dim=1)
+            probs_np = probs_t.squeeze(0).detach().cpu().numpy().astype(np.float32)
+            if arm_key == "arm5":
+                cls_lg = out.get("cls_logits") if isinstance(out, dict) else None
+                cls_p = (
+                    torch.sigmoid(cls_lg.float()).detach().cpu().numpy()
+                    if cls_lg is not None
+                    else probs_t.amax(dim=(2, 3)).detach().cpu().numpy()
+                )
+                probs_np, pred_raw = _apply_cgm_to_probs_np(
+                    probs_np, cls_p, GATE7_ARM5_SELF_CGM_THRESHOLDS
+                )
+            else:
+                pred_raw = np.argmax(probs_np, axis=0).astype(np.uint8)
+        elif method_key == "gate7_arm5_tta":
+            model = self._get_gate7_model("arm5")
+            with self._lock:
+                probs_t, cls_dict = apply_tta_probs(model, img_imnet, "ms_3_hflip", DEVICE)
+            probs_np = probs_t.squeeze(0).detach().cpu().numpy().astype(np.float32)
+            cls_p = cls_dict["tta"].detach().cpu().numpy()
+            probs_np, pred_raw = _apply_cgm_to_probs_np(
+                probs_np, cls_p, GATE7_ARM5_SELF_CGM_THRESHOLDS
+            )
+        elif method_key in ("gate7_4arm", "gate7_4arm_cgm"):
+            cache_4arm_key = ("g7_4arm_fused", h, w)
+            if precomputed_cache is not None and cache_4arm_key in precomputed_cache:
+                fused_logp, s2_cls_list = precomputed_cache[cache_4arm_key]
+            else:
+                fused_logp = np.zeros((4, h, w), dtype=np.float32)
+                s2_cls_list = []
+                for arm_key in GATE7_ARM_ORDER:
+                    model = self._get_gate7_model(arm_key)
+                    tta_mode = GATE7_ARM_TTAS[arm_key]
+                    with self._lock:
+                        probs_t, cls_dict = apply_tta_probs(model, img_imnet, tta_mode, DEVICE)
+                    probs_b = probs_t.detach().cpu().numpy().astype(np.float32)
+                    z_fp16 = encode_centered_logprobs_fp16(probs_b, axis=1)
+                    cal_lp = reconstruct_probs_from_centered(
+                        z_fp16, beta=GATE7_FULL_VAL_BETAS[arm_key], eps_log=1e-3, axis=1
+                    )[0]
+                    fused_logp += 0.25 * cal_lp.astype(np.float32)
+                    s2_cls_list.append(cls_dict["tta"].detach().cpu().numpy().astype(np.float64))
+                if precomputed_cache is not None:
+                    precomputed_cache[cache_4arm_key] = (fused_logp, s2_cls_list)
+
+            # CRITICAL: convert fused log-probs via softmax BEFORE entropy/confidence computation
+            probs_np = _softmax_np_axis0(fused_logp)
+            if method_key == "gate7_4arm":
+                pred_raw = np.argmax(probs_np, axis=0).astype(np.uint8)
+            else:
+                s1_model = self._get_gate7_stage1_cls()
+                if s1_model is not None:
+                    with self._lock:
+                        _, s1_y = s1_model.forward_cam(s1_inp)
+                    s1_p = s1_y.float().detach().cpu().numpy().astype(np.float64)
+                    gate_p = _combine_5_expert_probs(
+                        s1_p, s2_cls_list, [0.25, 0.25, 0.25, 0.25], "balanced_s1_s2_40_60"
+                    )
+                else:
+                    gate_p = np.mean(np.stack(s2_cls_list, axis=0), axis=0)
+                probs_np, pred_raw = _apply_cgm_to_probs_np(
+                    probs_np, gate_p, GATE7_4ARM_CGM_THRESHOLDS
+                )
+        else:
+            raise HTTPException(status_code=422, detail=f"Unsupported Gate-7 mode: {method_key}")
+
+        pred_mask = (
+            MultiMethodWSSSEngineV2.apply_bright_glass_guard(pred_raw, down_np, background_class_idx=4)
+            if enforce_otsu
+            else pred_raw.astype(np.int64)
+        )
+        return pred_mask.astype(np.int64), probs_np, method_key, True, {"cam": cam_out, "cam_conf": None}
 
     def _get_legacy_engine(self, mode: str) -> WSSSBenchmarkingEngine:
         engine_mode = "proposed" if mode == "legacy_proposed" else mode
@@ -320,8 +667,21 @@ class ClinicalWorkstationInferenceManager:
         return self._ablation_eval
 
     def available_methods(self) -> List[str]:
+        methods: List[str] = []
+        if "arm5" in self.gate7_ckpt_paths:
+            methods.extend(["gate7_arm5", "gate7_arm5_tta"])
+        if all(a in self.gate7_ckpt_paths for a in GATE7_ARM_ORDER):
+            methods.extend(["gate7_4arm_cgm", "gate7_4arm"])
+        for arm_k in ("arm6", "arm7", "arm8"):
+            if arm_k in self.gate7_ckpt_paths:
+                methods.append(f"gate7_{arm_k}")
         if self.stage2_loaded:
-            return ["m6", "m1", "m2", "m3", "m4", "m5", "m7", "od_prior", "sg_dap", "mpppc", "combined"]
+            methods.extend(
+                ["m6", "m1", "m2", "m3", "m4", "m5", "m7", "od_prior", "sg_dap", "mpppc", "combined"]
+            )
+            return methods
+        if methods:
+            return methods
         return ["proposed", "relocalization", "classmix", "baseline"]
 
     @torch.no_grad()
@@ -358,10 +718,39 @@ class ClinicalWorkstationInferenceManager:
         if req_mode not in REAL_SOTA_METHODS and req_mode not in LEGACY_CAM_MODES:
             req_mode = "m6" if self.stage2_loaded else "proposed"
 
-        if strict_weights and not self.stage2_loaded:
+        # Fail-closed guard for explicit env checkpoint errors or WSSS_FAIL_CLOSED=1
+        env_v2_missing = bool(
+            os.environ.get("WSSS_STAGE2_V2_CKPT", "").strip()
+            and not Path(os.environ.get("WSSS_STAGE2_V2_CKPT", "").strip()).is_file()
+        )
+        env_s2_missing = bool(
+            os.environ.get("WSSS_STAGE2_CKPT", "").strip()
+            and not Path(os.environ.get("WSSS_STAGE2_CKPT", "").strip()).is_file()
+        )
+        if req_mode in GATE7_MODES:
+            if env_v2_missing:
+                raise HTTPException(
+                    status_code=503,
+                    detail=self.checkpoint_error or "Configured WSSS_STAGE2_V2_CKPT is missing.",
+                )
+            return self._predict_gate7(
+                down_np=down_np,
+                method_key=req_mode,
+                enforce_otsu=enforce_otsu,
+                precomputed_cache=precomputed_cache,
+            )
+
+        if env_s2_missing and req_mode not in LEGACY_CAM_MODES:
             raise HTTPException(
                 status_code=503,
-                detail="Verified Stage-2 DeepLabV3+ checkpoint not loaded on server (strict_weights=True).",
+                detail=self.checkpoint_error or "Configured WSSS_STAGE2_CKPT is missing.",
+            )
+
+        if (strict_weights or self._fail_closed_env_triggered()) and not self.stage2_loaded:
+            raise HTTPException(
+                status_code=503,
+                detail=self.checkpoint_error
+                or "Verified Stage-2 DeepLabV3+ checkpoint not loaded on server (strict_weights=True).",
             )
 
         # Normalize to WSSS-Tissue [0.0, 1.0] standard and move onto inference device
@@ -670,12 +1059,39 @@ def _get_sample_record(sample_id: str) -> Dict[str, Any]:
     raise HTTPException(status_code=404, detail=f"Sample ID '{sample_id}' not found in test catalog.")
 
 
+def _decode_gt_pil_to_index_mask(img: Image.Image) -> np.ndarray:
+    """Safely decodes PIL GT mask ('P', 'L', 'RGB', 'RGBA') into class indices {0..4, 255}."""
+    if img.mode in ("P", "L"):
+        return np.array(img, dtype=np.int64)
+    arr = np.array(img, dtype=np.int64)
+    if arr.ndim == 2:
+        return arr
+    rgb = arr[:, :, :3]
+    is_gray = (rgb[:, :, 0] == rgb[:, :, 1]) & (rgb[:, :, 1] == rgb[:, :, 2])
+    if bool(np.all(is_gray)):
+        vals = set(np.unique(rgb[:, :, 0]).tolist())
+        if vals.issubset({0, 1, 2, 3, 4, 255}):
+            return rgb[:, :, 0].astype(np.int64)
+
+    # Match both canonical BCSS palette and clinical viewer RGB palette within tolerance <= 18
+    out = np.full(rgb.shape[:2], 255, dtype=np.int64)
+    best_dist = np.full(rgb.shape[:2], 19, dtype=np.int64)
+    for palette in (_BCSS_RGB_PALETTE, CLASS_COLORS_RGB):
+        for cls_idx, (cr, cg, cb) in palette.items():
+            dist = np.maximum(
+                np.maximum(np.abs(rgb[:, :, 0] - cr), np.abs(rgb[:, :, 1] - cg)),
+                np.abs(rgb[:, :, 2] - cb),
+            )
+            better = dist < best_dist
+            if np.any(better):
+                out[better] = int(cls_idx)
+                best_dist[better] = dist[better]
+    return out
+
+
 def _load_mask_array(path_str: str) -> np.ndarray:
-    m_img = Image.open(path_str)
-    arr = np.array(m_img if m_img.mode == "P" else m_img.convert("L"), dtype=np.int64)
-    if arr.ndim == 3:
-        arr = arr[:, :, 0]
-    return arr
+    with Image.open(path_str) as m_img:
+        return _decode_gt_pil_to_index_mask(m_img)
 
 
 def _decode_gt_base64(gt_b64: str) -> np.ndarray:
@@ -684,11 +1100,8 @@ def _decode_gt_base64(gt_b64: str) -> np.ndarray:
     if "," in gt_b64:
         gt_b64 = gt_b64.split(",", 1)[1]
     raw_bytes = io.BytesIO(base64.b64decode(gt_b64))
-    img = Image.open(raw_bytes)
-    arr = np.array(img, dtype=np.int64)
-    if arr.ndim == 3:
-        arr = arr[:, :, 0]
-    return arr
+    with Image.open(raw_bytes) as img:
+        return _decode_gt_pil_to_index_mask(img)
 
 
 # -------------------------------------------------------------------------
@@ -776,6 +1189,7 @@ class ExportReportRequest(BaseModel):
     gt_mask_base64: Optional[str] = None
     mode: Optional[str] = "m6"
     apply_otsu_gating: bool = True
+    strict_weights: bool = False
     target_class: int = Field(0, ge=0, le=4)
     blur_sigma: float = Field(4.0, ge=0.0, le=25.0)
     dim_factor: float = Field(0.55, ge=0.0, le=1.0)
@@ -797,6 +1211,7 @@ class WSIPredictRequest(BaseModel):
     slide_id: Optional[str] = "WSI_SLIDE"
     tiles: List[WSITileItem]
     mode: Optional[str] = "m6"
+    strict_weights: bool = False
 
 
 class WSIPredictResponse(BaseModel):
@@ -835,53 +1250,161 @@ def process_single_patch(
 ) -> Dict[str, Any]:
     """Runs WSSS inference with optional GT visual verification overlays and clinical biomarkers."""
     h_orig, w_orig = image_np.shape[:2]
-
     max_dim = max(h_orig, w_orig)
-    if max_dim > 1024:
-        scale = 1024.0 / max_dim
-        new_w = max(16, int(round(w_orig * scale)))
-        new_h = max(16, int(round(h_orig * scale)))
-        pil_down = Image.fromarray(image_np).resize((new_w, new_h), resample=Image.BILINEAR)
-        down_np = np.array(pil_down, dtype=np.uint8)
-    else:
-        down_np = image_np
 
     t0 = time.perf_counter()
-    down_mask, probs_arr, resolved_method, ckpt_verified, aux = _manager.predict_with_aux(
-        down_np=down_np,
-        mode=mode,
-        enforce_otsu=enforce_otsu,
-        strict_weights=strict_weights,
-        precomputed_cache=precomputed_cache,
-    )
-    latency_ms = (time.perf_counter() - t0) * 1000.0
-
-    cam_aligned: Optional[np.ndarray] = aux.get("cam")
-    if (down_mask.shape[0], down_mask.shape[1]) != (h_orig, w_orig):
-        pil_mask = Image.fromarray(down_mask.astype(np.uint8)).resize((w_orig, h_orig), resample=Image.NEAREST)
-        pred_mask = np.array(pil_mask, dtype=np.int64)
-        probs_t = torch.from_numpy(probs_arr).unsqueeze(0).float()
-        probs_up = F.interpolate(probs_t, size=(h_orig, w_orig), mode="bilinear", align_corners=False)
-        probs_arr = probs_up.squeeze(0).numpy()
-        if cam_aligned is not None and cam_aligned.ndim == 3:
-            cam_t = torch.from_numpy(cam_aligned).unsqueeze(0).float()
-            cam_up = F.interpolate(cam_t, size=(h_orig, w_orig), mode="bilinear", align_corners=False)
-            cam_aligned = cam_up.squeeze(0).numpy()
-    else:
+    if max_dim <= 256:
+        down_mask, probs_arr, resolved_method, ckpt_verified, aux = _manager.predict_with_aux(
+            down_np=image_np,
+            mode=mode,
+            enforce_otsu=enforce_otsu,
+            strict_weights=strict_weights,
+            precomputed_cache=precomputed_cache,
+        )
+        cam_aligned: Optional[np.ndarray] = aux.get("cam")
         pred_mask = down_mask
+    else:
+        # Feather-blended 224x224 sliding-window tiling up to 4096px (preserves native 40x histology)
+        if max_dim > 4096:
+            scale = 4096.0 / float(max_dim)
+            new_w = max(224, int(round(w_orig * scale)))
+            new_h = max(224, int(round(h_orig * scale)))
+            work_np = np.array(
+                Image.fromarray(image_np).resize((new_w, new_h), resample=Image.BILINEAR),
+                dtype=np.uint8,
+            )
+        else:
+            work_np = image_np
 
-    if enforce_otsu:
-        if ckpt_verified:
-            if (down_mask.shape[0], down_mask.shape[1]) != (h_orig, w_orig):
+        h_w, w_w = work_np.shape[:2]
+        pad_h = max(0, 224 - h_w)
+        pad_w = max(0, 224 - w_w)
+        if pad_h > 0 or pad_w > 0:
+            p_mode = "reflect" if (h_w > 1 and w_w > 1) else "edge"
+            padded_np = np.pad(work_np, ((0, pad_h), (0, pad_w), (0, 0)), mode=p_mode)
+        else:
+            padded_np = work_np
+
+        ph, pw = padded_np.shape[:2]
+        max_wdim = max(h_w, w_w)
+        if max_wdim <= 1024:
+            stride = 112
+        elif max_wdim <= 2048:
+            stride = 168
+        else:
+            stride = 224
+
+        ys = _compute_tile_starts(ph, 224, stride)
+        xs = _compute_tile_starts(pw, 224, stride)
+        feather_win = _build_tile_feather_window(224, 224)
+
+        probs_acc: Optional[np.ndarray] = None
+        weight_acc = np.zeros((ph, pw), dtype=np.float32)
+        cam_acc: Optional[np.ndarray] = None
+        cam_w_acc = np.zeros((ph, pw), dtype=np.float32)
+        resolved_method = mode
+        ckpt_verified = False
+
+        for ty in ys:
+            for tx in xs:
+                tile_rgb = padded_np[ty : ty + 224, tx : tx + 224]
+                _, t_probs, resolved_method, ckpt_verified, t_aux = _manager.predict_with_aux(
+                    down_np=tile_rgb,
+                    mode=mode,
+                    enforce_otsu=False,
+                    strict_weights=strict_weights,
+                    precomputed_cache=None,
+                )
+                t_probs_f = np.asarray(t_probs, dtype=np.float32)
+                if probs_acc is None:
+                    probs_acc = np.zeros((t_probs_f.shape[0], ph, pw), dtype=np.float32)
+                probs_acc[:, ty : ty + 224, tx : tx + 224] += t_probs_f * feather_win[None, ...]
+                weight_acc[ty : ty + 224, tx : tx + 224] += feather_win
+
+                t_cam = t_aux.get("cam")
+                if t_cam is not None and isinstance(t_cam, np.ndarray) and t_cam.ndim == 3:
+                    if t_cam.shape[1:] != (224, 224):
+                        t_cam = (
+                            F.interpolate(
+                                torch.from_numpy(t_cam).unsqueeze(0).float(),
+                                size=(224, 224),
+                                mode="bilinear",
+                                align_corners=False,
+                            )
+                            .squeeze(0)
+                            .numpy()
+                        )
+                    if cam_acc is None:
+                        cam_acc = np.zeros((t_cam.shape[0], ph, pw), dtype=np.float32)
+                    cam_acc[:, ty : ty + 224, tx : tx + 224] += t_cam.astype(np.float32) * feather_win[None, ...]
+                    cam_w_acc[ty : ty + 224, tx : tx + 224] += feather_win
+
+        assert probs_acc is not None
+        probs_blended = probs_acc[:, :h_w, :w_w] / np.maximum(weight_acc[:h_w, :w_w][None, ...], 1e-6)
+        probs_blended = probs_blended / np.maximum(np.sum(probs_blended, axis=0, keepdims=True), 1e-6)
+        pred_work = np.argmax(probs_blended, axis=0).astype(np.int64)
+        cam_work = (
+            cam_acc[:, :h_w, :w_w] / np.maximum(cam_w_acc[:h_w, :w_w][None, ...], 1e-6)
+            if cam_acc is not None
+            else None
+        )
+
+        if (h_w, w_w) != (h_orig, w_orig):
+            pred_mask = np.array(
+                Image.fromarray(pred_work.astype(np.uint8)).resize((w_orig, h_orig), resample=Image.NEAREST),
+                dtype=np.int64,
+            )
+            probs_arr = (
+                F.interpolate(
+                    torch.from_numpy(probs_blended).unsqueeze(0).float(),
+                    size=(h_orig, w_orig),
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                .squeeze(0)
+                .numpy()
+            )
+            cam_aligned = (
+                F.interpolate(
+                    torch.from_numpy(cam_work).unsqueeze(0).float(),
+                    size=(h_orig, w_orig),
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                .squeeze(0)
+                .numpy()
+                if cam_work is not None
+                else None
+            )
+        else:
+            pred_mask = pred_work
+            probs_arr = probs_blended
+            cam_aligned = cam_work
+
+        if enforce_otsu:
+            if ckpt_verified and str(resolved_method).startswith("gate7_"):
+                pred_mask = MultiMethodWSSSEngineV2.apply_bright_glass_guard(
+                    pred_mask, image_np, background_class_idx=4
+                )
+            elif ckpt_verified:
                 pred_mask = MultiMethodWSSSEngineV2.apply_pure_glass_guard(
                     pred_mask, image_np, background_class_idx=4
                 )
-        else:
-            pred_mask = apply_otsu_gating_to_prediction(
-                pred_mask=pred_mask,
-                image=image_np,
-                background_class_idx=4,
-            )
+            else:
+                pred_mask = apply_otsu_gating_to_prediction(
+                    pred_mask=pred_mask,
+                    image=image_np,
+                    background_class_idx=4,
+                )
+
+    latency_ms = (time.perf_counter() - t0) * 1000.0
+
+    if max_dim <= 256 and enforce_otsu and not ckpt_verified:
+        pred_mask = apply_otsu_gating_to_prediction(
+            pred_mask=pred_mask,
+            image=image_np,
+            background_class_idx=4,
+        )
 
     vtp = compute_viable_tumor_percentage(pred_mask, tumor_class_idx=0, background_class_idx=4)
     tsr = compute_tumor_stroma_ratio(pred_mask, tumor_class_idx=0, stroma_class_idx=1)
@@ -979,6 +1502,7 @@ def process_single_patch(
         "overlay_base64": encode_image_to_base64(mask_rgba, format="PNG"),
         "blended_base64": encode_image_to_base64(blended, format="PNG"),
         "applied_gating": enforce_otsu,
+        "tiling_used": bool(max(h_orig, w_orig) > 256),
         "method_used": resolved_method,
         "checkpoint_verified": ckpt_verified,
         "latency_ms": round(float(latency_ms), 2),
@@ -1014,11 +1538,25 @@ def get_system_health() -> Dict[str, Any]:
     cuda_avail = torch.cuda.is_available()
     vram_mb = torch.cuda.memory_allocated() / (1024.0 * 1024.0) if cuda_avail else 0.0
 
+    health_mode = (
+        "m6"
+        if _manager.stage2_loaded
+        else (
+            "gate7_arm5"
+            if "arm5" in _manager.gate7_ckpt_paths
+            else (
+                f"gate7_{sorted(_manager.gate7_ckpt_paths)[0]}"
+                if _manager.gate7_ckpt_paths
+                else "legacy_fallback"
+            )
+        )
+    )
+
     return {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "model": {
-            "mode": "m6" if _manager.stage2_loaded else "legacy_fallback",
+            "mode": health_mode,
             "device": DEVICE_NAME,
             "num_classes": 5,
             "classes": CLASS_NAMES,
@@ -1027,12 +1565,25 @@ def get_system_health() -> Dict[str, Any]:
             "loaded": _manager.real_checkpoints_loaded,
             "stage1_loaded": _manager.stage1_loaded,
             "stage2_loaded": _manager.stage2_loaded,
+            "gate7_available_arms": sorted(_manager.gate7_ckpt_paths.keys()),
+            "gate7_loaded_arms": sorted(_manager._gate7_models.keys()),
+            "checkpoint_error": _manager.checkpoint_error,
             "prototypes_calibrated": bool(
                 _manager._ablation_eval is not None
                 and getattr(_manager._ablation_eval, "prototypes_calibrated", False)
             ),
             "weights_source": (
-                "pretrained_bcss_stage1_stage2" if _manager.real_checkpoints_loaded else "untrained_fallback"
+                "pretrained_bcss_stage1_stage2_and_gate7"
+                if (_manager.stage2_loaded and _manager.gate7_ckpt_paths)
+                else (
+                    "pretrained_bcss_stage1_stage2"
+                    if _manager.stage2_loaded
+                    else (
+                        "gate7_track_a_dual_head"
+                        if _manager.gate7_ckpt_paths
+                        else "untrained_fallback"
+                    )
+                )
             ),
             "available_methods": _manager.available_methods(),
         },
@@ -1412,12 +1963,22 @@ async def compare_methods_endpoint(payload: MethodCompareRequest) -> Dict[str, A
                     "verification_metrics": res["verification_metrics"],
                 }
             )
+        gt_for_color: Optional[np.ndarray] = None
+        if gt_np is not None:
+            gt_for_color = np.asarray(gt_np, dtype=np.int64)
+            if gt_for_color.shape[:2] != image_np.shape[:2]:
+                gt_for_color = np.array(
+                    Image.fromarray(np.clip(gt_for_color, 0, 255).astype(np.uint8)).resize(
+                        (image_np.shape[1], image_np.shape[0]), resample=Image.NEAREST
+                    ),
+                    dtype=np.int64,
+                )
         return {
             "success": True,
-            "gt_available": gt_np is not None,
+            "gt_available": gt_for_color is not None,
             "raw_image_base64": encode_image_to_base64(image_np, format="PNG"),
-            "gt_color_base64": encode_image_to_base64(mask_to_color_image(gt_np), format="PNG")
-            if gt_np is not None
+            "gt_color_base64": encode_image_to_base64(mask_to_color_image(gt_for_color), format="PNG")
+            if gt_for_color is not None
             else None,
             "comparisons": comparisons,
         }
@@ -1472,6 +2033,7 @@ async def export_report_endpoint(payload: ExportReportRequest) -> Response:
             enforce_otsu=payload.apply_otsu_gating,
             gt_mask=gt_np,
             target_class=payload.target_class,
+            strict_weights=payload.strict_weights,
             blur_sigma=payload.blur_sigma,
             dim_factor=payload.dim_factor,
             gt_alpha=payload.gt_alpha,
@@ -1606,7 +2168,12 @@ def predict_wsi(request: WSIPredictRequest) -> WSIPredictResponse:
 
     for tile, img_np in decoded_tiles:
         try:
-            res = process_single_patch(img_np, mode=req_mode, enforce_otsu=True)
+            res = process_single_patch(
+                img_np,
+                mode=req_mode,
+                enforce_otsu=True,
+                strict_weights=request.strict_weights,
+            )
             resolved_method_name = str(res["method_used"] or req_mode)
             processed_tiles.append({
                 "x": tile.x,

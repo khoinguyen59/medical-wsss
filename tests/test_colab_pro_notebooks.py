@@ -23,6 +23,11 @@ import pytest
 import torch
 from PIL import Image
 
+_OPTIONAL_ROOT_T4_NOTEBOOKS = {
+    "stage1_t4_root": Path("01_Train_Stage1_Classifier_T4.ipynb"),
+    "stage2_t4_root": Path("02_Pseudo_Masks_Train_Stage2_T4.ipynb"),
+}
+
 NOTEBOOKS = {
     "stage1": Path("notebooks/01_Train_Stage1_Classifier.ipynb"),
     "stage2": Path("notebooks/02_Pseudo_Masks_Train_Stage2.ipynb"),
@@ -36,8 +41,7 @@ NOTEBOOKS = {
     "stage2_l4": Path("notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb"),
     "medsam_l4": Path("notebooks/03_Train_Proposed_MedSAM_L4.ipynb"),
     "benchmark_l4": Path("notebooks/04_Exhaustive_Benchmark_Survival_L4.ipynb"),
-    "stage1_t4_root": Path("01_Train_Stage1_Classifier_T4.ipynb"),
-    "stage2_t4_root": Path("02_Pseudo_Masks_Train_Stage2_T4.ipynb"),
+    **{k: p for k, p in _OPTIONAL_ROOT_T4_NOTEBOOKS.items() if p.is_file()},
 }
 
 
@@ -376,10 +380,12 @@ def test_stage2_notebooks_detailed_specifications():
     """
     t4_nb = Path("notebooks/02_Pseudo_Masks_Train_Stage2_T4.ipynb").read_text(encoding="utf-8")
     l4_nb = Path("notebooks/02_Pseudo_Masks_Train_Stage2_L4.ipynb").read_text(encoding="utf-8")
-    root_t4 = Path("02_Pseudo_Masks_Train_Stage2_T4.ipynb").read_text(encoding="utf-8")
+    root_t4_path = Path("02_Pseudo_Masks_Train_Stage2_T4.ipynb")
 
-    # Synchronization
-    assert t4_nb == root_t4, "Root 02_Pseudo_Masks_Train_Stage2_T4.ipynb is out of sync with notebooks/"
+    # Synchronization (root mirror is gitignored on clean CI checkouts)
+    if root_t4_path.is_file():
+        root_t4 = root_t4_path.read_text(encoding="utf-8")
+        assert t4_nb == root_t4, "Root 02_Pseudo_Masks_Train_Stage2_T4.ipynb is out of sync with notebooks/"
 
     # T4 specific configurations
     assert "BATCH_SIZE = 12" in t4_nb, "T4 notebook missing BATCH_SIZE = 12"
@@ -502,7 +508,7 @@ def test_stage2_mlps_loss_gradient_flow():
 
 def test_stage2_cell_4_dry_run_and_workers_declared():
     """Verify DRY_RUN and NUM_WORKERS are present in Cell 4 across all Stage 2 notebooks."""
-    stage2_keys = ["stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"]
+    stage2_keys = [k for k in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root") if k in NOTEBOOKS]
     for k in stage2_keys:
         nb_path = NOTEBOOKS[k]
         with open(nb_path, "r", encoding="utf-8") as f:
@@ -596,7 +602,7 @@ def test_generator_clean_cells_have_safe_paletted_mask_loading():
 
 def test_notebook_01_rule17_pretrained_validation_loop_and_parity():
     """Verify Notebook 01 (Base, T4, L4, root T4) enforces Rule 17 init, env presets, EMA, and metrics."""
-    for key in ("stage1", "stage1_t4", "stage1_l4", "stage1_t4_root"):
+    for key in [k for k in ("stage1", "stage1_t4", "stage1_l4", "stage1_t4_root") if k in NOTEBOOKS]:
         content = NOTEBOOKS[key].read_text(encoding="utf-8")
         assert "resolve_stage1_config_from_env()" in content, f"{key} missing env-driven preset resolution"
         assert "load_pretrained_resnet38d_weights" in content, f"{key} missing pretrained ResNet-38d loader"
@@ -631,8 +637,9 @@ def test_notebook_01_rule17_pretrained_validation_loop_and_parity():
 
     t4_s1 = NOTEBOOKS["stage1_t4"].read_text(encoding="utf-8")
     l4_s1 = NOTEBOOKS["stage1_l4"].read_text(encoding="utf-8")
-    root_t4_s1 = NOTEBOOKS["stage1_t4_root"].read_text(encoding="utf-8")
-    assert t4_s1 == root_t4_s1, "Root 01_Train_Stage1_Classifier_T4.ipynb is out of sync with notebooks/"
+    if "stage1_t4_root" in NOTEBOOKS:
+        root_t4_s1 = NOTEBOOKS["stage1_t4_root"].read_text(encoding="utf-8")
+        assert t4_s1 == root_t4_s1, "Root 01_Train_Stage1_Classifier_T4.ipynb is out of sync with notebooks/"
     assert "else 16" in t4_s1 and "else 20" in t4_s1
     assert "else 32" in l4_s1 and "else 25" in l4_s1
     assert "LEARNING_RATE = EXP_CFG.lr_bb" in t4_s1 and "LEARNING_RATE = EXP_CFG.lr_bb" in l4_s1
@@ -640,7 +647,7 @@ def test_notebook_01_rule17_pretrained_validation_loop_and_parity():
 
 def test_notebook_02_six_audit_fixes_parity():
     """Verify Notebook 02 (Base, T4, L4, root T4) includes all 6 audited scientific fixes."""
-    for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
+    for key in [k for k in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root") if k in NOTEBOOKS]:
         content = NOTEBOOKS[key].read_text(encoding="utf-8")
         # (a) Explicit Stage-1 checkpoint policy + SG-DAP + quick val pseudo-mask sanity check
         assert "os.environ.get('STAGE1_CKPT_SOURCE', 'author_baseline')" in content, (
@@ -882,7 +889,7 @@ def test_notebook_01_env_preset_overrides_and_active_labels_forward(
 
 def test_notebook_02_gradcam_sgdap_guards_and_prose_parity():
     """Verify Notebook 02 (Base, T4, L4, root T4) fixes prose, DRY_RUN split order, Grad-CAM/SG-DAP, and Cell 14 guards."""
-    for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
+    for key in [k for k in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root") if k in NOTEBOOKS]:
         nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
         c0 = "".join(nb_data["cells"][0]["source"])
         c2 = "".join(nb_data["cells"][2]["source"])
@@ -921,7 +928,7 @@ def test_notebook_02_gradcam_sgdap_guards_and_prose_parity():
 
 def test_notebook_01_stop_after_epoch_and_notebook_02_ckpt_source_env_wiring(monkeypatch):
     """Verify STAGE1_STOP_AFTER_EPOCH decoupling in NB1 and STAGE1_CKPT_SOURCE env wiring in NB2."""
-    for key in ("stage1", "stage1_t4", "stage1_l4", "stage1_t4_root"):
+    for key in [k for k in ("stage1", "stage1_t4", "stage1_l4", "stage1_t4_root") if k in NOTEBOOKS]:
         nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
         c10 = "".join(nb_data["cells"][10]["source"])
         c14 = "".join(nb_data["cells"][14]["source"])
@@ -947,7 +954,7 @@ def test_notebook_01_stop_after_epoch_and_notebook_02_ckpt_source_env_wiring(mon
             f"{key} Cell 16 missing stop_after_epoch metadata in STAGE1_TRAINING_METRICS.json"
         )
 
-    for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
+    for key in [k for k in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root") if k in NOTEBOOKS]:
         nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
         c6 = "".join(nb_data["cells"][6]["source"])
         src_line = next(ln for ln in c6.splitlines() if ln.strip().startswith("STAGE1_CKPT_SOURCE ="))
@@ -968,7 +975,7 @@ def test_notebook_02_stage2_prelaunch_patch_contracts(monkeypatch):
     """Verify all Stage-2 Pre-Launch Patch contracts across Base, T4, L4, and root T4 notebooks."""
     from src.models.wsss_inference_methods import WSSSTissueStage1NetCAM
 
-    for key in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root"):
+    for key in [k for k in ("stage2", "stage2_t4", "stage2_l4", "stage2_t4_root") if k in NOTEBOOKS]:
         nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
         c4 = "".join(nb_data["cells"][4]["source"])
         c6 = "".join(nb_data["cells"][6]["source"])

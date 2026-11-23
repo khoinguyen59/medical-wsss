@@ -16,6 +16,7 @@ Tier-1 packages ONLY (torch, torchvision, transformers). Pure ASCII hyphen '-' o
 
 import contextlib
 import math
+import re
 from itertools import chain
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
@@ -828,6 +829,97 @@ def build_stage2_v2_model(
     raise ValueError(f"Unsupported Stage-2 v2 arch: {cfg.arch!r}.")
 
 
+def remap_hf_state_dict_keys(
+    state_dict: Dict[str, torch.Tensor],
+    target_keys: Iterable[str],
+) -> Dict[str, torch.Tensor]:
+    """Bidirectionally remaps HuggingFace transformers v4 <-> v5 keys for DINOv2 & SegFormer.
+
+    Keys already present in target_keys are returned verbatim (no-op). Unmatched keys are
+    tested against deterministic v5 -> v4 and v4 -> v5 rewrites and remapped only when the
+    rewritten key exists in target_keys.
+    """
+    target_set = set(target_keys)
+    if not target_set or set(state_dict.keys()).issubset(target_set):
+        return dict(state_dict)
+
+    def _to_v4(key: str) -> str:
+        nk = key
+        nk = re.sub(r"(^|\.)decode_head\.linear_projections\.", r"\1decode_head.linear_c.", nk)
+        nk = re.sub(r"(^|\.)stages\.(\d+)\.patch_embeddings\.", r"\1encoder.patch_embeddings.\2.", nk)
+        nk = re.sub(r"(^|\.)stages\.(\d+)\.layer_norm\.", r"\1encoder.layer_norm.\2.", nk)
+        if re.search(r"(^|\.)stages\.\d+\.blocks\.\d+\.", nk):
+            nk = re.sub(r"(^|\.)stages\.(\d+)\.blocks\.(\d+)\.", r"\1encoder.block.\2.\3.", nk)
+            nk = nk.replace(".layernorm_before.", ".layer_norm_1.")
+            nk = nk.replace(".layernorm_after.", ".layer_norm_2.")
+            nk = nk.replace(".attention.q_proj.", ".attention.self.query.")
+            nk = nk.replace(".attention.k_proj.", ".attention.self.key.")
+            nk = nk.replace(".attention.v_proj.", ".attention.self.value.")
+            nk = nk.replace(".attention.o_proj.", ".attention.output.dense.")
+            nk = nk.replace(
+                ".attention.sequence_reduction.sequence_reduction.",
+                ".attention.self.sr.",
+            )
+            nk = nk.replace(
+                ".attention.sequence_reduction.layer_norm.",
+                ".attention.self.layer_norm.",
+            )
+            nk = nk.replace(".mlp.fc1.", ".mlp.dense1.")
+            nk = nk.replace(".mlp.fc2.", ".mlp.dense2.")
+        else:
+            nk = nk.replace(".attention.q_proj.", ".attention.attention.query.")
+            nk = nk.replace(".attention.k_proj.", ".attention.attention.key.")
+            nk = nk.replace(".attention.v_proj.", ".attention.attention.value.")
+            nk = nk.replace(".attention.o_proj.", ".attention.output.dense.")
+        return nk
+
+    def _to_v5(key: str) -> str:
+        nk = key
+        nk = re.sub(r"(^|\.)decode_head\.linear_c\.", r"\1decode_head.linear_projections.", nk)
+        nk = re.sub(r"(^|\.)encoder\.patch_embeddings\.(\d+)\.", r"\1stages.\2.patch_embeddings.", nk)
+        nk = re.sub(r"(^|\.)encoder\.layer_norm\.(\d+)\.", r"\1stages.\2.layer_norm.", nk)
+        if re.search(r"(^|\.)encoder\.block\.\d+\.\d+\.", nk):
+            nk = re.sub(r"(^|\.)encoder\.block\.(\d+)\.(\d+)\.", r"\1stages.\2.blocks.\3.", nk)
+            nk = nk.replace(".layer_norm_1.", ".layernorm_before.")
+            nk = nk.replace(".layer_norm_2.", ".layernorm_after.")
+            nk = nk.replace(".attention.self.query.", ".attention.q_proj.")
+            nk = nk.replace(".attention.self.key.", ".attention.k_proj.")
+            nk = nk.replace(".attention.self.value.", ".attention.v_proj.")
+            nk = nk.replace(".attention.output.dense.", ".attention.o_proj.")
+            nk = nk.replace(
+                ".attention.self.sr.",
+                ".attention.sequence_reduction.sequence_reduction.",
+            )
+            nk = nk.replace(
+                ".attention.self.layer_norm.",
+                ".attention.sequence_reduction.layer_norm.",
+            )
+            nk = nk.replace(".mlp.dense1.", ".mlp.fc1.")
+            nk = nk.replace(".mlp.dense2.", ".mlp.fc2.")
+        else:
+            nk = nk.replace(".attention.attention.query.", ".attention.q_proj.")
+            nk = nk.replace(".attention.attention.key.", ".attention.k_proj.")
+            nk = nk.replace(".attention.attention.value.", ".attention.v_proj.")
+            nk = nk.replace(".attention.output.dense.", ".attention.o_proj.")
+        return nk
+
+    remapped: Dict[str, torch.Tensor] = {}
+    for k, v in state_dict.items():
+        if k in target_set:
+            remapped[k] = v
+            continue
+        cand_v4 = _to_v4(k)
+        if cand_v4 in target_set and cand_v4 not in remapped and cand_v4 not in state_dict:
+            remapped[cand_v4] = v
+            continue
+        cand_v5 = _to_v5(k)
+        if cand_v5 in target_set and cand_v5 not in remapped and cand_v5 not in state_dict:
+            remapped[cand_v5] = v
+            continue
+        remapped[k] = v
+    return remapped
+
+
 def load_stage2_v2_checkpoint(
     ckpt_path: Union[str, Path],
     device: Union[str, torch.device] = "cpu",
@@ -1010,6 +1102,7 @@ def load_stage2_v2_checkpoint(
             raise ValueError(f"Non-finite tensor {ck!r} in checkpoint {ckpt_p}.")
         cleaned_sd[ck] = v
 
+    cleaned_sd = remap_hf_state_dict_keys(cleaned_sd, model.state_dict().keys())
     model.load_state_dict(cleaned_sd, strict=strict)
     model.to(dev).eval()
 

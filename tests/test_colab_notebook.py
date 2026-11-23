@@ -567,7 +567,10 @@ def test_stage1_netcam_architecture_and_forward_cam():
     5. MultiMethodWSSSEngine integration with model_stage1 activates CGM gating and CAM fusion.
     """
     import sys
-    sys.path.insert(0, str(Path("repos/WSSS-Tissue").resolve()))
+    ref_repo = Path("repos/WSSS-Tissue")
+    if not (ref_repo / "network" / "resnet38_cls.py").is_file():
+        pytest.skip("Gitignored reference repo repos/WSSS-Tissue is not present on clean CI checkout.")
+    sys.path.insert(0, str(ref_repo.resolve()))
     from network.resnet38_cls import Net_CAM
 
     from src.models.wsss_inference_methods import MultiMethodWSSSEngine, WSSSTissueStage1NetCAM

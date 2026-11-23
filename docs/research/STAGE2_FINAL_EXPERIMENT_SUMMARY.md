@@ -3,7 +3,7 @@
 > **Mã học phần:** SE374.R11 - Phát triển phần mềm xử lý ảnh y khoa (UIT, ĐHQG-HCM, 2026)
 > **Bộ dữ liệu chuẩn hóa:** BCSS-WSSS (`151` bệnh nhân TCGA-BRCA, `31,826` ảnh mẫu: `106` Train `23,422` / `22` Val `3,418` / `23` Test `4,986`; xác minh `patient_overlap_count = 0` theo `src/config/bcss_patient_splits.json`)
 > **Commit mã nguồn chốt thực nghiệm:** `8dcee13301dba5b7c70899e36a0b8f4a839f0e0c` (xác nhận khớp `STAGE2_GIT_REF` trên toàn bộ Gate-7 Track A)
-> **Kho minh chứng mật mã:** `checkpoints/vps_evidence/SHA256SUMS.txt` (`115/115` tệp xác minh bit-exact `BAD = 0`, 100% chạy thực nghiệm thật trên GPU NVIDIA G4 96GB Blackwell và NVIDIA L4 24GB)
+> **Kho minh chứng mật mã:** `checkpoints/vps_evidence/SHA256SUMS.txt` (`123/123` tệp xác minh bit-exact `BAD = 0`, 100% chạy thực nghiệm thật trên GPU NVIDIA G4 96GB Blackwell và NVIDIA L4 24GB)
 > **Nghiệm thu đa tác tử:** Đồng thuận `3/3 PASS` (Swarm Board `#121` + `#122`, `/teamwork` `VICTORY CONFIRMED`, `/boost` DeepInvestigator `PASS`)
 
 ---
@@ -133,7 +133,7 @@ So sánh 4 họ kiến trúc độc lập giữa Round-1 (học từ `q_s1_sgdap
 
 ## 5. Phân Tích Lỗi Lâm Sàng Cấp Bệnh Nhân (`INVARIANT-10` từ `per_patient_class_ious.json`)
 
-Bằng việc lưu trữ ma trận giao/hợp chính xác `23 x 4` (`inter_p`, `union_p`) trong `checkpoints/vps_evidence/se374_g7_ensemble_tracka/per_patient_class_ious.json` (`SHA256 = d180876c1dc7...`), chúng tôi lý giải triệt để **nghịch lý thống kê** giữa kiểm định permutation toàn cục (`perm_p_holm = 0.0005`) và kiểm định Wilcoxon cấp bệnh nhân (`wilcoxon_p_holm = 0.9268`, `d_z = -0.1172` cho `primary_4arm vs Step-0 Author`, và `d_z = -0.6034`, `9W/14L` cho `primary_4arm vs arm5`):
+Bằng việc lưu trữ ma trận giao/hợp chính xác `23 x 4` (`inter_p`, `union_p`) trong `checkpoints/vps_evidence/se374_g7_ensemble_tracka/artifacts/per_patient_class_ious.json` (`SHA256 = d180876c1dc7...`), chúng tôi lý giải triệt để **nghịch lý thống kê** giữa kiểm định permutation toàn cục (`perm_p_holm = 0.0005`) và kiểm định Wilcoxon cấp bệnh nhân (`wilcoxon_p_holm = 0.9268`, `d_z = -0.1172` cho `primary_4arm vs Step-0 Author`, và `d_z = -0.6034`, `9W/14L` cho `primary_4arm vs arm5`):
 
 1. **Cơ chế toán học (`pooled` vs `per-patient active-union`):** Phép thử permutation đánh giá **pooled global Delta-mIoU** (miễn nhiễm với vài trăm pixel nhiễu trên lớp vắng mặt), trong khi Wilcoxon và `Cohen's d_z` đánh giá **per-patient macro-mIoU** trên các lớp có `union_p > 0`. Khi một bệnh nhân thực tế có `0` pixel ground truth của lớp `NEC` hoặc `LYM` (`GT == 0`), chỉ cần mô hình `no_cgm` dự đoán nhầm vài chục đến vài trăm pixel (`< 0.02%` diện tích) là `IoU` lớp đó rơi xuống `0.0` thay vì `None`, làm mẫu số macro-mIoU nhảy từ `3 -> 4` và tạo cú rơi nhân tạo `-12%` đến `-21%`!
 2. **Chứng minh đầy đủ 8 ô `(patient, class)` có `GT == 0`** (xác định toán học từ `min(union_p) == 0` qua toàn bộ 11 mô hình trong JSON):
@@ -162,19 +162,19 @@ Bằng việc lưu trữ ma trận giao/hợp chính xác `23 x 4` (`inter_p`, `
 | SIA-WSSS | MICCAI 2025 (`SIA_WSSS_MICCAI2025.pdf` p. 6 Table 1) | 5-run avg (gồm lớp `OTR`, khác định nghĩa Dice) | 73.40% | Gate-7 Track A thấp hơn **`-0.60%`** (Primary) / **`-0.50%`** (Simplex-CV) |
 
 - **Cảnh báo trung thực về so sánh mDice với `SIA-WSSS` (MICCAI 2025):** Không so sánh trực tiếp `84.05%` mDice của hệ thống này với `79.9%` mDice trong `SIA_WSSS_MICCAI2025.pdf` (trang 6, Table 1), vì bảng 1 của SIA-WSSS báo cáo `WSSS-Tissue` ở `0.697` mIoU / `0.767` mDice (chênh `~5.1` điểm phần trăm định nghĩa mDice so với `0.8179` của công thức 4-class pooled chuẩn). So sánh công bằng duy nhất giữa hai công trình là trên **mIoU** (`72.80%`/`72.90%` vs `73.40%`, và mức tăng trên nền WSSS-Tissue: `+3.31%`/`+3.42%` so với `+3.70%` của SIA-WSSS).
-- **Ghi chú về hình ảnh xuất bản (`INVARIANT-24` & `INVARIANT-25`):** Tệp `checkpoints/vps_evidence/se374_g7_ensemble_tracka/stage2_training_loss.png` (biểu đồ cột 8 thanh so sánh TEST mIoU kèm 95% Patient Bootstrap CI) được giữ nguyên vẹn làm minh chứng SHA256 bất biến; tuy nhiên thanh `Primary 4-Arm` tô đen đặc `#000000` che mất nửa dưới error bar màu đen và đường lưới `0.775` chạm nhãn số, nên **không nhúng trực tiếp** vào báo cáo cuối kỳ / slide mà sẽ vẽ lại hình đơn sắc 300 DPI sạch hoàn hảo từ tệp JSON đã xác minh khi biên soạn báo cáo cuối kỳ.
+- **Ghi chú về hình ảnh xuất bản (`INVARIANT-24` & `INVARIANT-25`):** Tệp `checkpoints/vps_evidence/se374_g7_ensemble_tracka/artifacts/stage2_training_loss.png` (biểu đồ cột 8 thanh so sánh TEST mIoU kèm 95% Patient Bootstrap CI) được giữ nguyên vẹn làm minh chứng SHA256 bất biến; tuy nhiên thanh `Primary 4-Arm` tô đen đặc `#000000` che mất nửa dưới error bar màu đen và đường lưới `0.775` chạm nhãn số, nên **không nhúng trực tiếp** vào báo cáo cuối kỳ / slide mà sẽ vẽ lại hình đơn sắc 300 DPI sạch hoàn hảo từ tệp JSON đã xác minh khi biên soạn báo cáo cuối kỳ.
 
 ---
 
-## 7. Danh Mục Minh Chứng Mật Mã Chính (115/115 Tệp Đã Xác Minh)
+## 7. Danh Mục Minh Chứng Mật Mã Chính (123/123 Tệp Local Đã Xác Minh + Lưu Trữ VPS)
 
-Toàn bộ `115` tệp minh chứng (log huấn luyện, notebook đầu ra `.ipynb`, tệp số liệu `.json`/`.csv`, biểu đồ `.png`, trọng số `.pth`) được lưu trữ tại `checkpoints/vps_evidence/` và kiểm định toàn vẹn tại `checkpoints/vps_evidence/SHA256SUMS.txt` (`115/115 OK`, `0` lỗi).
+Toàn bộ `123` tệp minh chứng cục bộ (log huấn luyện `.log`, session log `.md`, tệp số liệu `.json`/`.csv`, biểu đồ `.png`, và 6 trọng số `.pth` hoạt động chính gồm Stage-1 Champion + Gate-7 Track A `arm5-arm8`) được lưu trữ tại `checkpoints/vps_evidence/` và kiểm định toàn vẹn tại `checkpoints/vps_evidence/SHA256SUMS.txt` (`123/123 OK`, `BAD = 0`, `MISSING = 0`). Riêng 4 tệp trọng số `.pth` Gate-6 Round-1 (`arm1-arm4`) được lưu trữ nguyên vẹn trên `vps-colab` (`~/medical-wsss/colab_runner_local/runs/se374_s2v2_arm*/checkpoints/stage2_retrained_best.pth`) với chữ ký SHA256 ghi nhận trong `checkpoints/vps_evidence/se374_s2v2_ensemble/artifacts/STAGE2_TRAINING_METRICS.json`.
 
 | Giai đoạn / Phiên chạy | Tệp minh chứng chính | SHA256 (16 ký tự đầu) |
 |---|---|---|
 | Stage-1 Champion (`se374_arm_b_full`) | `stage1_retrained_best.pth` / `stage1_best_cls.pth` | `a182d8890c09d7b8` / `e1a88293aff0a0e3` |
 | Gate-6 Step-0 (`se374_s2v2_step0`) | `STAGE2_TRAINING_METRICS.json` | `b0b319d6f7ab0537` |
-| Gate-6 Round-1 `arm1-arm4` | `arm1` / `arm2` / `arm3` / `arm4` `stage2_retrained_best.pth` | `69b569e6080370f3` / `e32e2a618c994f57` / `f706c0f52cd4c49d` / `bda6c2f048d1ed13` |
+| Gate-6 Round-1 `arm1-arm4` (lưu trên `vps-colab`) | `arm1` / `arm2` / `arm3` / `arm4` `stage2_retrained_best.pth` | `69b569e6080370f3` / `e32e2a618c994f57` / `f706c0f52cd4c49d` / `bda6c2f048d1ed13` |
 | Gate-6 Round-1 4-Arm (`se374_s2v2_ensemble`) | `STAGE2_TRAINING_METRICS.json` | `9e43aa5f27a623ca` |
 | Multi-seed Arm 4 (`s123` / `s456`) | `STAGE2_TRAINING_METRICS.json` (`s123` / `s456`) | `d7be7060c1445bea` / `0160c4639a6924c6` |
 | Gate-7 Step-0 (`se374_g7_diag_r2_val`) | `STAGE2_TRAINING_METRICS.json` | `21c08b3996507d66` |

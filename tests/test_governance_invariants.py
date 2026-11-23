@@ -6,6 +6,8 @@ import os
 import re
 from pathlib import Path
 
+import pytest
+
 IGNORED_DASH_PREFIXES = (
     "repos\\", "repos/",
     "graphify-out\\", "graphify-out/",
@@ -102,7 +104,8 @@ def test_src_and_drive_bundle_ast_and_content_sync():
     src_root = Path("src")
     bundle_src_root = Path("drive_upload_ready/SE374_WSSS_Drive_Code/src")
     assert src_root.is_dir(), "src/ directory must exist"
-    assert bundle_src_root.is_dir(), "Drive bundle src/ directory must exist"
+    if not bundle_src_root.is_dir():
+        pytest.skip("Gitignored Drive bundle drive_upload_ready/SE374_WSSS_Drive_Code/src is not present on clean CI checkout.")
 
     src_py_files = sorted(src_root.rglob("*.py"))
     assert len(src_py_files) >= 25, "Expected at least 25 Python modules in src/"
@@ -136,8 +139,10 @@ def test_teacher_lab1_notebook_copy_untouched_and_valid_json():
 
 def test_invariants_24_and_25_defined_in_agents_md():
     """Verify that Invariant 24 (Scientific visuals) and Invariant 25 (Auditor gate) exist in AGENTS.md."""
-    with open("AGENTS.md", "r", encoding="utf-8") as f:
-        content = f.read()
+    agents_md = Path("AGENTS.md")
+    if not agents_md.is_file():
+        pytest.skip("Gitignored AGENTS.md is not present on clean CI checkout.")
+    content = agents_md.read_text(encoding="utf-8")
     assert "[INVARIANT-24]" in content, "INVARIANT-24 must be defined in AGENTS.md"
     assert "[INVARIANT-25]" in content, "INVARIANT-25 must be defined in AGENTS.md"
     assert "deliverable_auditor.py" in content, "deliverable_auditor.py must be documented in AGENTS.md"

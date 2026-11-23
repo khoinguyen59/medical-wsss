@@ -73,8 +73,10 @@ from src.stage2_v2.models import (
     Stage2ModelEMA,
     build_stage2_v2_model,
     load_stage2_v2_checkpoint,
+    remap_hf_state_dict_keys,
 )
 from src.stage2_v2.trainer import train_stage2_v2
+from src.stage2_v2.visual_audit import run_stage2_v2_visual_audit
 
 __all__ = [
     "STAGE2_V2_PRESETS",
@@ -93,6 +95,8 @@ __all__ = [
     "Stage2ModelEMA",
     "build_stage2_v2_model",
     "load_stage2_v2_checkpoint",
+    "remap_hf_state_dict_keys",
+    "run_stage2_v2_visual_audit",
     "SoftCrossEntropyLoss",
     "KLSoftOEEMLoss",
     "SoftSymmetricCELoss",

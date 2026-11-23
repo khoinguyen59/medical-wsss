@@ -109,9 +109,9 @@ def blend_overlay(
             image = np.clip(image, 0, 255).astype(np.uint8)
 
     color_mask = mask_to_color_image(mask)
-    # Blend foreground classes; keep background tissue untouched or slightly shaded
+    # Blend foreground tissue classes {0..3} only; keep BACK (4) and ignore (255) untouched
     blended = image.copy()
-    fg_mask = (mask != 4)
+    fg_mask = (mask >= 0) & (mask < 4)
     if np.any(fg_mask):
         blended[fg_mask] = (
             (1.0 - alpha) * image[fg_mask].astype(np.float32) +
@@ -361,16 +361,18 @@ def compute_patch_iou_metrics(
     """Computes unified per-patch IoU and Dice metrics across tissue classes {0,1,2,3} and BACK {4}.
 
     Unifies the metric contract across clinical_viewer.py and colab_pkg/visualizer.py:
-    - miou_gt_present: averages strictly over GT-present tissue classes {0,1,2,3} (falling back
-      to min_px=1 if all GT foreground classes have fewer than eff_min_px pixels).
-    - miou_penalized_4cls: includes 0.0 penalties for tissue classes predicted >= eff_min_px
-      when absent in GT (< eff_min_px), transparently surfacing false-positive hallucination.
+    - miou_4cls / miou_gt_present / mdice_4cls: canonical valid_fg (gt in {0..3}) metrics over
+      GT-present tissue classes (zero outside-ROI gt==4 FP pollution; falls back to min_px=1 if
+      all GT foreground classes have fewer than eff_min_px pixels).
+    - miou_penalized_4cls: evaluated on valid_all (gt in {0..4}), including 0.0 penalties for
+      absent tissue classes predicted >= eff_min_px (transparently surfacing hallucination).
     """
     pred = np.asarray(pred_mask, dtype=np.int64)
     gt = np.asarray(gt_mask, dtype=np.int64)
-    valid = (gt >= 0) & (gt <= 4)
-    n_valid = int(np.sum(valid))
-    n_fg = int(np.sum((gt < 4) & valid))
+    valid_all = (gt >= 0) & (gt <= 4)
+    valid_fg = (gt >= 0) & (gt < 4)
+    n_valid = int(np.sum(valid_all))
+    n_fg = int(np.sum(valid_fg))
 
     eff_min_px = (50 if n_valid >= 4096 else 1) if min_px is None else max(1, int(min_px))
 
@@ -378,46 +380,58 @@ def compute_patch_iou_metrics(
     iou_gt_present_list: List[float] = []
     dice_gt_present_list: List[float] = []
     iou_penalized_list: List[float] = []
-    dice_penalized_list: List[float] = []
     iou_5_list: List[float] = []
 
     for c_idx, c_name in enumerate(CLASS_NAMES):
-        p_c = (pred == c_idx) & valid
-        g_c = (gt == c_idx) & valid
-        p_cnt = int(np.sum(p_c))
-        g_cnt = int(np.sum(g_c))
-        inter = int(np.sum(p_c & g_c))
-        union = int(np.sum(p_c | g_c))
-        denom_d = p_cnt + g_cnt
-        if union > 0 and (g_cnt >= eff_min_px or p_cnt >= eff_min_px):
-            iou_pct = float(inter / union * 100.0)
-            dice_pct = float(2.0 * inter / denom_d * 100.0) if denom_d > 0 else 0.0
-            per_class_iou[c_name] = round(iou_pct, 2)
-            iou_5_list.append(iou_pct)
-            if c_idx < 4 and g_cnt >= eff_min_px:
-                iou_gt_present_list.append(iou_pct)
-                dice_gt_present_list.append(dice_pct)
-                iou_penalized_list.append(iou_pct)
-                dice_penalized_list.append(dice_pct)
-            elif c_idx < 4 and p_cnt >= eff_min_px:
+        p_all = (pred == c_idx) & valid_all
+        g_all = (gt == c_idx) & valid_all
+        p_cnt_all = int(np.sum(p_all))
+        g_cnt_all = int(np.sum(g_all))
+        inter_all = int(np.sum(p_all & g_all))
+        union_all = int(np.sum(p_all | g_all))
+
+        if union_all > 0 and (g_cnt_all >= eff_min_px or p_cnt_all >= eff_min_px):
+            iou_all_pct = float(inter_all / union_all * 100.0)
+            iou_5_list.append(iou_all_pct)
+            if c_idx == 4:
+                per_class_iou[c_name] = round(iou_all_pct, 2)
+
+        if c_idx < 4:
+            p_fg = (pred == c_idx) & valid_fg
+            g_fg = (gt == c_idx) & valid_fg
+            p_cnt_fg = int(np.sum(p_fg))
+            g_cnt_fg = int(np.sum(g_fg))
+            inter_fg = int(np.sum(p_fg & g_fg))
+            union_fg = int(np.sum(p_fg | g_fg))
+            denom_d_fg = p_cnt_fg + g_cnt_fg
+
+            if union_fg > 0 and g_cnt_fg >= eff_min_px:
+                iou_fg_pct = float(inter_fg / union_fg * 100.0)
+                dice_fg_pct = float(2.0 * inter_fg / denom_d_fg * 100.0) if denom_d_fg > 0 else 0.0
+                per_class_iou[c_name] = round(iou_fg_pct, 2)
+                iou_gt_present_list.append(iou_fg_pct)
+                dice_gt_present_list.append(dice_fg_pct)
+                iou_all_c = float(inter_all / union_all * 100.0) if union_all > 0 else 0.0
+                iou_penalized_list.append(iou_all_c)
+            elif p_cnt_all >= eff_min_px:
+                per_class_iou.setdefault(c_name, 0.0)
                 iou_penalized_list.append(0.0)
-                dice_penalized_list.append(0.0)
 
     if not iou_gt_present_list and n_fg > 0:
         for c_idx, c_name in enumerate(CLASS_NAMES[:4]):
-            p_c = (pred == c_idx) & valid
-            g_c = (gt == c_idx) & valid
-            p_cnt = int(np.sum(p_c))
-            g_cnt = int(np.sum(g_c))
-            inter = int(np.sum(p_c & g_c))
-            union = int(np.sum(p_c | g_c))
-            denom_d = p_cnt + g_cnt
-            if g_cnt >= 1 and union > 0:
-                iou_pct = float(inter / union * 100.0)
-                dice_pct = float(2.0 * inter / denom_d * 100.0) if denom_d > 0 else 0.0
-                per_class_iou.setdefault(c_name, round(iou_pct, 2))
-                iou_gt_present_list.append(iou_pct)
-                dice_gt_present_list.append(dice_pct)
+            p_fg = (pred == c_idx) & valid_fg
+            g_fg = (gt == c_idx) & valid_fg
+            p_cnt_fg = int(np.sum(p_fg))
+            g_cnt_fg = int(np.sum(g_fg))
+            inter_fg = int(np.sum(p_fg & g_fg))
+            union_fg = int(np.sum(p_fg | g_fg))
+            denom_d_fg = p_cnt_fg + g_cnt_fg
+            if g_cnt_fg >= 1 and union_fg > 0:
+                iou_fg_pct = float(inter_fg / union_fg * 100.0)
+                dice_fg_pct = float(2.0 * inter_fg / denom_d_fg * 100.0) if denom_d_fg > 0 else 0.0
+                per_class_iou.setdefault(c_name, round(iou_fg_pct, 2))
+                iou_gt_present_list.append(iou_fg_pct)
+                dice_gt_present_list.append(dice_fg_pct)
 
     miou_gt_present = float(np.mean(iou_gt_present_list)) if iou_gt_present_list else 0.0
     miou_penalized_4cls = float(np.mean(iou_penalized_list)) if iou_penalized_list else 0.0
@@ -425,6 +439,7 @@ def compute_patch_iou_metrics(
     miou_5cls = float(np.mean(iou_5_list)) if iou_5_list else 0.0
 
     return {
+        "miou_4cls": round(miou_gt_present, 2),
         "miou_gt_present": round(miou_gt_present, 2),
         "miou_penalized_4cls": round(miou_penalized_4cls, 2),
         "mdice_4cls": round(mdice_4cls, 2),
@@ -481,6 +496,13 @@ def compute_agreement_error_overlay(
     fn_missed_mask = (gt < 4) & (pred == 4) & valid
     misclass_mask = (gt < 4) & (pred < 4) & (pred != gt) & valid
 
+    # Separate stained outside-ROI tissue (gt==4 with H&E stain) from true bright optical glass FP
+    hsv_u8 = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2HSV)
+    sat_u8 = hsv_u8[:, :, 1]
+    gray_u8 = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2GRAY)
+    outside_roi_tissue_mask = fp_glass_mask & (gray_u8 < 235) & (sat_u8 > 15)
+    fp_bright_glass_mask = fp_glass_mask & (~outside_roi_tissue_mask)
+
     base = _dimmed_grayscale_base(rgb_u8, he_weight=0.40)
     out = rgb_u8.astype(np.float32).copy()
 
@@ -490,27 +512,35 @@ def compute_agreement_error_overlay(
     color_magenta = np.array([217.0, 70.0, 239.0], dtype=np.float32)
     color_blue = np.array([59.0, 130.0, 246.0], dtype=np.float32)
     color_glass = np.array([226.0, 232.0, 240.0], dtype=np.float32)
+    color_outside_roi = np.array([148.0, 163.0, 184.0], dtype=np.float32)
 
     if np.any(match_bg):
         out[match_bg] = 0.85 * out[match_bg] + 0.15 * color_glass
+    if np.any(outside_roi_tissue_mask):
+        out[outside_roi_tissue_mask] = 0.65 * base[outside_roi_tissue_mask] + 0.35 * color_outside_roi
     if np.any(match_fg):
         out[match_fg] = (1.0 - alpha * 0.80) * base[match_fg] + (alpha * 0.80) * color_green
-    if np.any(mismatch_margin):
-        out[mismatch_margin] = (1.0 - alpha * 0.88) * base[mismatch_margin] + (alpha * 0.88) * color_amber
+    margin_display = mismatch_margin & (~outside_roi_tissue_mask)
+    if np.any(margin_display):
+        out[margin_display] = (1.0 - alpha * 0.88) * base[margin_display] + (alpha * 0.88) * color_amber
 
     core_w = min(0.88, alpha + 0.14)
+    core_misclass = misclass_mask & (~boundary_zone)
+    core_fp_bright_glass = fp_bright_glass_mask & (~boundary_zone)
+    core_fn_missed = fn_missed_mask & (~boundary_zone)
     if error_breakdown:
-        core_misclass = misclass_mask & (~boundary_zone)
-        core_fp_glass = fp_glass_mask & (~boundary_zone)
-        core_fn_missed = fn_missed_mask & (~boundary_zone)
         if np.any(core_misclass):
             out[core_misclass] = (1.0 - core_w) * base[core_misclass] + core_w * color_red
-        if np.any(core_fp_glass):
-            out[core_fp_glass] = (1.0 - core_w) * base[core_fp_glass] + core_w * color_magenta
+        if np.any(core_fp_bright_glass):
+            out[core_fp_bright_glass] = (1.0 - core_w) * base[core_fp_bright_glass] + core_w * color_magenta
         if np.any(core_fn_missed):
             out[core_fn_missed] = (1.0 - core_w) * base[core_fn_missed] + core_w * color_blue
-    elif np.any(mismatch_core):
-        out[mismatch_core] = (1.0 - core_w) * base[mismatch_core] + core_w * color_red
+    else:
+        core_fg_err = (core_misclass | core_fn_missed)
+        if np.any(core_fg_err):
+            out[core_fg_err] = (1.0 - core_w) * base[core_fg_err] + core_w * color_red
+        if np.any(core_fp_bright_glass):
+            out[core_fp_bright_glass] = (1.0 - core_w) * base[core_fp_bright_glass] + core_w * color_magenta
 
     # Quantitative diagnostic summary
     n_valid = int(np.sum(valid))
@@ -519,6 +549,8 @@ def compute_agreement_error_overlay(
     margin_err_px = int(np.sum(mismatch_margin))
     core_err_px = int(np.sum(mismatch_core))
     fp_glass_px = int(np.sum(fp_glass_mask))
+    outside_roi_tissue_px = int(np.sum(outside_roi_tissue_mask))
+    fp_bright_glass_px = int(np.sum(fp_bright_glass_mask))
     fn_missed_px = int(np.sum(fn_missed_mask))
     misclass_px = int(np.sum(misclass_mask))
 
@@ -557,7 +589,8 @@ def compute_agreement_error_overlay(
         "boundary_margin_pct": round(margin_err_pct, 2),
         "core_error_pct": round(core_err_pct, 2),
         "total_error_pct": round(margin_err_pct + core_err_pct, 2),
-        "miou_4cls": iou_stats["miou_gt_present"],
+        "miou_4cls": iou_stats["miou_4cls"],
+        "miou_4cls_roi_canonical": iou_stats["miou_4cls"],
         "miou_gt_present": iou_stats["miou_gt_present"],
         "miou_penalized_4cls": iou_stats["miou_penalized_4cls"],
         "miou_penalized": iou_stats["miou_penalized_4cls"],
@@ -571,6 +604,8 @@ def compute_agreement_error_overlay(
         "margin_err_px": margin_err_px,
         "core_err_px": core_err_px,
         "fp_glass_px": fp_glass_px,
+        "outside_roi_tissue_px": outside_roi_tissue_px,
+        "fp_bright_glass_px": fp_bright_glass_px,
         "fn_missed_px": fn_missed_px,
         "misclass_px": misclass_px,
     }
@@ -863,9 +898,11 @@ def compute_cam_overlay(
 
     resolved_target: Optional[int] = None
     if cam.ndim == 3:
-        if cam.shape[0] <= 10 and cam.shape[1] > 10:
+        if cam.shape[0] <= 10 and cam.shape[2] > 10:
             pass
-        elif cam.shape[2] <= 10:
+        elif cam.shape[2] <= 10 and cam.shape[0] > 10:
+            cam = np.transpose(cam, (2, 0, 1))
+        elif cam.shape[2] <= 10 and cam.shape[2] < cam.shape[0]:
             cam = np.transpose(cam, (2, 0, 1))
         if target_class is not None and 0 <= int(target_class) < cam.shape[0]:
             resolved_target = int(target_class)

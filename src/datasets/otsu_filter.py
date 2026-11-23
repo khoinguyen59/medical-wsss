@@ -46,13 +46,33 @@ def compute_otsu_tissue_mask(
         ]
         return np.stack(masks, axis=0)
 
-    if image.dtype in [np.float32, np.float64]:
-        if image.max() <= 1.0:
-            image_uint8 = (image * 255.0).astype(np.uint8)
+    if isinstance(image, np.ndarray) and image.ndim == 3 and image.shape[0] in (1, 3) and image.shape[2] not in (1, 3):
+        image = np.transpose(image, (1, 2, 0))
+
+    if image.size == 0:
+        return np.zeros(image.shape[:2], dtype=np.uint8)
+
+    if np.issubdtype(image.dtype, np.floating):
+        img_f = image.astype(np.float32)
+        f_min = float(np.min(img_f))
+        f_max = float(np.max(img_f))
+        if f_min >= -1e-4 and f_max <= 1.0 + 1e-4:
+            image_uint8 = np.clip(img_f * 255.0, 0.0, 255.0).astype(np.uint8)
+        elif f_min >= -2.5 and f_max <= 2.75:
+            if img_f.ndim == 3 and img_f.shape[-1] == 3:
+                mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
+                std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 1, 3)
+                rgb01 = np.clip(img_f * std + mean, 0.0, 1.0)
+            else:
+                rgb01 = np.clip(img_f * 0.226 + 0.449, 0.0, 1.0)
+            image_uint8 = np.clip(rgb01 * 255.0, 0.0, 255.0).astype(np.uint8)
         else:
-            image_uint8 = np.clip(image, 0, 255).astype(np.uint8)
+            image_uint8 = np.clip(img_f, 0.0, 255.0).astype(np.uint8)
+    elif image.dtype != np.uint8:
+        image_uint8 = np.clip(image, 0, 255).astype(np.uint8)
     else:
         image_uint8 = image
+    image_uint8 = np.ascontiguousarray(image_uint8)
 
     if image_uint8.ndim == 2:
         image_uint8 = cv2.cvtColor(image_uint8, cv2.COLOR_GRAY2RGB)
