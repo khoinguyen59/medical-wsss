@@ -1133,6 +1133,103 @@ def test_nan_inf_and_out_of_range_float_422_handling(monkeypatch: pytest.MonkeyP
             assert resp_oob.status_code == 422, f"{endpoint} {bad_payload} gave {resp_oob.status_code}"
 
 
+def test_export_report_cap_pdf_and_ui_button(monkeypatch: pytest.MonkeyPatch):
+    """Tests POST /api/v1/export/report format='pdf' returns valid CAP QA PDF bytes and UI exposes Export CAP PDF."""
+    import pymupdf
+
+    stub_client, _ = _fast_stub_client(monkeypatch)
+    img = np.full((64, 64, 3), 150, dtype=np.uint8)
+    img[:, :, 0] = 210
+    img_b64 = encode_image_to_base64(img, format="PNG")
+    gt = np.zeros((64, 64), dtype=np.uint8)
+    gt[32:, :] = 1
+    gt_buf = io.BytesIO()
+    Image.fromarray(gt, mode="L").save(gt_buf, format="PNG")
+    gt_b64 = "data:image/png;base64," + base64.b64encode(gt_buf.getvalue()).decode("ascii")
+
+    # 1. With GT mask
+    r_pdf = stub_client.post(
+        "/api/v1/export/report",
+        json={"image_base64": img_b64, "gt_mask_base64": gt_b64, "mode": "m6", "format": "pdf"},
+    )
+    assert r_pdf.status_code == 200, r_pdf.text
+    assert r_pdf.headers["content-type"] == "application/pdf"
+    assert r_pdf.headers["content-disposition"].endswith('_clinical_qa_report.pdf"')
+    assert r_pdf.content.startswith(b"%PDF-")
+    assert len(r_pdf.content) > 5000
+
+    doc = pymupdf.open(stream=r_pdf.content, filetype="pdf")
+    try:
+        assert len(doc) == 2
+        p1_text = doc[0].get_text()
+        for expected in (
+            "CLINICAL PATHOLOGY QA REPORT",
+            "Patient ID:",
+            "Sample ID:",
+            "TUM",
+            "STR",
+            "LYM",
+            "NEC",
+            "BACK",
+            "Viable Tumor Percentage (VTP)",
+            "Tumor-Stroma Ratio (TSR)",
+            "CAP Risk Tier",
+            "RESEARCH USE ONLY (RUO)",
+        ):
+            assert expected in p1_text, f"Missing '{expected}' in PDF page 1 text"
+    finally:
+        doc.close()
+
+    # 2. Without GT mask + stroma-only clinical risk regression check (TUM=0%, STR>0% -> High Risk, NOT Indeterminate)
+    r_pdf_no_gt = stub_client.post(
+        "/api/v1/export/report",
+        json={"image_base64": img_b64, "mode": "m6", "format": "pdf"},
+    )
+    assert r_pdf_no_gt.status_code == 200
+    assert r_pdf_no_gt.headers["content-type"] == "application/pdf"
+    assert r_pdf_no_gt.content.startswith(b"%PDF-")
+
+    stroma_res = {
+        "pred_mask": np.ones((64, 64), dtype=np.uint8),
+        "_probs_arr": np.stack([np.zeros((64, 64)), np.ones((64, 64)), np.zeros((64, 64)), np.zeros((64, 64))], axis=0).astype(np.float32),
+        "_gt_aligned": None,
+        "_cam_aligned": None,
+        "method_used": "gate7_4arm_cgm",
+        "checkpoint_verified": True,
+        "applied_gating": True,
+        "latency_ms": 12.5,
+        "mean_entropy": 0.1,
+        "mask_shape": [64, 64],
+        "biomarkers": {"viable_tumor_percentage": 0.0, "tumor_stroma_ratio": 0.0},
+        "gt_biomarkers": None,
+        "class_distribution": {"TUM": 0.0, "STR": 100.0, "LYM": 0.0, "NEC": 0.0, "BACK": 0.0},
+        "gt_distribution": None,
+        "verification_metrics": None,
+    }
+    import src.visualization.api_server as api_srv
+
+    long_sample = "TCGA-D8-A27F-DX1_xmin98787_ymin6725_MPP-0.2500+0.png"
+    stroma_pdf = api_srv._render_clinical_cap_pdf_report(
+        img, stroma_res, "TCGA-D8-A27F", long_sample, api_srv.ExportReportRequest(sample_id=long_sample, format="pdf")
+    )
+    doc_s = pymupdf.open(stream=stroma_pdf, filetype="pdf")
+    try:
+        assert len(doc_s) == 2
+        sp1, sp2 = doc_s[0].get_text(), doc_s[1].get_text()
+        assert "Stroma-Rich (High Risk)" in sp1
+        assert "Stroma Proportion: 100.00%" in sp1
+        assert "Indeterminate" not in sp1
+        assert "Appendix:" in sp2 and "TCGA-D8-A27F" in sp2
+    finally:
+        doc_s.close()
+
+    # 3. Workstation HTML wires Export CAP PDF button
+    html = client.get("/viewer").text
+    assert 'id="btnExportPdf"' in html
+    assert "Export CAP PDF" in html
+    assert 'exportQAReport("pdf")' in html
+
+
 
 
 

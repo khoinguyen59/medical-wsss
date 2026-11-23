@@ -900,7 +900,7 @@
 
     .export-btn-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: 1fr 1fr;
       gap: 6px;
     }
 
@@ -1488,6 +1488,7 @@
       <div class="panel-card">
         <h3>Export QA Report</h3>
         <div class="export-btn-row">
+          <button type="button" class="btn btn-primary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportPdf">Export CAP PDF</button>
           <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportPng">PNG Sheet</button>
           <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportJson">JSON Audit</button>
           <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportCsv">CSV Metrics</button>
@@ -3146,6 +3147,7 @@
         }
       });
 
+      document.getElementById("btnExportPdf").addEventListener("click", () => exportQAReport("pdf"));
       document.getElementById("btnExportPng").addEventListener("click", () => exportQAReport("png"));
       document.getElementById("btnExportJson").addEventListener("click", () => exportQAReport("json"));
       document.getElementById("btnExportCsv").addEventListener("click", () => exportQAReport("csv"));

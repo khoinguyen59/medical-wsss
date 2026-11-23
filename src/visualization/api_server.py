@@ -8,7 +8,7 @@ Provides endpoints for:
                                 Green/Red match, contours, entropy uncertainty, Stage-1 CAM,
                                 class spotlight), pixel-index maps, VTP & TSR biomarkers
 - POST /api/v1/compare        : Multi-method A/B side-by-side comparison on the same tissue patch
-- POST /api/v1/export/report  : Downloadable 300-DPI PNG Diagnostic Sheet, JSON, or CSV audit report
+- POST /api/v1/export/report  : Downloadable 300-DPI PNG Sheet, CAP Clinical PDF, JSON, or CSV audit report
 - POST /api/v1/predict/wsi    : Multi-patch WSI slide stitching and composite heatmap synthesis
 - GET  /viewer and /          : Enterprise self-contained HTML5 clinical workstation UI
 - Pure ASCII hyphen '-' (0x2D) enforced throughout (Invariant 12).
@@ -39,6 +39,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.clinical.survival_analysis import stratify_cap_risk
 from src.colab_pkg.downloader import extract_patient_id
 from src.datasets.otsu_filter import apply_otsu_gating_to_prediction
 from src.datasets.patient_split import load_patient_splits
@@ -1986,12 +1987,190 @@ async def compare_methods_endpoint(payload: MethodCompareRequest) -> Dict[str, A
     return await run_in_threadpool(_run_compare)
 
 
+def _render_clinical_cap_pdf_report(
+    image_np: np.ndarray,
+    res: Dict[str, Any],
+    patient_id: str,
+    sample_label: str,
+    payload: ExportReportRequest,
+) -> bytes:
+    """Renders a 2-page CAP-aligned Clinical Pathology QA PDF Report (thread-safe OO Matplotlib)."""
+    import textwrap
+
+    from matplotlib.backends.backend_pdf import FigureCanvasPdf, PdfPages
+    from matplotlib.figure import Figure
+
+    ts_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    bio = res["biomarkers"]
+    dist = res["class_distribution"]
+    vtp = float(bio.get("viable_tumor_percentage", 0.0))
+    tsr = float(bio.get("tumor_stroma_ratio", 0.0))
+    has_tum_str = (float(dist.get("TUM", 0.0)) + float(dist.get("STR", 0.0))) > 0.0
+    stroma_prop = round(max(0.0, 100.0 - tsr), 2) if has_tum_str else 0.0
+    cap_info = stratify_cap_risk(tsr, stroma_proportion=stroma_prop, threshold=50.0)
+    risk_tier = f"{cap_info['risk_group']} ({cap_info['risk_level']})"
+
+    gt_dist = res.get("gt_distribution")
+    gt_bio = res.get("gt_biomarkers")
+    ver = res.get("verification_metrics")
+
+    diag_png = render_single_patch_diagnostic_sheet(
+        image=image_np,
+        pred_mask=res["pred_mask"],
+        probs=res["_probs_arr"],
+        gt_mask=res["_gt_aligned"],
+        cam_map=res["_cam_aligned"],
+        method_name=str(res["method_used"] or "m6"),
+        sample_id=sample_label,
+        biomarkers=bio,
+        gt_biomarkers=gt_bio,
+        blur_sigma=payload.blur_sigma,
+        dim_factor=payload.dim_factor,
+        gt_alpha=payload.gt_alpha,
+        pred_alpha=payload.pred_alpha,
+        error_alpha=payload.error_alpha,
+        tolerance_px=payload.tolerance_px,
+        dpi=200,
+    )
+    diag_rgb = np.array(Image.open(io.BytesIO(diag_png)).convert("RGB"), dtype=np.uint8)
+
+    pred_rgb = blend_overlay(image_np, res["pred_mask"], alpha=0.45)
+    contour_rgb = compute_contour_comparison_overlay(image_np, res["pred_mask"], res["_gt_aligned"])
+    if res["_gt_aligned"] is not None:
+        third_rgb, _ = compute_agreement_error_overlay(
+            image_np, res["pred_mask"], res["_gt_aligned"], tolerance_px=payload.tolerance_px, error_breakdown=True
+        )
+        third_title = "Match vs Error QA"
+    else:
+        third_rgb, _ = compute_entropy_heatmap_overlay(image_np, res["_probs_arr"], alpha=0.55)
+        third_title = "Shannon Entropy"
+
+    def _wrap_kv(prefix: str, value: str, width: int = 86) -> str:
+        return textwrap.fill(f"{prefix}{value}", width=width, subsequent_indent=" " * 4)
+
+    buf = io.BytesIO()
+    with PdfPages(buf) as pdf:
+        # Page 1: CAP Synoptic Clinical Pathology Summary + Visual Strip + RUO Disclaimer
+        fig1 = Figure(figsize=(8.27, 11.69), dpi=180)
+        FigureCanvasPdf(fig1)
+        fig1.patch.set_facecolor("#FFFFFF")
+        ax = fig1.add_axes([0.05, 0.04, 0.90, 0.92])
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis("off")
+
+        ax.text(0.0, 0.985, "BCSS-WSSS CLINICAL PATHOLOGY QA REPORT", fontsize=13.2, fontweight="bold", color="#0F172A", va="top")
+        ax.text(0.0, 0.954, "CAP-Aligned Synoptic Quantitative Histopathology & Prognostic Biomarker Summary", fontsize=8.9, color="#475569", va="top")
+        ax.plot([0.0, 1.0], [0.932, 0.932], color="#0F172A", linewidth=1.4)
+
+        sample_disp = sample_label if len(sample_label) <= 62 else (sample_label[:59] + "...")
+        meta_lines = [
+            f"Patient ID: {patient_id}   |   Sample ID: {sample_disp}",
+            f"Report Timestamp (UTC): {ts_utc}   |   Patch Shape: {res['mask_shape'][0]} x {res['mask_shape'][1]} px",
+            f"Inference Method: {str(res['method_used']).upper()}   |   Checkpoint Verified: {res['checkpoint_verified']}   |   Otsu Gating: {res['applied_gating']}",
+            f"Inference Latency: {res['latency_ms']:.2f} ms   |   Mean Shannon Entropy: {res['mean_entropy']:.4f}",
+        ]
+        ax.text(0.0, 0.914, "1. SPECIMEN & EXECUTION METADATA", fontsize=9.8, fontweight="bold", color="#0F172A", va="top")
+        ax.text(
+            0.01, 0.892, "\n".join(meta_lines), fontsize=8.1, color="#1E293B", va="top", linespacing=1.42,
+            bbox={"boxstyle": "round,pad=0.45", "facecolor": "#F8FAFC", "edgecolor": "#CBD5E1"},
+        )
+
+        ax.text(0.0, 0.778, "2. TISSUE COMPARTMENT AREA PERCENTAGES", fontsize=9.8, fontweight="bold", color="#0F172A", va="top")
+        area_lines = ["Class        Pred Area (%)    GT Area (%)      Delta (%)"]
+        area_lines.append("-" * 56)
+        for cls_name in CLASS_NAMES:
+            p_pct = float(dist.get(cls_name, 0.0))
+            if gt_dist is not None:
+                g_pct = float(gt_dist.get(cls_name, 0.0))
+                area_lines.append(f"{cls_name:<12} {p_pct:>9.2f}%    {g_pct:>9.2f}%    {p_pct - g_pct:>+8.2f}%")
+            else:
+                area_lines.append(f"{cls_name:<12} {p_pct:>9.2f}%          N/A           N/A")
+        ax.text(
+            0.01, 0.756, "\n".join(area_lines), fontsize=8.1, family="monospace", color="#0F172A", va="top", linespacing=1.35,
+            bbox={"boxstyle": "round,pad=0.45", "facecolor": "#F8FAFC", "edgecolor": "#CBD5E1"},
+        )
+
+        ax.text(0.0, 0.592, "3. QUANTITATIVE BIOMARKERS & CAP / UNITED RISK STRATIFICATION", fontsize=9.8, fontweight="bold", color="#0F172A", va="top")
+        bio_lines = [
+            f"Predicted Viable Tumor Percentage (VTP): {vtp:.2f}%"
+            + (f"   (GT VTP: {float(gt_bio['viable_tumor_percentage']):.2f}%)" if gt_bio else ""),
+            f"Predicted Tumor-Stroma Ratio (TSR): {tsr:.2f}%   |   Stroma Proportion: {stroma_prop:.2f}%"
+            + (f"   (GT TSR: {float(gt_bio['tumor_stroma_ratio']):.2f}%)" if gt_bio else ""),
+            f"CAP Risk Tier (50% TSR cut-off): {risk_tier}",
+            _wrap_kv("Guideline Reference: ", str(cap_info["guideline_authority"]), width=84),
+            _wrap_kv("Clinical Interpretation: ", str(cap_info["clinical_assessment"]), width=84),
+        ]
+        if ver is not None:
+            bio_lines.append(
+                _wrap_kv(
+                    "GT QA Metrics: ",
+                    f"Exact Match={ver['exact_match_pct']:.1f}% | mIoU(GT-present)={ver['miou_4cls']:.1f}% | "
+                    f"Penalized mIoU={ver['miou_penalized_4cls']:.1f}% | Boundary F1={ver['boundary_f1']:.1f}%",
+                    width=84,
+                )
+            )
+        ax.text(
+            0.01, 0.570, "\n".join(bio_lines), fontsize=7.9, color="#0F172A", va="top", linespacing=1.38,
+            bbox={"boxstyle": "round,pad=0.45", "facecolor": "#F1F5F9", "edgecolor": "#94A3B8"},
+        )
+
+        ax.text(0.0, 0.355, "4. HIGH-RESOLUTION HISTOPATHOLOGY VISUAL COMPARISON PANELS", fontsize=9.8, fontweight="bold", color="#0F172A", va="top")
+        panel_specs = [
+            (image_np, "Raw H&E Patch"),
+            (pred_rgb, f"AI Overlay ({str(res['method_used']).upper()})"),
+            (contour_rgb, "Boundary Contours"),
+            (third_rgb, third_title),
+        ]
+        for idx_p, (p_img, p_title) in enumerate(panel_specs):
+            sub_ax = fig1.add_axes([0.055 + idx_p * 0.228, 0.135, 0.21, 0.195])
+            sub_ax.imshow(p_img)
+            sub_ax.set_title(p_title, fontsize=7.9, fontweight="bold", color="#0F172A", pad=3)
+            sub_ax.axis("off")
+
+        ruo_text = (
+            "RESEARCH USE ONLY (RUO) - NOT CLEARED FOR PRIMARY CLINICAL DIAGNOSIS\n"
+            "This report is generated by an automated weakly-supervised digital pathology research workstation.\n"
+            "All AI tissue segmentation overlays, VTP/TSR percentages, and CAP/UNITED risk tiers MUST be independently\n"
+            "verified by a board-certified anatomical pathologist prior to any diagnostic or therapeutic decision."
+        )
+        ax.text(
+            0.5, 0.012, ruo_text, fontsize=7.5, fontweight="bold", color="#7F1D1D", ha="center", va="bottom", linespacing=1.35,
+            bbox={"boxstyle": "round,pad=0.45", "facecolor": "#FEF2F2", "edgecolor": "#B91C1C", "linewidth": 1.0},
+        )
+        pdf.savefig(fig1)
+
+        # Page 2: Full 2x4 Diagnostic Comparison Sheet Appendix
+        fig2 = Figure(figsize=(11.69, 8.27), dpi=180)
+        FigureCanvasPdf(fig2)
+        fig2.patch.set_facecolor("#FFFFFF")
+        ax2 = fig2.add_axes([0.02, 0.04, 0.96, 0.88])
+        ax2.imshow(diag_rgb)
+        ax2.axis("off")
+        p2_title = textwrap.fill(
+            f"Appendix: 2x4 Diagnostic Verification Sheet - {sample_label} ({patient_id})",
+            width=102,
+        )
+        fig2.suptitle(p2_title, fontsize=9.8, fontweight="bold", color="#0F172A", y=0.975)
+        fig2.text(
+            0.5, 0.012,
+            "RESEARCH USE ONLY (RUO) - Board-certified pathologist review required before clinical use.",
+            ha="center", va="bottom", fontsize=8.0, color="#64748B",
+        )
+        pdf.savefig(fig2)
+
+    return buf.getvalue()
+
+
 @app.post("/api/v1/export/report")
 async def export_report_endpoint(payload: ExportReportRequest) -> Response:
-    """Exports a 300-DPI PNG Diagnostic Comparison Sheet, JSON audit, or CSV metrics report."""
+    """Exports a 300-DPI PNG Diagnostic Sheet, CAP Clinical PDF, JSON audit, or CSV metrics report."""
     fmt = (payload.format or "png").lower().strip()
-    if fmt not in {"png", "json", "csv"}:
-        raise HTTPException(status_code=422, detail=f"Invalid report format '{payload.format}'. Allowed: png, json, csv.")
+    if fmt not in {"png", "pdf", "json", "csv"}:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid report format '{payload.format}'. Allowed: png, pdf, json, csv.",
+        )
 
     image_np: Optional[np.ndarray] = None
     gt_np: Optional[np.ndarray] = None
@@ -2062,6 +2241,16 @@ async def export_report_endpoint(payload: ExportReportRequest) -> Response:
                 dpi=300,
             )
             return png_bytes, "image/png", f"{safe_tag}_diagnostic_sheet.png"
+
+        if fmt == "pdf":
+            pdf_bytes = _render_clinical_cap_pdf_report(
+                image_np=image_np,
+                res=res,
+                patient_id=patient_id,
+                sample_label=sample_label,
+                payload=payload,
+            )
+            return pdf_bytes, "application/pdf", f"{safe_tag}_clinical_qa_report.pdf"
 
         audit_doc = {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
