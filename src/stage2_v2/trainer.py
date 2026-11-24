@@ -19,6 +19,7 @@ import json
 import math
 import os
 import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -62,6 +63,49 @@ def _atomic_write_json(payload: Dict[str, Any], target_path: Path) -> None:
     tmp_path = target_path.with_suffix(target_path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(tmp_path, target_path)
+
+
+def _is_valid_git_commit_sha(value: str) -> bool:
+    """Return True iff `value` is a single-line hexadecimal Git commit SHA (7-64 chars)."""
+    return 7 <= len(value) <= 64 and all(ch in "0123456789abcdefABCDEF" for ch in value)
+
+
+def _resolve_git_head_commit() -> str:
+    """Resolve current Git HEAD commit SHA safely, returning '' if git is unavailable."""
+    cmds: List[List[str]] = []
+    try:
+        parents = Path(__file__).resolve().parents
+        if len(parents) > 2:
+            cmds.append(["git", "-C", str(parents[2]), "rev-parse", "HEAD"])
+    except Exception:
+        pass
+    cmds.append(["git", "rev-parse", "HEAD"])
+
+    for cmd in cmds:
+        try:
+            res = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if res.returncode == 0:
+                sha = res.stdout.strip()
+                if _is_valid_git_commit_sha(sha):
+                    return sha
+        except Exception:
+            continue
+    return ""
+
+
+def _apply_git_provenance(cfg_dict: Dict[str, Any]) -> tuple[Dict[str, Any], str]:
+    """Normalize `cfg_dict['git_ref']` and backfill from Git HEAD when empty."""
+    updated = dict(cfg_dict)
+    resolved_git_commit = _resolve_git_head_commit()
+    explicit_ref = str(updated.get("git_ref") or "").strip()
+    updated["git_ref"] = explicit_ref or resolved_git_commit
+    return updated, resolved_git_commit
 
 
 def _resolve_memmap_source(
@@ -838,8 +882,11 @@ def train_stage2_v2(
             "test_eval_calibrated": raw_test_cal,
         }
 
+    cfg_dict, resolved_git_commit = _apply_git_provenance(cfg.to_dict())
+
     metrics_payload: Dict[str, Any] = {
-        "config": cfg.to_dict(),
+        "config": cfg_dict,
+        "resolved_git_commit": resolved_git_commit,
         "best_epoch": int(best_meta.get("epoch") or 0),
         "best_val_miou": round(float(best_val_miou), 4),
         "best_selected_weights": best_selected_weights,

@@ -1124,3 +1124,139 @@ def test_job_h_ablation_env_overrides_and_02b_local_bundle() -> None:
     cell1 = "".join(nb02b["cells"][1]["source"])
     assert 'LOCAL_BUNDLE = Path("/content/local_repo.bundle")' in cell1
     assert "git" in cell1 and "clone" in cell1 and "LOCAL_BUNDLE" in cell1
+
+
+def test_trainer_git_provenance_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify git provenance helper edge cases and end-to-end STAGE2_TRAINING_METRICS.json serialization."""
+    import subprocess
+
+    import src.stage2_v2.trainer as s2_trainer
+
+    # 1. Real git repo returns a valid 40-char hex commit SHA
+    real_sha = s2_trainer._resolve_git_head_commit()
+    assert len(real_sha) == 40 and all(ch in "0123456789abcdef" for ch in real_sha.lower())
+
+    # 2. _apply_git_provenance with real git available
+    cfg_empty, resolved = s2_trainer._apply_git_provenance({"git_ref": ""})
+    assert resolved == real_sha and cfg_empty["git_ref"] == real_sha
+
+    cfg_ws, resolved_ws = s2_trainer._apply_git_provenance({"git_ref": "   "})
+    assert resolved_ws == real_sha and cfg_ws["git_ref"] == real_sha
+
+    cfg_explicit, resolved_exp = s2_trainer._apply_git_provenance({"git_ref": "  release-tag-r2  "})
+    assert resolved_exp == real_sha and cfg_explicit["git_ref"] == "release-tag-r2"
+
+    # 3. End-to-end train_stage2_v2 STAGE2_TRAINING_METRICS.json checks (empty, explicit, and git unavailable)
+    splits = load_bcss_patient_splits()
+    tr_pids = splits["train"][:2]
+    val_pids = splits["val"][:1]
+    img_dir = tmp_path / "train"
+    img_dir.mkdir()
+    rng = np.random.default_rng(19)
+    for i, pid in enumerate(tr_pids):
+        arr = rng.integers(40, 200, size=(224, 224, 3), dtype=np.uint8)
+        Image.fromarray(arr, mode="RGB").save(img_dir / f"{pid}_dx1_p{i}_[1100].png")
+    val_dir = tmp_path / "val"
+    val_dir.mkdir()
+    Image.fromarray(rng.integers(40, 200, size=(224, 224, 3), dtype=np.uint8), mode="RGB").save(
+        val_dir / f"{val_pids[0]}_dx1_v0_[1111].png"
+    )
+    val_loader = DataLoader(_TinySimpleDataset(sorted(val_dir.glob("*.png")), img_size=64), batch_size=1)
+    s1_m = WSSSTissueStage1NetCAM(n_class=4)
+    mm_dir = tmp_path / "mm"
+    s1_dat, s1_man, _ = generate_bn7_soft_memmap(
+        s1_m, img_dir, mm_dir, patient_ids=tr_pids, soft_mode="raw_l1", batch_size=2, device=torch.device("cpu")
+    )
+
+    def _fake_eval(*_args, **_kwargs):
+        base = {
+            "mIoU": 0.70,
+            "mDice": 0.80,
+            "per_class_iou": {"tum": 0.7, "str": 0.7, "lym": 0.7, "nec": 0.7},
+            "class_ious": [0.7] * 4,
+        }
+        return {"num_patches": 1, "raw": base, "cgm_self": base, "ms_tta": base, "ms_tta_cgm": base}
+
+    monkeypatch.setattr(s2_trainer, "evaluate_stage2_v2_model", _fake_eval)
+    monkeypatch.setattr(
+        s2_trainer,
+        "calibrate_cgm_thresholds_val_only",
+        lambda **_kw: {"gate_source": "self", "thresholds": [0.1] * 4, "per_class_thresholds": {}, "val_miou": 0.7},
+    )
+    monkeypatch.setattr(
+        s2_trainer,
+        "load_stage2_v2_checkpoint",
+        lambda ckpt_p, device="cpu", strict=True: (
+            _TinyDualHead(has_frozen=False),
+            torch.load(ckpt_p, map_location="cpu", weights_only=False),
+        ),
+    )
+
+    base_cfg = replace(
+        get_stage2_v2_preset("arm1_deeplab_cleankd"),
+        epochs=1,
+        num_workers=0,
+        batch_size=2,
+        memmap_source="stage1",
+    )
+
+    def _run_case(tag: str, git_ref_val: str) -> dict:
+        out_dir = tmp_path / f"out_{tag}"
+        train_stage2_v2(
+            cfg=replace(base_cfg, git_ref=git_ref_val),
+            model=_TinyDualHead(has_frozen=False),
+            train_img_dir=img_dir,
+            memmap_path=s1_dat,
+            manifest_path=s1_man,
+            val_loader=val_loader,
+            stage1_sha256="sha_test",
+            train_patient_ids=tr_pids,
+            checkpoint_dir=tmp_path / f"ckpt_{tag}",
+            output_dir=out_dir,
+            zip_path=tmp_path / f"res_{tag}.zip",
+            device=torch.device("cpu"),
+        )
+        return json.loads((out_dir / "STAGE2_TRAINING_METRICS.json").read_text(encoding="utf-8"))
+
+    disk_empty = _run_case("empty", "")
+    assert disk_empty["resolved_git_commit"] == real_sha
+    assert disk_empty["config"]["git_ref"] == real_sha
+
+    disk_explicit = _run_case("explicit", "  explicit-release-v2  ")
+    assert disk_explicit["resolved_git_commit"] == real_sha
+    assert disk_explicit["config"]["git_ref"] == "explicit-release-v2"
+
+    # 4. Non-SHA stdout (e.g., symbolic 'HEAD' or warnings) is rejected to ''
+    monkeypatch.setattr(
+        s2_trainer.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(args=a[0], returncode=0, stdout="HEAD\n", stderr=""),
+    )
+    assert s2_trainer._resolve_git_head_commit() == ""
+
+    # 5. Non-zero exit code returns ''
+    monkeypatch.setattr(
+        s2_trainer.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(args=a[0], returncode=128, stdout="", stderr="not a git repo"),
+    )
+    assert s2_trainer._resolve_git_head_commit() == ""
+
+    # 6. Timeout and missing git binary fail silently to '', and whitespace git_ref normalizes to ''
+    def _raise_timeout(*_a, **_kw):
+        raise subprocess.TimeoutExpired(cmd=["git", "rev-parse", "HEAD"], timeout=5)
+
+    monkeypatch.setattr(s2_trainer.subprocess, "run", _raise_timeout)
+    assert s2_trainer._resolve_git_head_commit() == ""
+
+    def _raise_missing(*_a, **_kw):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(s2_trainer.subprocess, "run", _raise_missing)
+    assert s2_trainer._resolve_git_head_commit() == ""
+    cfg_ws_nogit, res_nogit = s2_trainer._apply_git_provenance({"git_ref": "   "})
+    assert res_nogit == "" and cfg_ws_nogit["git_ref"] == ""
+
+    disk_nogit = _run_case("nogit_ws", "   ")
+    assert disk_nogit["resolved_git_commit"] == ""
+    assert disk_nogit["config"]["git_ref"] == ""
