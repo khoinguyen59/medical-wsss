@@ -271,7 +271,9 @@ def _plot_pareto_panel(fig: Any, ax: Any, models_map: Mapping[str, Mapping[str, 
     fig.canvas.draw()
     rend = fig.canvas.get_renderer()
     ax_box, leg = ax.get_window_extent(rend), ax.get_legend()
-    placed = [leg.get_window_extent(rend)] if leg is not None else []
+    from matplotlib.transforms import Bbox
+    pt_boxes = [Bbox.from_bounds(px - 10, py - 10, 20, 20) for px, py in ax.transData.transform(pts)]
+    placed = ([leg.get_window_extent(rend)] if leg is not None else []) + pt_boxes
     offsets = [(14, 24 if p01 else -18), (14, -18 if p01 else 24), (14, 24 if p23 else -22), (14, -22 if p23 else 24), (14, -18), (-12, -26)]
     cands = [(14, 24, "left"), (14, -18, "left"), (14, 46, "left"), (14, -40, "left"), (-12, -26, "right"), (-12, 24, "right"), (-12, 46, "right"), (-12, -46, "right"), (14, 68, "left"), (14, -62, "left"), (-12, 68, "right"), (-12, -62, "right")]
     for idx, (m_key, info) in enumerate(rows):
