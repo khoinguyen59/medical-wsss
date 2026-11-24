@@ -1497,3 +1497,182 @@ def test_visual_audit_reviewer_edge_cases_and_fixed_gt_shift(tmp_path):
         mgr.gate7_ckpt_paths.clear()
         mgr.gate7_ckpt_paths.update(orig_p)
         mgr._gate7_stage1_cls = orig_s1
+
+
+def test_visual_audit_v2_matched_spatial_glass_ablation_hann_and_separate_dx_dy(tmp_path, monkeypatch):
+    """Verify 02d_v2 upgrades: CSV spatial cols, matched common-intersection & Wilcoxon/CI, full glass ablation, Hann 50% ROI, separate dx/dy, author 1x disambiguation & provenance."""
+    import csv
+
+    from src.stage2_v2 import visual_audit as va_mod
+
+    img_dir = tmp_path / "v2_img"
+    mask_dir = tmp_path / "v2_mask"
+    img_dir.mkdir()
+    mask_dir.mkdir()
+
+    roi_prefix = "TCGA-EW-A1P4-DX1_xmin17256_ymin35430_MPP-0.2500"
+    specs = [
+        (f"{roi_prefix}+0.png", False),
+        (f"{roi_prefix}+1.png", False),
+        (f"{roi_prefix}+2.png", False),
+        (f"{roi_prefix}+3.png", False),
+        ("TCGA-E2-A1LL-DX1_xmin10_ymin20_MPP-0.2500+0.png", True),
+        ("TCGA-GI-A2C9-DX1_xmin10_ymin20_MPP-0.2500+0.png", False),
+    ]
+    items: List[Tuple[Path, Path, str]] = []
+    for idx, (fn, has_glass) in enumerate(specs):
+        gt = np.zeros((64, 64), dtype=np.uint8)
+        rgb = np.zeros((64, 64, 3), dtype=np.uint8)
+        gt[0:30, 0:34] = 0
+        rgb[0:30, 0:34] = (230, 30, 30)
+        gt[0:30, 34:64] = 1
+        rgb[0:30, 34:64] = (30, 220, 30)
+        gt[30:64, 0:28] = 2
+        rgb[30:64, 0:28] = (30, 40, 230)
+        gt[30:64, 28:64] = 3
+        rgb[30:64, 28:64] = (240, 240, 10)
+        if has_glass:
+            gt[40:, :] = 4
+            rgb[40:, :] = (248, 248, 248)
+        elif idx < 4:
+            rgb[0, :, :] = (180, 120, 140)
+            rgb[-1, :, :] = (180, 120, 140)
+            rgb[:, 0, :] = (180, 120, 140)
+            rgb[:, -1, :] = (180, 120, 140)
+        ip, mp = img_dir / fn, mask_dir / fn
+        Image.fromarray(rgb, mode="RGB").save(ip)
+        _save_bcss_indexed_mask(gt, mp)
+        items.append((ip, mp, fn))
+
+    class _PositiveLogitAuthorModel(_EquivariantColorModel):
+        """Shifts logits positive (+4.0) so official mul0 CGM (logit * 0.0) cleanly suppresses gated-off classes."""
+
+        def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+            out = super().forward(x)
+            return {"seg_logits": out["seg_logits"] + 4.0, "cls_logits": out["cls_logits"]}
+
+    class _GateOffStrS1(nn.Module):
+        def forward_cam(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            b = x.shape[0]
+            # Suppress class 1 (STR) for Author mul0 while raw_1x keeps all 4 -> proves disambiguation!
+            probs = torch.tensor([[0.95, 0.01, 0.95, 0.95]], device=x.device).repeat(b, 1)
+            return torch.ones((b, 4, 4, 4), device=x.device), probs
+
+    # Capture Whole-ROI and Monochrome Fig 11 matplotlib layout properties
+    fig_meta: Dict[str, object] = {}
+    orig_save = va_mod._atomic_save_figure
+
+    def _spy_save(fig, path, dpi=300):
+        nm = Path(path).name
+        if "09_whole_roi" in nm:
+            fig_meta["roi_hspace"] = float(fig.subplotpars.hspace)
+            fig_meta["roi_n_legends"] = len(fig.legends) + sum(1 for a in fig.artists if "Legend" in type(a).__name__)
+        elif "11_spatial_alignment" in nm:
+            # Panel A must have separate dx & dy lines (2 lines per plotted model!)
+            fig_meta["fig11_panel_a_lines"] = len(fig.axes[0].lines)
+        return orig_save(fig, path, dpi=dpi)
+
+    monkeypatch.setattr(va_mod, "_atomic_save_figure", _spy_save)
+
+    arm_specs = [
+        {"name": "arm8_deeplab_r101_r2", "model": _EquivariantColorModel("imagenet")},
+        {"name": "arm6_segformer_b5_r2", "model": _EquivariantColorModel("imagenet")},
+        {"name": "arm7_convnext_large_r2", "model": _EquivariantColorModel("imagenet")},
+        {"name": "arm5_dinov2_large_r2", "model": _EquivariantColorModel("imagenet")},
+    ]
+    out_dir = tmp_path / "v2_out"
+    metrics = run_stage2_v2_visual_audit(
+        arm_specs=arm_specs,
+        test_loader=DataLoader(_SyntheticBCSSDataset(items), batch_size=3, shuffle=False),
+        output_dir=out_dir,
+        zip_path=tmp_path / "v2_out.zip",
+        device=torch.device("cpu"),
+        selected_ttas=("raw_1x", "raw_1x", "raw_1x", "raw_1x"),
+        enforce_strict_reconciliation=False,
+        enforce_sha=False,
+        enforce_palette_check=True,
+        enforce_equivariance=False,
+        enforce_shift_alignment=False,
+        dpi=100,
+        stage1_model_override=_DummyStage1Cls(),
+        author_stage1_model_override=_GateOffStrS1(),
+        author_model_override=_PositiveLogitAuthorModel("zero_one"),
+        whole_roi_targets=((roi_prefix, 2, 2, "09_whole_roi_v2_2x2.png", "multiclass"),),
+        enable_hann_whole_roi=True,
+    )
+
+    # 1. Provenance & Author 1x disambiguation
+    assert "provenance" in metrics and "git_commit_sha" in metrics["provenance"]
+    pm = metrics["pooled_test_metrics"]
+    assert "author_raw_1x_no_cgm" in pm and "author_pure_1x_cgm_mul0" in pm and "author_pure_1x" in pm
+    assert pm["author_raw_1x_no_cgm"]["mIoU"] > pm["author_pure_1x_cgm_mul0"]["mIoU"]
+
+    # 2. Per-patch CSV has boundary_f1_at_2px and tum_centroid_offset_px + per-model columns
+    with open(out_dir / "per_patch_visual_audit.csv", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 6
+    for col in (
+        "boundary_f1_at_2px",
+        "tum_centroid_offset_px",
+        "author_step0_boundary_f1_at_2px",
+        "ens4_cgm_boundary_f1_at_2px",
+        "author_step0_tum_centroid_offset_px",
+        "ens4_cgm_tum_centroid_offset_px",
+    ):
+        assert col in rows[0] and rows[0][col] != ""
+
+    # 3. Matched common-intersection TUM centroid + detection recall + Wilcoxon + 95% bootstrap CIs
+    assert metrics["tum_centroid_offset_px"]["ens4_cgm"]["n_gt_tum_patches"] == 6
+    assert metrics["tum_centroid_offset_px"]["ens4_cgm"]["tum_patch_detection_recall"] == pytest.approx(1.0)
+    assert "bootstrap_95ci" in metrics["boundary_f1_at_2px"]["ens4_cgm"]
+    ms = metrics["matched_spatial_stats"]
+    assert "ens4_cgm_vs_author_step0" in ms["boundary_f1_at_2px_paired_wilcoxon"]
+    mci = ms["tum_centroid_matched_common_intersection"]
+    assert mci["n_common_patches"] == 6
+    assert "bootstrap_95ci_median_px" in mci["per_model"]["ens4_cgm"]
+    assert "ens4_cgm_vs_author_step0" in mci["paired_wilcoxon"]
+
+    # 4. Full-test quantitative Glass-Guard ablation
+    ft_glass = metrics["glass_guard_ablation"]["full_test_quantitative"]
+    assert ft_glass["n_patches"] == 6
+    assert set(ft_glass["modes"].keys()) == {"none", "pure_glass", "cand1_bright_glass", "otsu"}
+    assert ft_glass["modes"]["cand1_bright_glass"]["bright_glass_suppression_pct"] > 90.0
+
+    # 5. Whole-ROI hspace, 2 legends, and 50%-overlap Hann stitching ablation
+    roi_rep = metrics["whole_roi_audit"][0]
+    assert roi_rep["hann_overlap50_miou"] is not None and roi_rep["hann_overlap50_miou"] > 0.85
+    assert roi_rep["native_tiled_no_cgm_miou"] is not None
+    assert "hann_overlap50_seam_flip_rate" in roi_rep["seam_discontinuity"]
+    assert float(fig_meta["roi_hspace"]) >= 0.20
+    assert int(fig_meta["roi_n_legends"]) >= 2
+
+    # 6. Fig 11 Panel A plots separate dx & dy curves (4 models * 2 curves + 1 axvline = 9 lines) & strict B&W
+    assert int(fig_meta["fig11_panel_a_lines"]) >= 9
+    mono_arr = np.asarray(Image.open(out_dir / "11_spatial_alignment_monochrome_300dpi.png").convert("RGB"))
+    assert np.array_equal(mono_arr[..., 0], mono_arr[..., 1]) and np.array_equal(mono_arr[..., 1], mono_arr[..., 2])
+
+    # 7. Reconciliation allow_improvement_keys: permits post-fix 4-Arm improvement while strictly blocking regression or anchor drift
+    rec_ok = verify_pooled_miou_reconciliation(
+        {"author_step0": 0.7044, "arm5_cgm": 0.7280, "ens4_no_cgm": 0.7325, "ens4_cgm": 0.7330},
+        {"author_step0": 0.7043, "arm5_cgm": 0.7280, "ens4_no_cgm": 0.7280, "ens4_cgm": 0.7281},
+        tol=0.0015,
+        enforce_strict=True,
+        allow_improvement_keys=("ens4_no_cgm", "ens4_cgm"),
+    )
+    assert rec_ok["passed"] is True and rec_ok["deltas"]["ens4_no_cgm"]["improved_above_ref"] is True
+    with pytest.raises(RuntimeError, match="regressed below"):
+        verify_pooled_miou_reconciliation(
+            {"author_step0": 0.7043, "ens4_no_cgm": 0.7250},
+            {"author_step0": 0.7043, "ens4_no_cgm": 0.7280},
+            tol=0.0015,
+            enforce_strict=True,
+            allow_improvement_keys=("ens4_no_cgm",),
+        )
+    with pytest.raises(RuntimeError, match="author_step0"):
+        verify_pooled_miou_reconciliation(
+            {"author_step0": 0.7080, "ens4_no_cgm": 0.7310},
+            {"author_step0": 0.7043, "ens4_no_cgm": 0.7280},
+            tol=0.0015,
+            enforce_strict=True,
+            allow_improvement_keys=("ens4_no_cgm",),
+        )

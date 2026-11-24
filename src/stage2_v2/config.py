@@ -85,6 +85,7 @@ class Stage2V2Config:
     track: str = "track_a_clean"
     tcga_pretrained: bool = False
     ema_only_best_selection: bool = False
+    save_best_raw_checkpoint: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration to a plain JSON-friendly dict."""
@@ -398,6 +399,8 @@ def resolve_stage2_v2_config_from_env(
     - STAGE2_SOFT_TEMP: positive float temperature (default 0.25)
     - STAGE2_MEMMAP_SOURCE: 'stage1' | 'ens4_r2'
     - STAGE2_EMA_ONLY_BEST_SELECTION: '1'/'true' vs '0'/'false'
+    - STAGE2_INTERNAL_SCALE: positive float in [0.5, 2.0] (e.g. '1.0' for 224px ablation)
+    - STAGE2_SAVE_BEST_RAW: '1'/'true' vs '0'/'false' (also save & evaluate best raw weights)
     - STAGE2_DRY_RUN: '1'/'true' vs '0'/'false'
     - STAGE2_GIT_REF: optional git ref metadata string
     """
@@ -472,6 +475,23 @@ def resolve_stage2_v2_config_from_env(
             updates["ema_only_best_selection"] = False
         else:
             raise ValueError(f"Unsupported STAGE2_EMA_ONLY_BEST_SELECTION={raw_ema_only!r}.")
+
+    raw_int_scale = env.get("STAGE2_INTERNAL_SCALE", "")
+    if raw_int_scale is not None and str(raw_int_scale).strip() != "":
+        is_val = float(str(raw_int_scale).strip())
+        if not math.isfinite(is_val) or not (0.5 <= is_val <= 2.0):
+            raise ValueError(f"STAGE2_INTERNAL_SCALE must be finite and in [0.5, 2.0], got {is_val}.")
+        updates["internal_scale"] = is_val
+
+    raw_save_best_raw = env.get("STAGE2_SAVE_BEST_RAW", "")
+    if raw_save_best_raw is not None and str(raw_save_best_raw).strip() != "":
+        sbr_s = str(raw_save_best_raw).strip().lower()
+        if sbr_s in ("1", "true", "yes"):
+            updates["save_best_raw_checkpoint"] = True
+        elif sbr_s in ("0", "false", "no"):
+            updates["save_best_raw_checkpoint"] = False
+        else:
+            raise ValueError(f"Unsupported STAGE2_SAVE_BEST_RAW={raw_save_best_raw!r}.")
 
     raw_r2_blend = env.get("STAGE2_R2_BLEND", "")
     if raw_r2_blend is not None and str(raw_r2_blend).strip() != "":

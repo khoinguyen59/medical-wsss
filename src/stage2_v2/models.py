@@ -332,11 +332,31 @@ class ConvNeXtFPNDualHead(BaseStage2DualHead):
         nn.init.normal_(self.cls_head.weight, mean=0.0, std=0.01)
         nn.init.zeros_(self.cls_head.bias)
 
+    def _pad_to_multiple_of_32(self, x: torch.Tensor) -> Tuple[torch.Tensor, int, int, int, int]:
+        """Symmetrically pad spatial dims to a multiple of 32 so ConvNeXt stride-2 stages drop zero border pixels."""
+        _, _, h, w = x.shape
+        pad_h = (32 - (h % 32)) % 32
+        pad_w = (32 - (w % 32)) % 32
+        if pad_h == 0 and pad_w == 0:
+            return x, 0, 0, h, w
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+        mode = (
+            "reflect"
+            if (pad_top < h and pad_bottom < h and pad_left < w and pad_right < w)
+            else "replicate"
+        )
+        x_pad = F.pad(x, (pad_left, pad_right, pad_top, pad_bottom), mode=mode)
+        return x_pad, pad_top, pad_left, h, w
+
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        h, w = x.shape[2:]
+        x_pad, pad_top, pad_left, h, w = self._pad_to_multiple_of_32(x)
+        pad_h, pad_w = x_pad.shape[2:]
         tapped: Dict[str, torch.Tensor] = {}
         stage_map = {1: "c2", 3: "c3", 5: "c4", 7: "c5"}
-        cur = x
+        cur = x_pad
         for idx, layer in enumerate(self.features):
             cur = layer(cur)
             if idx in stage_map:
@@ -355,7 +375,11 @@ class ConvNeXtFPNDualHead(BaseStage2DualHead):
             )
         fused = torch.cat(fused_list, dim=1)
         logits_low = self.decode_head(fused)
-        seg_logits = F.interpolate(logits_low, size=(h, w), mode="bilinear", align_corners=False)
+        logits_pad = F.interpolate(logits_low, size=(pad_h, pad_w), mode="bilinear", align_corners=False)
+        if pad_h == h and pad_w == w:
+            seg_logits = logits_pad
+        else:
+            seg_logits = logits_pad[:, :, pad_top : pad_top + h, pad_left : pad_left + w]
         return {"seg_logits": seg_logits, "cls_logits": cls_logits}
 
     def backbone_parameters(self) -> Iterable[nn.Parameter]:

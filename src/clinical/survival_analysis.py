@@ -33,197 +33,76 @@ import torch
 from scipy import stats
 
 # ==============================================================================
-# 1. Grounded TCGA-BRCA 23 Test Patients Clinical Manifest
+# 1. Grounded TCGA-BRCA 151-Patient NCI GDC Clinical Manifest (23 Test Cohort)
 # ==============================================================================
 
-# Exact survival durations (in months), vital status (1: Deceased, 0: Censored/Living),
-# histological subtypes, and staging for the 23 active test patients in BCSS-WSSS test/img/.
-TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA: Dict[str, Dict[str, Any]] = {
-    "TCGA-D8-A27F": {
-        "patient_id": "TCGA-D8-A27F",
-        "overall_survival_months": 7.46,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage I/II",
-    },
-    "TCGA-D8-A27H": {
-        "patient_id": "TCGA-D8-A27H",
-        "overall_survival_months": 4.60,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage I",
-    },
-    "TCGA-E2-A14N": {
-        "patient_id": "TCGA-E2-A14N",
-        "overall_survival_months": 44.35,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-E2-A14R": {
-        "patient_id": "TCGA-E2-A14R",
-        "overall_survival_months": 27.76,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-E2-A14X": {
-        "patient_id": "TCGA-E2-A14X",
-        "overall_survival_months": 22.74,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-E2-A150": {
-        "patient_id": "TCGA-E2-A150",
-        "overall_survival_months": 19.42,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-E2-A158": {
-        "patient_id": "TCGA-E2-A158",
-        "overall_survival_months": 14.78,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Basal-like Triple Negative Breast Cancer (TNBC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-E2-A159": {
-        "patient_id": "TCGA-E2-A159",
-        "overall_survival_months": 16.92,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Basal-like Triple Negative Breast Cancer (TNBC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-E2-A1LK": {
-        "patient_id": "TCGA-E2-A1LK",
-        "overall_survival_months": 8.74,
-        "vital_status": 1,
-        "status_label": "Deceased",
-        "histological_subtype": "Aggressive Triple Negative Breast Cancer (TNBC)",
-        "clinical_stage": "Stage III",
-    },
-    "TCGA-E2-A1LL": {
-        "patient_id": "TCGA-E2-A1LL",
-        "overall_survival_months": 33.31,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Triple Negative Breast Cancer (TNBC)",
-        "clinical_stage": "Stage III",
-    },
-    "TCGA-E2-A1LS": {
-        "patient_id": "TCGA-E2-A1LS",
-        "overall_survival_months": 7.85,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage I",
-    },
-    "TCGA-E2-A573": {
-        "patient_id": "TCGA-E2-A573",
-        "overall_survival_months": 12.30,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-E2-A574": {
-        "patient_id": "TCGA-E2-A574",
-        "overall_survival_months": 24.50,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-E9-A5FL": {
-        "patient_id": "TCGA-E9-A5FL",
-        "overall_survival_months": 15.60,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-EW-A1OV": {
-        "patient_id": "TCGA-EW-A1OV",
-        "overall_survival_months": 17.15,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-EW-A1OW": {
-        "patient_id": "TCGA-EW-A1OW",
-        "overall_survival_months": 15.21,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-EW-A1P1": {
-        "patient_id": "TCGA-EW-A1P1",
-        "overall_survival_months": 30.19,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-EW-A1P4": {
-        "patient_id": "TCGA-EW-A1P4",
-        "overall_survival_months": 16.46,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-EW-A1P7": {
-        "patient_id": "TCGA-EW-A1P7",
-        "overall_survival_months": 20.86,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-EW-A1P8": {
-        "patient_id": "TCGA-EW-A1P8",
-        "overall_survival_months": 7.85,
-        "vital_status": 1,
-        "status_label": "Deceased",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-EW-A3U0": {
-        "patient_id": "TCGA-EW-A3U0",
-        "overall_survival_months": 18.20,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-EW-A6SB": {
-        "patient_id": "TCGA-EW-A6SB",
-        "overall_survival_months": 21.40,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
-    "TCGA-GI-A2C9": {
-        "patient_id": "TCGA-GI-A2C9",
-        "overall_survival_months": 23.36,
-        "vital_status": 0,
-        "status_label": "Living",
-        "histological_subtype": "Invasive Ductal Carcinoma (IDC)",
-        "clinical_stage": "Stage II",
-    },
+GDC_CLINICAL_MANIFEST_PATH: Path = (
+    Path(__file__).resolve().parent.parent / "config" / "tcga_bcss_151_gdc_clinical.json"
+)
+
+
+def load_gdc_clinical_manifest(
+    manifest_path: Optional[Union[str, Path]] = None,
+    splits: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Loads the immutable NCI GDC clinical survival manifest for BCSS-WSSS (151 TCGA-BRCA patients).
+
+    Parameters
+    ----------
+    manifest_path : Optional[Union[str, Path]]
+        Optional override path to tcga_bcss_151_gdc_clinical.json.
+    splits : Optional[Sequence[str]]
+        Optional subset of splits to filter (e.g., ('test',) for n=23 or ('val', 'test') for n=45).
+
+    Returns
+    -------
+    Dict[str, Any]
+        Manifest metadata and 'patients' dictionary keyed by TCGA Patient ID.
+    """
+    p = Path(manifest_path) if manifest_path is not None else GDC_CLINICAL_MANIFEST_PATH
+    if not p.is_file():
+        raise FileNotFoundError(
+            f"[CLINICAL ERROR] Immutable NCI GDC clinical manifest not found at: {p}"
+        )
+    with open(p, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    patients_all = raw.get("patients", {})
+    if not isinstance(patients_all, dict) or not patients_all:
+        raise ValueError(f"[CLINICAL ERROR] Invalid or empty 'patients' mapping in {p}")
+
+    gdc_release = str(raw.get("gdc_release", ""))
+    queried_utc = str(raw.get("queried_utc", ""))
+
+    if splits is not None:
+        allowed = {str(s).strip().lower() for s in splits}
+        filtered = {
+            pid: {**dict(rec), "gdc_release": gdc_release, "queried_utc": queried_utc}
+            for pid, rec in sorted(patients_all.items())
+            if str(rec.get("split", "")).strip().lower() in allowed
+        }
+    else:
+        filtered = {
+            pid: {**dict(rec), "gdc_release": gdc_release, "queried_utc": queried_utc}
+            for pid, rec in sorted(patients_all.items())
+        }
+
+    out = {k: v for k, v in raw.items() if k != "patients"}
+    out["num_patients_loaded"] = len(filtered)
+    out["patients"] = filtered
+    return out
+
+
+_GDC_TEST_MANIFEST = load_gdc_clinical_manifest(splits=("test",))
+GDC_CLINICAL_MANIFEST_META: Dict[str, Any] = {
+    k: v for k, v in _GDC_TEST_MANIFEST.items() if k != "patients"
 }
+
+# Exact live NCI GDC survival durations (months = days / 30.4375), vital status (1: Deceased, 0: Living),
+# AJCC pathologic stage, and primary diagnosis for the 23 held-out test patients in BCSS-WSSS.
+TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA: Dict[str, Dict[str, Any]] = dict(
+    _GDC_TEST_MANIFEST["patients"]
+)
 
 ACTIVE_TEST_PATIENTS_23: List[str] = sorted(list(TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA.keys()))
 

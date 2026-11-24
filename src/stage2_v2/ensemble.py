@@ -27,6 +27,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
@@ -81,12 +82,35 @@ ENSEMBLE_CGM_GRID: Tuple[float, ...] = (
     0.65,
 )
 
+NEC_FOCUSED_CGM_GRID: Tuple[float, ...] = (
+    0.20,
+    0.25,
+    0.30,
+    0.35,
+    0.40,
+    0.45,
+    0.50,
+    0.55,
+    0.60,
+    0.65,
+    0.70,
+    0.75,
+)
+
 TTA_CANDIDATES: Tuple[str, ...] = ("raw_1x", "d4_8view_1x", "ms_up_hflip", "ms_3_hflip")
+TTA_CANDIDATES_EXTENDED: Tuple[str, ...] = (
+    "raw_1x",
+    "d4_8view_1x",
+    "ms_up_hflip",
+    "ms_3_hflip",
+    "ms_3_hvflip",
+)
 TTA_VIEW_COUNTS: Dict[str, int] = {
     "raw_1x": 1,
     "ms_up_hflip": 4,
     "ms_3_hflip": 6,
     "d4_8view_1x": 8,
+    "ms_3_hvflip": 12,
 }
 
 DEFAULT_ARM_NAMES: Tuple[str, ...] = (
@@ -270,6 +294,7 @@ def _forward_single_view(
     target_hw: Tuple[int, int],
     k_rot: int = 0,
     do_flip: bool = False,
+    do_vflip: bool = False,
     device: Optional[torch.device] = None,
     amp_dtype: Optional[torch.dtype] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -279,6 +304,8 @@ def _forward_single_view(
     with torch.amp.autocast(device_type=dev.type, dtype=amp_dtype, enabled=use_amp):
         seg_lg, cls_lg = _forward_dual_head(model, x_in)
     pr = torch.softmax(seg_lg.float(), dim=1)
+    if do_vflip:
+        pr = torch.flip(pr, dims=[-2])
     if do_flip:
         pr = torch.flip(pr, dims=[-1])
     if k_rot % 4 != 0:
@@ -303,8 +330,8 @@ def apply_tta_probs(
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
     """Run discrete TTA mode and return FP32 seg probs + dict of cls probs (1x, d4, tta)."""
     mode = str(tta_mode).strip().lower()
-    if mode not in TTA_CANDIDATES:
-        raise ValueError(f"Unsupported TTA mode {tta_mode!r}; expected one of {TTA_CANDIDATES}")
+    if mode not in TTA_VIEW_COUNTS:
+        raise ValueError(f"Unsupported TTA mode {tta_mode!r}; expected one of {tuple(TTA_VIEW_COUNTS.keys())}")
     b, _, h, w = imgs.shape
     target_hw = (h, w)
     seg_sum = torch.zeros((b, NUM_FOREGROUND, h, w), device=device, dtype=torch.float32)
@@ -313,16 +340,23 @@ def apply_tta_probs(
     count = 0
 
     if mode == "raw_1x":
-        views: List[Tuple[float, int, bool]] = [(1.0, 0, False)]
+        views: List[Tuple[float, int, bool, bool]] = [(1.0, 0, False, False)]
     elif mode == "d4_8view_1x":
-        views = [(1.0, k, flp) for k in range(4) for flp in (False, True)]
+        views = [(1.0, k, flp, False) for k in range(4) for flp in (False, True)]
     elif mode == "ms_up_hflip":
-        views = [(sc, 0, flp) for sc in (1.0, 1.25) for flp in (False, True)]
+        views = [(sc, 0, flp, False) for sc in (1.0, 1.25) for flp in (False, True)]
+    elif mode == "ms_3_hvflip":
+        views = [
+            (sc, 0, hflp, vflp)
+            for sc in (0.75, 1.0, 1.25)
+            for hflp in (False, True)
+            for vflp in (False, True)
+        ]
     else:
-        views = [(sc, 0, flp) for sc in (0.75, 1.0, 1.25) for flp in (False, True)]
+        views = [(sc, 0, flp, False) for sc in (0.75, 1.0, 1.25) for flp in (False, True)]
 
     d4_cache: Dict[Tuple[int, bool], torch.Tensor] = {}
-    for sc, k_rot, do_flip in views:
+    for sc, k_rot, do_flip, do_vflip in views:
         if abs(sc - 1.0) > 1e-4:
             nh = max(16, int(round(h * sc)))
             nw = max(16, int(round(w * sc)))
@@ -333,13 +367,26 @@ def apply_tta_probs(
             x_v = torch.rot90(x_v, k=k_rot, dims=[-2, -1])
         if do_flip:
             x_v = torch.flip(x_v, dims=[-1])
+        if do_vflip:
+            x_v = torch.flip(x_v, dims=[-2])
         pr, cls_pr = _forward_single_view(
-            model, x_v, target_hw=target_hw, k_rot=k_rot, do_flip=do_flip, device=device, amp_dtype=amp_dtype
+            model,
+            x_v,
+            target_hw=target_hw,
+            k_rot=k_rot,
+            do_flip=do_flip,
+            do_vflip=do_vflip,
+            device=device,
+            amp_dtype=amp_dtype,
         )
         if abs(sc - 1.0) < 1e-4:
-            d4_cache[(k_rot, do_flip)] = cls_pr
-            if k_rot == 0 and not do_flip:
-                cls_1x = cls_pr
+            if not do_vflip:
+                d4_cache[(k_rot, do_flip)] = cls_pr
+                if k_rot == 0 and not do_flip:
+                    cls_1x = cls_pr
+            elif k_rot == 0:
+                # vflip == (rot180, hflip) and hvflip == (rot180, no_flip)
+                d4_cache[(2, not do_flip)] = cls_pr
         seg_sum = seg_sum + pr
         cls_sum = cls_sum + cls_pr
         count += 1
@@ -348,7 +395,7 @@ def apply_tta_probs(
     cls_tta = cls_sum / float(max(1, count))
     if cls_1x is None:
         _, cls_1x = _forward_single_view(
-            model, imgs, target_hw=target_hw, k_rot=0, do_flip=False, device=device, amp_dtype=amp_dtype
+            model, imgs, target_hw=target_hw, k_rot=0, do_flip=False, do_vflip=False, device=device, amp_dtype=amp_dtype
         )
         d4_cache[(0, False)] = cls_1x
     if mode == "d4_8view_1x":
@@ -376,8 +423,9 @@ def _collect_all_tta_candidates_batch(
     imgs: torch.Tensor,
     device: torch.device,
     amp_dtype: Optional[torch.dtype] = None,
+    include_hvflip_tta: bool = False,
 ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-    """Compute all 4 discrete TTA candidates in 12 shared views (vs 19 separate views)."""
+    """Compute all discrete TTA candidates in 12 shared views (or 16 when include_hvflip_tta=True)."""
     _, _, h, w = imgs.shape
     target_hw = (h, w)
 
@@ -394,20 +442,30 @@ def _collect_all_tta_candidates_batch(
             d4_seg[(k, flp)] = pr
             d4_cls[(k, flp)] = cpr
 
-    # 1.25x and 0.75x HFlip (4 additional views)
-    scaled_seg: Dict[Tuple[float, bool], torch.Tensor] = {}
-    scaled_cls: Dict[Tuple[float, bool], torch.Tensor] = {}
+    # 1.25x and 0.75x HFlip (4 views) + optional VFlip/HVFlip (4 additional views)
+    scaled_seg: Dict[Tuple[float, bool, bool], torch.Tensor] = {}
+    scaled_cls: Dict[Tuple[float, bool, bool], torch.Tensor] = {}
+    vflips = (False, True) if include_hvflip_tta else (False,)
     for sc in (0.75, 1.25):
         nh = max(16, int(round(h * sc)))
         nw = max(16, int(round(w * sc)))
         x_s = F.interpolate(imgs, size=(nh, nw), mode="bilinear", align_corners=False)
         for flp in (False, True):
-            x_v = torch.flip(x_s, dims=[-1]) if flp else x_s
-            pr, cpr = _forward_single_view(
-                model, x_v, target_hw=target_hw, k_rot=0, do_flip=flp, device=device, amp_dtype=amp_dtype
-            )
-            scaled_seg[(sc, flp)] = pr
-            scaled_cls[(sc, flp)] = cpr
+            x_h = torch.flip(x_s, dims=[-1]) if flp else x_s
+            for vflp in vflips:
+                x_v = torch.flip(x_h, dims=[-2]) if vflp else x_h
+                pr, cpr = _forward_single_view(
+                    model,
+                    x_v,
+                    target_hw=target_hw,
+                    k_rot=0,
+                    do_flip=flp,
+                    do_vflip=vflp,
+                    device=device,
+                    amp_dtype=amp_dtype,
+                )
+                scaled_seg[(sc, flp, vflp)] = pr
+                scaled_cls[(sc, flp, vflp)] = cpr
 
     seg_raw = d4_seg[(0, False)]
     cls_raw = d4_cls[(0, False)]
@@ -415,13 +473,23 @@ def _collect_all_tta_candidates_batch(
     seg_d4 = sum(d4_seg.values()) / 8.0
     cls_d4 = sum(d4_cls.values()) / 8.0
 
-    up_views_s = [d4_seg[(0, False)], d4_seg[(0, True)], scaled_seg[(1.25, False)], scaled_seg[(1.25, True)]]
-    up_views_c = [d4_cls[(0, False)], d4_cls[(0, True)], scaled_cls[(1.25, False)], scaled_cls[(1.25, True)]]
+    up_views_s = [
+        d4_seg[(0, False)],
+        d4_seg[(0, True)],
+        scaled_seg[(1.25, False, False)],
+        scaled_seg[(1.25, True, False)],
+    ]
+    up_views_c = [
+        d4_cls[(0, False)],
+        d4_cls[(0, True)],
+        scaled_cls[(1.25, False, False)],
+        scaled_cls[(1.25, True, False)],
+    ]
     seg_ms_up = sum(up_views_s) / 4.0
     cls_ms_up = sum(up_views_c) / 4.0
 
-    ms3_views_s = up_views_s + [scaled_seg[(0.75, False)], scaled_seg[(0.75, True)]]
-    ms3_views_c = up_views_c + [scaled_cls[(0.75, False)], scaled_cls[(0.75, True)]]
+    ms3_views_s = up_views_s + [scaled_seg[(0.75, False, False)], scaled_seg[(0.75, True, False)]]
+    ms3_views_c = up_views_c + [scaled_cls[(0.75, False, False)], scaled_cls[(0.75, True, False)]]
     seg_ms_3 = sum(ms3_views_s) / 6.0
     cls_ms_3 = sum(ms3_views_c) / 6.0
 
@@ -437,6 +505,26 @@ def _collect_all_tta_candidates_batch(
         "ms_up_hflip": cls_ms_up,
         "ms_3_hflip": cls_ms_3,
     }
+    if include_hvflip_tta:
+        # 1.0x vflip == d4 (rot180, hflip) and 1.0x hvflip == d4 (rot180, no_flip)
+        hv_views_s = ms3_views_s + [
+            d4_seg[(2, True)],
+            d4_seg[(2, False)],
+            scaled_seg[(1.25, False, True)],
+            scaled_seg[(1.25, True, True)],
+            scaled_seg[(0.75, False, True)],
+            scaled_seg[(0.75, True, True)],
+        ]
+        hv_views_c = ms3_views_c + [
+            d4_cls[(2, True)],
+            d4_cls[(2, False)],
+            scaled_cls[(1.25, False, True)],
+            scaled_cls[(1.25, True, True)],
+            scaled_cls[(0.75, False, True)],
+            scaled_cls[(0.75, True, True)],
+        ]
+        seg_out["ms_3_hvflip"] = sum(hv_views_s) / 12.0
+        cls_out["ms_3_hvflip"] = sum(hv_views_c) / 12.0
     return seg_out, cls_out
 
 
@@ -1335,6 +1423,103 @@ def calibrate_ensemble_cgm_cv(
     }
 
 
+def calibrate_nec_focused_1dof_cgm_cv(
+    inter_bm: np.ndarray,
+    union_bm: np.ndarray,
+    patch_patient_idx: np.ndarray,
+    folds: Sequence[Sequence[int]],
+    s1_cls_probs: np.ndarray,
+    s2_cls_probs: Sequence[np.ndarray],
+    y_gt_patches: np.ndarray,
+    arm_weights: Sequence[float],
+    strategy: str = "balanced_s1_s2_40_60",
+    base_threshold: float = 0.05,
+    nec_grid: Sequence[float] = NEC_FOCUSED_CGM_GRID,
+) -> Dict[str, Any]:
+    """VAL-only 5-fold CV for 1-DoF NEC-focused 4-Arm CGM: [0.05, 0.05, 0.05, t_NEC], t_NEC in [0.20..0.75]."""
+    n_patches = int(inter_bm.shape[0])
+    base_t = float(base_threshold)
+    grid_vals = [float(t) for t in nec_grid]
+    no_cgm_i = inter_bm[:, 15, :].sum(axis=0)
+    no_cgm_u = union_bm[:, 15, :].sum(axis=0)
+    no_cgm_miou = compute_macro_miou_from_iu(no_cgm_i, no_cgm_u)
+
+    def _gate_for_train(tr_idx: Optional[np.ndarray]) -> Tuple[np.ndarray, Optional[List[float]]]:
+        bce_betas: Optional[List[float]] = None
+        if strategy == "bce_cal_equal_5":
+            experts_all = [s1_cls_probs] + list(s2_cls_probs)
+            if tr_idx is None:
+                bce_betas = [fit_binary_cls_temperature_bce(ex, y_gt_patches) for ex in experts_all]
+            else:
+                bce_betas = [fit_binary_cls_temperature_bce(ex[tr_idx], y_gt_patches[tr_idx]) for ex in experts_all]
+        gp = _combine_5_expert_probs(s1_cls_probs, s2_cls_probs, arm_weights, strategy, bce_betas=bce_betas)
+        return gp, bce_betas
+
+    def _score_subset(bm_idx: np.ndarray, patch_idx: np.ndarray) -> float:
+        tot_i = inter_bm[patch_idx, bm_idx[patch_idx], :].sum(axis=0)
+        tot_u = union_bm[patch_idx, bm_idx[patch_idx], :].sum(axis=0)
+        return compute_macro_miou_from_iu(tot_i, tot_u)
+
+    oof_inter = np.zeros(NUM_FOREGROUND, dtype=np.int64)
+    oof_union = np.zeros(NUM_FOREGROUND, dtype=np.int64)
+    fold_t_nec: List[float] = []
+
+    for val_pats in folds:
+        val_set = set(int(p) for p in val_pats)
+        val_mask = np.isin(patch_patient_idx, list(val_set))
+        tr_mask = ~val_mask
+        if not np.any(tr_mask):
+            tr_mask = val_mask
+        tr_idx = np.where(tr_mask)[0]
+        val_idx = np.where(val_mask)[0]
+
+        gate_p, _ = _gate_for_train(tr_idx)
+        best_t = grid_vals[0]
+        best_sc = -1.0
+        for t_nec in grid_vals:
+            bm_t = _gate_masks_from_thresholds(gate_p, [base_t, base_t, base_t, t_nec])
+            sc = _score_subset(bm_t, tr_idx)
+            if sc > best_sc + 1e-9:
+                best_sc = sc
+                best_t = t_nec
+        fold_t_nec.append(round(best_t, 4))
+        bm_v = _gate_masks_from_thresholds(gate_p, [base_t, base_t, base_t, best_t])
+        oof_inter += inter_bm[val_idx, bm_v[val_idx], :].sum(axis=0)
+        oof_union += union_bm[val_idx, bm_v[val_idx], :].sum(axis=0)
+
+    oof_miou = compute_macro_miou_from_iu(oof_inter, oof_union)
+    oof_nec_iou = float(oof_inter[3] / oof_union[3]) if oof_union[3] > 0 else 0.0
+
+    full_gate_p, full_bce_betas = _gate_for_train(None)
+    all_idx = np.arange(n_patches)
+    t_star = grid_vals[0]
+    s_star = -1.0
+    grid_val_scores: Dict[str, float] = {}
+    for t_nec in grid_vals:
+        bm_t = _gate_masks_from_thresholds(full_gate_p, [base_t, base_t, base_t, t_nec])
+        sc = _score_subset(bm_t, all_idx)
+        grid_val_scores[f"{t_nec:.2f}"] = round(sc, 6)
+        if sc > s_star + 1e-9:
+            s_star = sc
+            t_star = t_nec
+
+    sel_thr = [round(base_t, 4), round(base_t, 4), round(base_t, 4), round(t_star, 4)]
+    return {
+        "strategy": strategy,
+        "base_thresholds": [round(base_t, 4)] * 3,
+        "nec_grid": grid_vals,
+        "fold_t_nec": fold_t_nec,
+        "no_cgm_val_miou": round(no_cgm_miou, 6),
+        "oof_miou": round(oof_miou, 6),
+        "oof_nec_iou": round(oof_nec_iou, 6),
+        "oof_gain_over_no_cgm": round(oof_miou - no_cgm_miou, 6),
+        "full_val_t_nec": round(t_star, 4),
+        "selected_thresholds": sel_thr,
+        "full_val_grid_miou": grid_val_scores,
+        "full_val_bce_betas": [round(x, 4) for x in full_bce_betas] if full_bce_betas is not None else None,
+    }
+
+
 def _calibrate_subset_cgm_cv(
     inter_bm: np.ndarray,
     union_bm: np.ndarray,
@@ -1461,10 +1646,12 @@ def _eval_cgm_from_memmaps(
     threshold_specs: Mapping[str, Optional[Union[float, Sequence[float]]]],
     eps_log: float = 1e-3,
     batch_size: int = 128,
+    patch_mask: Optional[np.ndarray] = None,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
     """Stream memmaps in bounded chunks to evaluate one or more CGM threshold specs with zero full FP32."""
     n_patches = int(shape[0])
     w_arr = np.asarray(w_vec, dtype=np.float32)
+    mask_arr = np.asarray(patch_mask, dtype=bool) if patch_mask is not None else None
     out_iu: Dict[str, Tuple[np.ndarray, np.ndarray]] = {
         k: (
             np.zeros((num_patients, NUM_FOREGROUND), dtype=np.int64),
@@ -1476,10 +1663,19 @@ def _eval_cgm_from_memmaps(
     try:
         for start in range(0, n_patches, int(batch_size)):
             end = min(n_patches, start + int(batch_size))
-            fused_b = _fuse_memmap_chunk(mms, start, end, w_arr, betas, prob_mode, eps_log=eps_log)
-            gt_b = gt_masks[start:end]
-            pidx_b = patch_patient_idx[start:end]
-            gp_b = gate_probs[start:end]
+            if mask_arr is not None:
+                sub_m = mask_arr[start:end]
+                if not np.any(sub_m):
+                    continue
+                fused_b = _fuse_memmap_chunk(mms, start, end, w_arr, betas, prob_mode, eps_log=eps_log)[sub_m]
+                gt_b = gt_masks[start:end][sub_m]
+                pidx_b = patch_patient_idx[start:end][sub_m]
+                gp_b = gate_probs[start:end][sub_m]
+            else:
+                fused_b = _fuse_memmap_chunk(mms, start, end, w_arr, betas, prob_mode, eps_log=eps_log)
+                gt_b = gt_masks[start:end]
+                pidx_b = patch_patient_idx[start:end]
+                gp_b = gate_probs[start:end]
             for mode_key, thr_spec in threshold_specs.items():
                 if thr_spec is None:
                     pred_b = np.argmax(fused_b, axis=1).astype(np.uint8)
@@ -2100,9 +2296,11 @@ def _stream_split_models(
     select_tta_on_split: bool = False,
     include_d4_cls: bool = False,
     track: str = "track_a_clean",
+    include_hvflip_tta: bool = False,
 ) -> Dict[str, Any]:
     """Stream 1 arm at a time on GPU -> centered float16 log-prob memmaps + cls probs + gt/y_gt."""
     track_norm = validate_track_name(track)
+    active_tta_cands = TTA_CANDIDATES_EXTENDED if include_hvflip_tta else TTA_CANDIDATES
     n_patches = len(loader.dataset)  # type: ignore[arg-type]
     gt_all: Optional[np.ndarray] = None
     h = 0
@@ -2172,9 +2370,9 @@ def _stream_split_models(
             arm_metas.append({"name": arm_name, "family": spec.get("family", "unknown"), **ck_meta})
             mm = np.memmap(mm_path, dtype=np.float16, mode="w+", shape=(n_patches, NUM_FOREGROUND, h, w))
             if select_tta_on_split:
-                cand_inter = {t: np.zeros(NUM_FOREGROUND, dtype=np.int64) for t in TTA_CANDIDATES}
-                cand_union = {t: np.zeros(NUM_FOREGROUND, dtype=np.int64) for t in TTA_CANDIDATES}
-                cand_cls: Dict[str, List[np.ndarray]] = {t: [] for t in TTA_CANDIDATES}
+                cand_inter = {t: np.zeros(NUM_FOREGROUND, dtype=np.int64) for t in active_tta_cands}
+                cand_union = {t: np.zeros(NUM_FOREGROUND, dtype=np.int64) for t in active_tta_cands}
+                cand_cls: Dict[str, List[np.ndarray]] = {t: [] for t in active_tta_cands}
                 # Temporary memmaps per candidate so we select winning TTA without running twice
                 cand_mms = {
                     t: np.memmap(
@@ -2183,7 +2381,7 @@ def _stream_split_models(
                         mode="w+",
                         shape=(n_patches, NUM_FOREGROUND, h, w),
                     )
-                    for t in TTA_CANDIDATES
+                    for t in active_tta_cands
                 }
                 try:
                     pos = 0
@@ -2195,9 +2393,13 @@ def _stream_split_models(
                             gt_np = gts_b.cpu().numpy()
                             vf = (gt_np >= 0) & (gt_np < NUM_FOREGROUND)
                             seg_dict, cls_dict = _collect_all_tta_candidates_batch(
-                                model_obj, imgs_b, device=device, amp_dtype=amp_dtype
+                                model_obj,
+                                imgs_b,
+                                device=device,
+                                amp_dtype=amp_dtype,
+                                include_hvflip_tta=include_hvflip_tta,
                             )
-                            for t in TTA_CANDIDATES:
+                            for t in active_tta_cands:
                                 p_np = seg_dict[t].cpu().numpy()
                                 cand_mms[t][pos : pos + b] = encode_centered_logprobs_fp16(p_np)
                                 cand_cls[t].append(cls_dict[t].cpu().numpy())
@@ -2211,10 +2413,10 @@ def _stream_split_models(
                             pos += b
 
                     cand_scores = {
-                        t: compute_macro_miou_from_iu(cand_inter[t], cand_union[t]) for t in TTA_CANDIDATES
+                        t: compute_macro_miou_from_iu(cand_inter[t], cand_union[t]) for t in active_tta_cands
                     }
                     # Select best TTA on VAL; break ties by smallest view count
-                    win_tta = max(TTA_CANDIDATES, key=lambda t: (round(cand_scores[t], 6), -TTA_VIEW_COUNTS[t]))
+                    win_tta = max(active_tta_cands, key=lambda t: (round(cand_scores[t], 6), -TTA_VIEW_COUNTS[t]))
                     selected_ttas[m_idx] = win_tta
                     cls_1x_arr = np.concatenate(cand_cls["raw_1x"], axis=0)
                     cls_d4_arr = np.concatenate(cand_cls["d4_8view_1x"], axis=0)
@@ -2235,14 +2437,14 @@ def _stream_split_models(
                                     np.concatenate(cand_cls[t], axis=0), y_gt_all
                                 ),
                             }
-                            for t in TTA_CANDIDATES
+                            for t in active_tta_cands
                         },
                     }
                 finally:
-                    for t in TTA_CANDIDATES:
+                    for t in active_tta_cands:
                         _close_memmap(cand_mms[t])
                     cand_mms.clear()
-                    for t in TTA_CANDIDATES:
+                    for t in active_tta_cands:
                         tmp_p = memmap_dir / f"tmp_{split_tag}_{m_idx}_{t}.dat"
                         if tmp_p.exists():
                             try:
@@ -2356,6 +2558,243 @@ def _fuse_memmaps_to_probs(
     return out
 
 
+def _resolve_ensemble_provenance() -> Dict[str, str]:
+    """Capture git_ref and HEAD commit SHA for reproducible ensemble provenance."""
+    repo_root = Path(__file__).resolve().parents[2]
+    git_ref = os.environ.get("STAGE2_GIT_REF", "").strip()
+    git_sha = ""
+    try:
+        r_sha = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if r_sha.returncode == 0:
+            git_sha = r_sha.stdout.strip()
+        if not git_ref:
+            r_br = subprocess.run(
+                ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if r_br.returncode == 0:
+                git_ref = r_br.stdout.strip()
+    except Exception:
+        pass
+    return {"git_ref": git_ref or "unknown", "git_commit_sha": git_sha or "unknown"}
+
+
+def _evaluate_arm5_multi_seed_variance(
+    seed_ckpts: Sequence[Union[str, Path, Mapping[str, Any]]],
+    arm5_slot: int,
+    arm5_name: str,
+    arm5_tta_mode: str,
+    base_memmap_paths: Sequence[Path],
+    shape: Tuple[int, int, int, int],
+    base_s2_cls_probs: Sequence[np.ndarray],
+    test_s1_cls: np.ndarray,
+    selected_cls_source: str,
+    test_loader: DataLoader,
+    test_gt: np.ndarray,
+    test_pidx: np.ndarray,
+    n_test_pat: int,
+    val_protocol_selection: Mapping[str, Any],
+    arm5_cgm_policy: Mapping[str, Any],
+    wdir: Path,
+    device: torch.device,
+    amp_dtype: Optional[torch.dtype],
+    track_norm: str,
+) -> Dict[str, Any]:
+    """Evaluate multi-seed 4-Arm ensemble & standalone Arm-5 variance by swapping only the Arm-5 slot on TEST."""
+    n_patches, c_fg, h, w = shape
+    primary_weights = list(val_protocol_selection["primary_weights"])
+    primary_betas = list(val_protocol_selection["full_val_betas"])
+    primary_mode = str(val_protocol_selection["selected_prob_mode"])
+    primary_cgm_key = "cgm_val_calibrated" if val_protocol_selection["use_cgm"] else "no_cgm"
+    include_d4 = selected_cls_source == "cls_d4"
+    cls_key = selected_cls_source.replace("cls_", "")
+
+    per_seed_rows: List[Dict[str, Any]] = []
+    for s_idx, item in enumerate(seed_ckpts):
+        if isinstance(item, Mapping):
+            seed_label = str(item.get("label", f"seed_{s_idx}"))
+            ckpt_p = item.get("ckpt_path")
+            in_mem_model = item.get("model")
+        else:
+            ckpt_p = Path(str(item))
+            if ckpt_p.stem.lower() in ("stage2_retrained_best", "best", "checkpoint", "model") and ckpt_p.parent.name:
+                seed_label = ckpt_p.parent.name
+            else:
+                seed_label = ckpt_p.stem
+            in_mem_model = None
+
+        validate_track_a_arm_spec(
+            {"name": arm5_name, "ckpt_path": str(ckpt_p) if ckpt_p else "", "model": in_mem_model},
+            track=track_norm,
+        )
+        if track_norm == "track_a_clean" and ckpt_p and Path(str(ckpt_p)).is_file():
+            validate_track_a_teacher_checkpoint(ckpt_p)
+
+        mm_seed_p = wdir / f"test_arm5_multiseed_{s_idx}.dat"
+        mm_seed: Optional[np.memmap] = None
+        m_obj: Optional[BaseStage2DualHead] = None
+        loaded_here = False
+        seed_sha = ""
+        try:
+            if in_mem_model is None:
+                if ckpt_p is None or not Path(str(ckpt_p)).is_file():
+                    raise FileNotFoundError(f"Missing multi-seed Arm-5 checkpoint: {ckpt_p}")
+                m_obj, ck_meta = load_stage2_v2_checkpoint(ckpt_p, device=device, strict=True)
+                seed_sha = compute_file_sha256(ckpt_p)
+                validate_track_a_arm_spec(
+                    {"name": arm5_name, **ck_meta, "ckpt_path": str(ckpt_p), "model": m_obj},
+                    track=track_norm,
+                )
+                loaded_here = True
+            else:
+                m_obj = in_mem_model.to(device).eval()
+
+            mm_seed = np.memmap(mm_seed_p, dtype=np.float16, mode="w+", shape=(n_patches, c_fg, h, w))
+            cls_seed = np.zeros((n_patches, c_fg), dtype=np.float32)
+            pos = 0
+            with torch.no_grad():
+                for batch in test_loader:
+                    imgs_b, _, _ = _extract_img_gt(batch)
+                    b = imgs_b.size(0)
+                    imgs_b = imgs_b.to(device, non_blocking=True)
+                    seg_p, cls_d = apply_tta_probs(
+                        m_obj,
+                        imgs_b,
+                        tta_mode=arm5_tta_mode,
+                        device=device,
+                        amp_dtype=amp_dtype,
+                        include_d4_cls=include_d4,
+                    )
+                    mm_seed[pos : pos + b] = encode_centered_logprobs_fp16(seg_p.cpu().numpy())
+                    cls_seed[pos : pos + b] = cls_d[cls_key].cpu().numpy()
+                    pos += b
+            mm_seed.flush()
+            _close_memmap(mm_seed)
+            mm_seed = None
+
+            mm_paths_seed = list(base_memmap_paths)
+            mm_paths_seed[arm5_slot] = mm_seed_p
+            s2_cls_seed = list(base_s2_cls_probs)
+            s2_cls_seed[arm5_slot] = cls_seed
+
+            gate_4arm = _combine_5_expert_probs(
+                test_s1_cls,
+                s2_cls_seed,
+                primary_weights,
+                str(val_protocol_selection["cgm_expert_strategy"]),
+                bce_betas=val_protocol_selection["cgm_bce_betas"],
+            )
+            ens_iu = _eval_cgm_from_memmaps(
+                mm_paths_seed,
+                shape,
+                primary_weights,
+                primary_betas,
+                primary_mode,
+                test_gt,
+                test_pidx,
+                n_test_pat,
+                gate_4arm,
+                {
+                    "no_cgm": None,
+                    "cgm_val_calibrated": val_protocol_selection["cgm_thresholds"],
+                    "cgm_nec_focused_1dof": val_protocol_selection["nec_focused_1dof_thresholds"],
+                },
+                batch_size=128,
+            )
+
+            w_one = [1.0 if j == arm5_slot else 0.0 for j in range(4)]
+            gate_arm5 = (
+                cls_seed
+                if arm5_cgm_policy["selected_gate_source"] == "s2_self"
+                else (0.5 * np.asarray(test_s1_cls, dtype=np.float64) + 0.5 * np.asarray(cls_seed, dtype=np.float64))
+            )
+            arm5_iu = _eval_cgm_from_memmaps(
+                mm_paths_seed,
+                shape,
+                w_one,
+                primary_betas,
+                primary_mode,
+                test_gt,
+                test_pidx,
+                n_test_pat,
+                gate_arm5,
+                {"no_cgm": None, "cgm_val_calibrated": arm5_cgm_policy["selected_thresholds"]},
+                batch_size=128,
+            )
+
+            ens_summ = {k: summarize_iu(v[0].sum(axis=0), v[1].sum(axis=0)) for k, v in ens_iu.items()}
+            a5_summ = {k: summarize_iu(v[0].sum(axis=0), v[1].sum(axis=0)) for k, v in arm5_iu.items()}
+            per_seed_rows.append(
+                {
+                    "seed_label": seed_label,
+                    "ckpt_path": str(ckpt_p) if ckpt_p is not None else "",
+                    "ckpt_sha256": seed_sha,
+                    "arm5_no_cgm": a5_summ["no_cgm"],
+                    "arm5_cgm_val_calibrated": a5_summ["cgm_val_calibrated"],
+                    "primary_4arm_no_cgm": ens_summ["no_cgm"],
+                    "primary_4arm_cgm_val_calibrated": ens_summ["cgm_val_calibrated"],
+                    "primary_4arm_cgm_nec_focused_1dof": ens_summ["cgm_nec_focused_1dof"],
+                    "primary_4arm_matched": ens_summ[primary_cgm_key],
+                }
+            )
+        finally:
+            if mm_seed is not None:
+                _close_memmap(mm_seed)
+            if m_obj is not None:
+                if loaded_here:
+                    del m_obj
+                else:
+                    m_obj.cpu()
+            if mm_seed_p.exists():
+                try:
+                    mm_seed_p.unlink()
+                except OSError:
+                    pass
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
+    def _agg(key: str) -> Dict[str, Any]:
+        vals = np.asarray([float(r[key]["mIoU_raw"]) for r in per_seed_rows], dtype=np.float64)
+        cls_stats = {}
+        for c_nm in _CLS_LOWER:
+            cv = np.asarray([float(r[key]["per_class_iou"][c_nm]) for r in per_seed_rows], dtype=np.float64)
+            cls_stats[c_nm] = {
+                "mean": round(float(cv.mean()), 4),
+                "std": round(float(cv.std(ddof=1 if cv.size > 1 else 0)), 4),
+            }
+        return {
+            "n_seeds": int(vals.size),
+            "mean": round(float(vals.mean()), 4) if vals.size else 0.0,
+            "std": round(float(vals.std(ddof=1 if vals.size > 1 else 0)), 4) if vals.size else 0.0,
+            "min": round(float(vals.min()), 4) if vals.size else 0.0,
+            "max": round(float(vals.max()), 4) if vals.size else 0.0,
+            "per_class_iou": cls_stats,
+        }
+
+    return {
+        "arm5_slot": int(arm5_slot),
+        "arm5_name": arm5_name,
+        "arm5_tta_mode": arm5_tta_mode,
+        "n_seeds": len(per_seed_rows),
+        "seeds": per_seed_rows,
+        "summary": {
+            "arm5_no_cgm": _agg("arm5_no_cgm"),
+            "arm5_cgm_val_calibrated": _agg("arm5_cgm_val_calibrated"),
+            "primary_4arm_no_cgm": _agg("primary_4arm_no_cgm"),
+            "primary_4arm_cgm_val_calibrated": _agg("primary_4arm_cgm_val_calibrated"),
+            "primary_4arm_cgm_nec_focused_1dof": _agg("primary_4arm_cgm_nec_focused_1dof"),
+            "primary_4arm_matched": _agg("primary_4arm_matched"),
+        },
+    }
+
+
 def run_stage2_v2_ensemble_eval(
     arm_specs: Sequence[Dict[str, Any]],
     val_loader: DataLoader,
@@ -2378,6 +2817,8 @@ def run_stage2_v2_ensemble_eval(
     test_patient_ids: Optional[Sequence[str]] = None,
     before_test_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
     track: Optional[str] = None,
+    include_hvflip_tta: bool = False,
+    arm5_multi_seed_ckpts: Optional[Sequence[Union[str, Path, Mapping[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     """Run complete zero-leakage 4-arm cross-family ensemble evaluation and export artifacts."""
     if len(arm_specs) != 4:
@@ -2424,13 +2865,14 @@ def run_stage2_v2_ensemble_eval(
         val_stream = _stream_split_models(
             arm_specs=arm_specs,
             loader=val_loader,
-            arm_tta_modes=list(TTA_CANDIDATES),
+            arm_tta_modes=["raw_1x"] * len(arm_specs),
             device=dev,
             memmap_dir=wdir,
             split_tag="val",
             amp_dtype=amp_dtype,
             select_tta_on_split=True,
             track=track_norm,
+            include_hvflip_tta=include_hvflip_tta,
         )
         val_unique_pids, val_pidx, val_folds = build_patient_folds(
             v_pids, val_stream["nec_pixels"], n_folds=5
@@ -2557,6 +2999,19 @@ def run_stage2_v2_ensemble_eval(
             adoption_delta=0.0005,
             precomputed_bitmasks=val_bitmasks,
         )
+        val_nec_focused_cgm = calibrate_nec_focused_1dof_cgm_cv(
+            inter_bm=val_bitmasks[0],
+            union_bm=val_bitmasks[1],
+            patch_patient_idx=val_pidx,
+            folds=val_folds,
+            s1_cls_probs=val_s1_cls,
+            s2_cls_probs=val_stream[selected_cls_source],
+            y_gt_patches=val_stream["y_gt_all"],
+            arm_weights=primary_weights,
+            strategy=str(val_cgm["selected_expert_strategy"]),
+            base_threshold=0.05,
+            nec_grid=NEC_FOCUSED_CGM_GRID,
+        )
         del val_bitmasks
         gc.collect()
 
@@ -2632,6 +3087,8 @@ def run_stage2_v2_ensemble_eval(
             "cgm_thresholds": list(val_cgm["selected_thresholds"]),
             "cgm_bce_betas": val_cgm["selected_bce_betas"],
             "use_cgm": bool(val_cgm["use_cgm"]),
+            "nec_focused_1dof_thresholds": list(val_nec_focused_cgm["selected_thresholds"]),
+            "nec_focused_1dof_t_nec": float(val_nec_focused_cgm["full_val_t_nec"]),
             "val_best_single_name": val_best_single_name,
             "val_best_single_no_cgm_name": val_best_single_no_cgm_name,
             "val_best_cnn_vit_pair_name": val_best_cnn_vit_pair_name,
@@ -2811,7 +3268,7 @@ def run_stage2_v2_ensemble_eval(
             }
         best_triplet_name = max(triplet_results.keys(), key=lambda n: triplet_results[n]["mIoU_raw"])
 
-        # Equal 4-Arm & VAL-Weighted 4-Arm (No-CGM, fixed-0.10, primary CGM) via chunked memmap streaming
+        # Equal 4-Arm & VAL-Weighted 4-Arm (No-CGM, fixed-0.10, primary CGM, 1-DoF NEC-focused CGM)
         def _eval_4arm_with_cgm(
             w_vec: Sequence[float],
             ip_no: np.ndarray,
@@ -2838,15 +3295,18 @@ def run_stage2_v2_ensemble_eval(
                 {
                     "cgm_fixed_0_10": 0.10,
                     "cgm_val_calibrated": val_protocol_selection["cgm_thresholds"],
+                    "cgm_nec_focused_1dof": val_protocol_selection["nec_focused_1dof_thresholds"],
                 },
                 batch_size=128,
             )
             ip_fix, up_fix = cgm_res["cgm_fixed_0_10"]
             ip_cal, up_cal = cgm_res["cgm_val_calibrated"]
+            ip_nec, up_nec = cgm_res["cgm_nec_focused_1dof"]
             return {
                 "no_cgm": _iu_summary(ip_no, up_no),
                 "cgm_fixed_0_10": _iu_summary(ip_fix, up_fix),
                 "cgm_val_calibrated": _iu_summary(ip_cal, up_cal),
+                "cgm_nec_focused_1dof": _iu_summary(ip_nec, up_nec),
             }
 
         equal_4arm_res = _eval_4arm_with_cgm(
@@ -2870,6 +3330,114 @@ def run_stage2_v2_ensemble_eval(
         primary_entry = primary_4arm_res[primary_mode_key]
         equal_entry = equal_4arm_res[primary_mode_key]
         best_single_entry = indiv_results[best_single_name][indiv_results[best_single_name]["cgm_mode"]]
+
+        # Compute exact per-patient GT NEC pixel totals & k>=2 multi-class dominance diagnostics
+        gt_nec_px_per_pat = np.zeros(n_test_pat, dtype=np.int64)
+        for p_i in range(n_test_pat):
+            pm_i = test_pidx == p_i
+            if np.any(pm_i):
+                gt_nec_px_per_pat[p_i] = int(np.sum(test_gt[pm_i] == 3))
+
+        k_ge_2_mask = np.sum(test_stream["y_gt_all"] > 0.5, axis=1) >= 2
+        n_multiclass_test_patches = int(np.sum(k_ge_2_mask))
+        multiclass_k_ge_2: Dict[str, Any] = {
+            "n_patches": n_multiclass_test_patches,
+            "n_total_patches": int(test_stream["shape"][0]),
+        }
+        if n_multiclass_test_patches > 0:
+            gate_primary_mc = _combine_5_expert_probs(
+                test_s1_cls,
+                test_stream[selected_cls_source],
+                primary_weights,
+                val_protocol_selection["cgm_expert_strategy"],
+                bce_betas=val_protocol_selection["cgm_bce_betas"],
+            )
+            mc_ens_iu = _eval_cgm_from_memmaps(
+                test_stream["memmap_paths"],
+                test_stream["shape"],
+                primary_weights,
+                primary_betas,
+                primary_mode,
+                test_gt,
+                test_pidx,
+                n_test_pat,
+                gate_primary_mc,
+                {
+                    "no_cgm": None,
+                    "cgm_val_calibrated": val_protocol_selection["cgm_thresholds"],
+                    "cgm_nec_focused_1dof": val_protocol_selection["nec_focused_1dof_thresholds"],
+                },
+                batch_size=128,
+                patch_mask=k_ge_2_mask,
+            )
+            bs_slot = arm_names.index(best_single_name)
+            bs_pol = val_indiv_cgm_policies[best_single_name]
+            bs_s2 = test_stream[selected_cls_source][bs_slot]
+            bs_gate = (
+                bs_s2
+                if bs_pol["selected_gate_source"] == "s2_self"
+                else (0.5 * np.asarray(test_s1_cls, dtype=np.float64) + 0.5 * np.asarray(bs_s2, dtype=np.float64))
+            )
+            mc_bs_iu = _eval_cgm_from_memmaps(
+                test_stream["memmap_paths"],
+                test_stream["shape"],
+                [1.0 if j == bs_slot else 0.0 for j in range(4)],
+                primary_betas,
+                primary_mode,
+                test_gt,
+                test_pidx,
+                n_test_pat,
+                bs_gate,
+                {"no_cgm": None, "cgm_val_calibrated": bs_pol["selected_thresholds"]},
+                batch_size=128,
+                patch_mask=k_ge_2_mask,
+            )
+            bs_mk = "cgm_val_calibrated" if bs_pol["use_cgm"] else "no_cgm"
+            multiclass_k_ge_2.update(
+                {
+                    "best_single_name": best_single_name,
+                    "primary_4arm_no_cgm": summarize_iu(mc_ens_iu["no_cgm"][0].sum(axis=0), mc_ens_iu["no_cgm"][1].sum(axis=0)),
+                    "primary_4arm_cgm_val_calibrated": summarize_iu(
+                        mc_ens_iu["cgm_val_calibrated"][0].sum(axis=0),
+                        mc_ens_iu["cgm_val_calibrated"][1].sum(axis=0),
+                    ),
+                    "primary_4arm_cgm_nec_focused_1dof": summarize_iu(
+                        mc_ens_iu["cgm_nec_focused_1dof"][0].sum(axis=0),
+                        mc_ens_iu["cgm_nec_focused_1dof"][1].sum(axis=0),
+                    ),
+                    "best_single_matched": summarize_iu(mc_bs_iu[bs_mk][0].sum(axis=0), mc_bs_iu[bs_mk][1].sum(axis=0)),
+                    "best_single_no_cgm": summarize_iu(mc_bs_iu["no_cgm"][0].sum(axis=0), mc_bs_iu["no_cgm"][1].sum(axis=0)),
+                }
+            )
+
+        # Optional multi-seed Arm-5 4-Arm ensemble variance (evaluated while frozen arm8/arm6/arm7 memmaps exist)
+        multi_seed_variance: Optional[Dict[str, Any]] = None
+        if arm5_multi_seed_ckpts:
+            arm5_slot = next(
+                (i for i, nm in enumerate(arm_names) if "arm5" in nm.lower() or "dinov2" in nm.lower()),
+                len(arm_names) - 1,
+            )
+            multi_seed_variance = _evaluate_arm5_multi_seed_variance(
+                seed_ckpts=arm5_multi_seed_ckpts,
+                arm5_slot=arm5_slot,
+                arm5_name=arm_names[arm5_slot],
+                arm5_tta_mode=str(val_protocol_selection["selected_ttas"][arm5_slot]),
+                base_memmap_paths=test_stream["memmap_paths"],
+                shape=test_stream["shape"],
+                base_s2_cls_probs=test_stream[selected_cls_source],
+                test_s1_cls=test_s1_cls,
+                selected_cls_source=selected_cls_source,
+                test_loader=test_loader,
+                test_gt=test_gt,
+                test_pidx=test_pidx,
+                n_test_pat=n_test_pat,
+                val_protocol_selection=val_protocol_selection,
+                arm5_cgm_policy=val_indiv_cgm_policies[arm_names[arm5_slot]],
+                wdir=wdir,
+                device=dev,
+                amp_dtype=amp_dtype,
+                track_norm=track_norm,
+            )
 
         # Clean up TEST memmaps and gt_all promptly after all memmap evals complete
         del test_gt, test_inter_all, test_union_all
@@ -3004,6 +3572,69 @@ def run_stage2_v2_ensemble_eval(
                 "perm_p_raw": round(pure_perm["p_value"], 6),
                 **pure_wilc,
             }
+        }
+
+        # 1-DoF VAL-calibrated NEC-focused 4-Arm CGM diagnostic + 3-way NEC-absent micro-FP & k>=2 dominance
+        nec1_ens = primary_4arm_res["cgm_nec_focused_1dof"]
+        val_cal_ens = primary_4arm_res["cgm_val_calibrated"]
+        nec_absent_idx = [p for p in range(n_test_pat) if int(gt_nec_px_per_pat[p]) == 0]
+        nec_absent_fp_no_cgm = {
+            test_unique_pids[p]: int(no_cgm_ens["union_p"][p, 3]) for p in nec_absent_idx
+        }
+        nec_absent_fp_val_cal = {
+            test_unique_pids[p]: int(val_cal_ens["union_p"][p, 3]) for p in nec_absent_idx
+        }
+        nec_absent_fp_nec1 = {
+            test_unique_pids[p]: int(nec1_ens["union_p"][p, 3]) for p in nec_absent_idx
+        }
+        nec1_vs_nocgm_perm = paired_patient_swap_permutation_test(
+            nec1_ens["inter_p"],
+            nec1_ens["union_p"],
+            no_cgm_ens["inter_p"],
+            no_cgm_ens["union_p"],
+            n_perm=n_perm,
+            seed=seed,
+        )
+        nec1_vs_nocgm_wilc = paired_wilcoxon_and_dz(
+            compute_per_patient_miou(nec1_ens["inter_p"], nec1_ens["union_p"]),
+            compute_per_patient_miou(no_cgm_ens["inter_p"], no_cgm_ens["union_p"]),
+        )
+        nec1_vs_single_perm = paired_patient_swap_permutation_test(
+            nec1_ens["inter_p"],
+            nec1_ens["union_p"],
+            best_single_entry["inter_p"],
+            best_single_entry["union_p"],
+            n_perm=n_perm,
+            seed=seed,
+        )
+        nec1_vs_single_wilc = paired_wilcoxon_and_dz(
+            compute_per_patient_miou(nec1_ens["inter_p"], nec1_ens["union_p"]),
+            compute_per_patient_miou(best_single_entry["inter_p"], best_single_entry["union_p"]),
+        )
+        nec_focused_1dof_diagnostic: Dict[str, Any] = {
+            "thresholds": list(val_protocol_selection["nec_focused_1dof_thresholds"]),
+            "t_nec_val_selected": float(val_protocol_selection["nec_focused_1dof_t_nec"]),
+            "n_gt_nec_absent_patients": len(nec_absent_idx),
+            "n_cleared_to_zero_px_no_cgm": sum(1 for v in nec_absent_fp_no_cgm.values() if v == 0),
+            "n_cleared_to_zero_px_cgm_val_cal": sum(1 for v in nec_absent_fp_val_cal.values() if v == 0),
+            "n_cleared_to_zero_px_nec1dof": sum(1 for v in nec_absent_fp_nec1.values() if v == 0),
+            "total_nec_absent_fp_px_no_cgm": int(sum(nec_absent_fp_no_cgm.values())),
+            "total_nec_absent_fp_px_cgm_val_cal": int(sum(nec_absent_fp_val_cal.values())),
+            "total_nec_absent_fp_px_nec1dof": int(sum(nec_absent_fp_nec1.values())),
+            "nec_absent_fp_px_by_patient_no_cgm": nec_absent_fp_no_cgm,
+            "nec_absent_fp_px_by_patient_cgm_val_cal": nec_absent_fp_val_cal,
+            "nec_absent_fp_px_by_patient_nec1dof": nec_absent_fp_nec1,
+            "multiclass_k_ge_2": multiclass_k_ge_2,
+            "primary_4arm_nec1dof_vs_no_cgm": {
+                "delta_miou": nec1_vs_nocgm_perm["delta_miou"],
+                "perm_p_raw": round(nec1_vs_nocgm_perm["p_value"], 6),
+                **nec1_vs_nocgm_wilc,
+            },
+            "primary_4arm_nec1dof_vs_best_single": {
+                "delta_miou": nec1_vs_single_perm["delta_miou"],
+                "perm_p_raw": round(nec1_vs_single_perm["p_value"], 6),
+                **nec1_vs_single_wilc,
+            },
         }
 
         # Per-patient CSV export (matched TTA+CGM)
@@ -3150,6 +3781,7 @@ def run_stage2_v2_ensemble_eval(
         report: Dict[str, Any] = {
             "pipeline": "stage2_v2_4arm_cross_family_ensemble",
             "track": track_norm,
+            "provenance": _resolve_ensemble_provenance(),
             "anti_leakage": {
                 "val_patches": int(val_stream["shape"][0]),
                 "val_patients": n_val_pat,
@@ -3163,6 +3795,7 @@ def run_stage2_v2_ensemble_eval(
             "val_cls_source_comparison": cls_src_scores,
             "val_cv_and_lopocv": val_cv,
             "val_cgm_calibration": val_cgm,
+            "val_nec_focused_1dof_cgm": val_nec_focused_cgm,
             "val_protocol_selection": val_protocol_selection,
             "val_diversity_and_oracles": val_diversity,
             "test_diversity_and_oracles": test_diversity,
@@ -3196,6 +3829,13 @@ def run_stage2_v2_ensemble_eval(
             "test_confirmatory_stats_holm_m5": confirmatory_stats,
             "test_secondary_author_anchor_stats": secondary_anchor_stats,
             "test_pure_ensemble_diagnostic": pure_ensemble_diagnostic,
+            "test_nec_focused_1dof_diagnostic": {
+                "primary_4arm_cgm_nec_focused_1dof": _strip_iu(nec1_ens),
+                "equal_4arm_cgm_nec_focused_1dof": _strip_iu(equal_4arm_res["cgm_nec_focused_1dof"]),
+                "simplex_cv_4arm_cgm_nec_focused_1dof": _strip_iu(simplex_4arm_res["cgm_nec_focused_1dof"]),
+                **nec_focused_1dof_diagnostic,
+            },
+            "test_multi_seed_4arm_variance": multi_seed_variance,
         }
 
         json_path = out_dir / "STAGE2_TRAINING_METRICS.json"

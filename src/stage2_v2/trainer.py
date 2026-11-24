@@ -244,7 +244,9 @@ def train_stage2_v2(
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     best_ckpt_path = ckpt_dir / "stage2_retrained_best.pth"
+    best_raw_ckpt_path = ckpt_dir / "stage2_best_raw.pth"
     latest_ckpt_path = ckpt_dir / "stage2_latest.pth"
+    save_best_raw = bool(getattr(cfg, "save_best_raw_checkpoint", False))
 
     use_amp = dev.type == "cuda"
     if amp_dtype is None and use_amp:
@@ -291,6 +293,8 @@ def train_stage2_v2(
 
     start_epoch = 1
     best_val_miou = -1.0
+    best_raw_val_miou = -1.0
+    best_raw_epoch = 0
     best_selected_weights = "raw"
     no_improve = 0
     round2_active = False
@@ -318,6 +322,8 @@ def train_stage2_v2(
                 ema.load_state_dict(r_obj["ema_state_dict"], model=model)
             start_epoch = int(r_obj.get("epoch", 0)) + 1
             best_val_miou = float(r_obj.get("best_val_miou", -1.0))
+            best_raw_val_miou = float(r_obj.get("best_raw_val_miou", -1.0))
+            best_raw_epoch = int(r_obj.get("best_raw_epoch", 0))
             best_selected_weights = str(r_obj.get("selected_weights", "raw"))
             no_improve = int(r_obj.get("epochs_without_improve", 0))
             round2_active = bool(r_obj.get("round2_active", False))
@@ -623,6 +629,23 @@ def train_stage2_v2(
         else:
             no_improve += 1
 
+        if save_best_raw and raw_miou > best_raw_val_miou + 1e-5:
+            best_raw_val_miou = raw_miou
+            best_raw_epoch = int(epoch)
+            best_raw_payload: Dict[str, Any] = {
+                **model_meta,
+                "preset": cfg.preset_name,
+                "seed": int(cfg.seed),
+                "epoch": int(epoch),
+                "selected_weights": "raw",
+                "val_miou": round(float(best_raw_val_miou), 4),
+                "stage1_sha256": str(stage1_sha256),
+                "memmap_source": memmap_source,
+                "r2_manifest_sha256": r2_manifest_sha256,
+                "state_dict": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
+            }
+            _atomic_torch_save(best_raw_payload, best_raw_ckpt_path)
+
         has_frozen_params = any(not p.requires_grad for p in model.parameters())
         latest_payload: Dict[str, Any] = {
             **model_meta,
@@ -631,6 +654,8 @@ def train_stage2_v2(
             "epoch": int(epoch),
             "selected_weights": sel_tag,
             "best_val_miou": round(float(best_val_miou), 4),
+            "best_raw_val_miou": round(float(best_raw_val_miou), 4),
+            "best_raw_epoch": int(best_raw_epoch),
             "epochs_without_improve": int(no_improve),
             "round2_active": bool(round2_active),
             "round2_step": int(round2_step),
@@ -738,6 +763,81 @@ def train_stage2_v2(
             amp_dtype=amp_dtype,
         )
 
+    best_raw_ablation: Optional[Dict[str, Any]] = None
+    if save_best_raw and best_raw_ckpt_path.is_file():
+        raw_eval_model, raw_eval_meta = load_stage2_v2_checkpoint(best_raw_ckpt_path, device=dev, strict=True)
+        raw_val_fixed = evaluate_stage2_v2_model(
+            model=raw_eval_model,
+            loader=val_loader,
+            device=dev,
+            stage1_model=stage1_model,
+            stage1_norm_mode=stage1_norm_mode,
+            stage1_cls_model=stage1_cls_model,
+            cgm_thresholds=0.10,
+            scales=cfg.eval_scales,
+            run_ms_tta=True,
+            amp_dtype=amp_dtype,
+        )
+        raw_cal_info = calibrate_cgm_thresholds_val_only(
+            model=raw_eval_model,
+            val_loader=val_loader,
+            device=dev,
+            stage1_model=s1_expert,
+            stage1_norm_mode=stage1_norm_mode,
+            gate_source=gate_src,
+            amp_dtype=amp_dtype,
+        )
+        raw_cal_thrs: List[float] = list(raw_cal_info["thresholds"])
+        raw_val_cal = evaluate_stage2_v2_model(
+            model=raw_eval_model,
+            loader=val_loader,
+            device=dev,
+            stage1_model=stage1_model,
+            stage1_norm_mode=stage1_norm_mode,
+            stage1_cls_model=stage1_cls_model,
+            cgm_thresholds=raw_cal_thrs,
+            scales=cfg.eval_scales,
+            run_ms_tta=True,
+            amp_dtype=amp_dtype,
+        )
+        raw_test_fixed: Optional[Dict[str, Any]] = None
+        raw_test_cal: Optional[Dict[str, Any]] = None
+        if test_loader is not None:
+            raw_test_fixed = evaluate_stage2_v2_model(
+                model=raw_eval_model,
+                loader=test_loader,
+                device=dev,
+                stage1_model=stage1_model,
+                stage1_norm_mode=stage1_norm_mode,
+                stage1_cls_model=stage1_cls_model,
+                cgm_thresholds=0.10,
+                scales=cfg.eval_scales,
+                run_ms_tta=True,
+                amp_dtype=amp_dtype,
+            )
+            raw_test_cal = evaluate_stage2_v2_model(
+                model=raw_eval_model,
+                loader=test_loader,
+                device=dev,
+                stage1_model=stage1_model,
+                stage1_norm_mode=stage1_norm_mode,
+                stage1_cls_model=stage1_cls_model,
+                cgm_thresholds=raw_cal_thrs,
+                scales=cfg.eval_scales,
+                run_ms_tta=True,
+                amp_dtype=amp_dtype,
+            )
+        best_raw_ablation = {
+            "best_raw_epoch": int(raw_eval_meta.get("epoch") or best_raw_epoch),
+            "best_raw_val_miou": round(float(best_raw_val_miou), 4),
+            "best_raw_checkpoint": str(best_raw_ckpt_path),
+            "val_eval_fixed_0_10": raw_val_fixed,
+            "val_cgm_calibration": raw_cal_info,
+            "val_eval_calibrated": raw_val_cal,
+            "test_eval_fixed_0_10": raw_test_fixed,
+            "test_eval_calibrated": raw_test_cal,
+        }
+
     metrics_payload: Dict[str, Any] = {
         "config": cfg.to_dict(),
         "best_epoch": int(best_meta.get("epoch") or 0),
@@ -756,6 +856,8 @@ def train_stage2_v2(
         "test_eval_calibrated": test_calibrated,
         "best_checkpoint": str(best_ckpt_path),
     }
+    if best_raw_ablation is not None:
+        metrics_payload["best_raw_ablation"] = best_raw_ablation
 
     metrics_json_path = out_dir / "STAGE2_TRAINING_METRICS.json"
     _atomic_write_json(metrics_payload, metrics_json_path)

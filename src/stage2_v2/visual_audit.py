@@ -25,6 +25,7 @@ import gc
 import json
 import os
 import re
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
@@ -33,6 +34,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -58,6 +60,7 @@ from src.stage2_v2.ensemble import (
     apply_tta_probs,
     compute_macro_miou_from_iu,
     encode_centered_logprobs_fp16,
+    paired_wilcoxon_and_dz,
     summarize_iu,
     validate_track_a_arm_spec,
 )
@@ -765,22 +768,39 @@ def verify_pooled_miou_reconciliation(
     expected_mious: Mapping[str, float] = GATE7_EXPECTED_TEST_MIOU,
     tol: float = 0.0015,
     enforce_strict: bool = True,
+    allow_improvement_keys: Sequence[str] = (),
 ) -> Dict[str, Any]:
-    """Assertion 6: Reconcile pooled TEST mIoU against frozen Gate-7 Track A reference values."""
-    deltas: Dict[str, Dict[str, float]] = {}
+    """Assertion 6: Reconcile pooled TEST mIoU against frozen Gate-7 Track A reference values.
+
+    For keys listed in ``allow_improvement_keys``, strict enforcement guards against regression
+    below ``expected - tol`` while permitting verified post-fix improvements above ``expected``.
+    """
+    allow_imp = set(allow_improvement_keys)
+    deltas: Dict[str, Dict[str, Any]] = {}
     failures: List[str] = []
     for key, exp_v in expected_mious.items():
         if key not in observed_mious:
             failures.append(f"missing observed key {key}")
             continue
         obs_v = float(observed_mious[key])
-        diff = abs(obs_v - float(exp_v))
+        signed_diff = obs_v - float(exp_v)
+        diff = abs(signed_diff)
+        improved_above_ref = key in allow_imp and signed_diff > float(tol)
         deltas[key] = {
             "observed": round(obs_v, 4),
             "expected": round(float(exp_v), 4),
+            "signed_diff": round(signed_diff, 6),
             "abs_diff": round(diff, 6),
+            "allow_improvement": key in allow_imp,
+            "improved_above_ref": improved_above_ref,
         }
-        if diff > float(tol):
+        if key in allow_imp:
+            if signed_diff < -float(tol):
+                failures.append(
+                    f"{key}: observed={obs_v:.4f} regressed below expected={exp_v:.4f} "
+                    f"(signed_diff={signed_diff:+.4f} < -{tol})"
+                )
+        elif diff > float(tol):
             failures.append(f"{key}: observed={obs_v:.4f} vs expected={exp_v:.4f} (diff={diff:.4f} > {tol})")
 
     passed = len(failures) == 0
@@ -803,48 +823,13 @@ def _extract_binary_boundary(mask: np.ndarray) -> np.ndarray:
     return np.logical_and(m, np.logical_not(eroded))
 
 
-def compute_boundary_f1_at_radius(
-    preds: np.ndarray,
-    gts: np.ndarray,
-    radius: int = 2,
-) -> Dict[str, Any]:
-    """Compute pooled per-class Boundary F1 at pixel tolerance radius strictly within valid_fg."""
-    p_arr = np.asarray(preds, dtype=np.uint8)
-    g_arr = np.asarray(gts, dtype=np.uint8)
-    if p_arr.ndim == 2:
-        p_arr = p_arr[None, ...]
-        g_arr = g_arr[None, ...]
-
-    y_g, x_g = np.ogrid[-radius : radius + 1, -radius : radius + 1]
-    disk = (x_g * x_g + y_g * y_g) <= (radius * radius)
-
-    prec_num = np.zeros(NUM_FOREGROUND, dtype=np.int64)
-    prec_den = np.zeros(NUM_FOREGROUND, dtype=np.int64)
-    rec_num = np.zeros(NUM_FOREGROUND, dtype=np.int64)
-    rec_den = np.zeros(NUM_FOREGROUND, dtype=np.int64)
-
-    for i in range(p_arr.shape[0]):
-        gt_i = g_arr[i]
-        pr_i = p_arr[i]
-        valid = (gt_i >= 0) & (gt_i < NUM_FOREGROUND)
-        if not np.any(valid):
-            continue
-        for c in range(NUM_FOREGROUND):
-            gb = _extract_binary_boundary((gt_i == c) & valid)
-            pb = _extract_binary_boundary((pr_i == c) & valid)
-            g_cnt = int(gb.sum())
-            p_cnt = int(pb.sum())
-            if g_cnt == 0 and p_cnt == 0:
-                continue
-            if p_cnt > 0:
-                g_dil = binary_dilation(gb, structure=disk) if g_cnt > 0 else np.zeros_like(gb)
-                prec_num[c] += int(np.logical_and(pb, g_dil).sum())
-                prec_den[c] += p_cnt
-            if g_cnt > 0:
-                p_dil = binary_dilation(pb, structure=disk) if p_cnt > 0 else np.zeros_like(pb)
-                rec_num[c] += int(np.logical_and(gb, p_dil).sum())
-                rec_den[c] += g_cnt
-
+def _macro_boundary_f1_from_counts(
+    prec_num: np.ndarray,
+    prec_den: np.ndarray,
+    rec_num: np.ndarray,
+    rec_den: np.ndarray,
+) -> Tuple[float, Dict[str, float]]:
+    """Compute macro and per-class Boundary F1 from length-4 precision/recall numerator/denominator vectors."""
     per_class: Dict[str, float] = {}
     vals: List[float] = []
     for c in range(NUM_FOREGROUND):
@@ -854,43 +839,476 @@ def compute_boundary_f1_at_radius(
         per_class[_CLS_LOWER[c]] = round(f1, 4)
         if rec_den[c] > 0 or prec_den[c] > 0:
             vals.append(f1)
-
-    return {
-        "radius_px": int(radius),
-        "macro_boundary_f1": round(float(np.mean(vals)) if vals else 0.0, 4),
-        "per_class_boundary_f1": per_class,
-    }
+    return (float(np.mean(vals)) if vals else 0.0), per_class
 
 
-def compute_tum_centroid_offset(preds: np.ndarray, gts: np.ndarray, min_tum_px: int = 64) -> Dict[str, Any]:
-    """Compute Euclidean TUM centroid offset (pixels) across patches with >= min_tum_px GT & Pred TUM."""
+def compute_boundary_f1_detailed(
+    preds: np.ndarray,
+    gts: np.ndarray,
+    patch_pidx: Optional[np.ndarray] = None,
+    num_patients: int = 0,
+    radius: int = 2,
+    n_boot: int = 2000,
+    seed: int = 42,
+) -> Tuple[Dict[str, Any], np.ndarray, np.ndarray]:
+    """Compute pooled, per-patch, and patient-level Boundary F1@radius with 95% patient bootstrap CI."""
     p_arr = np.asarray(preds, dtype=np.uint8)
     g_arr = np.asarray(gts, dtype=np.uint8)
     if p_arr.ndim == 2:
         p_arr = p_arr[None, ...]
         g_arr = g_arr[None, ...]
 
-    offsets: List[float] = []
-    for i in range(p_arr.shape[0]):
+    n_patches = int(p_arr.shape[0])
+    y_g, x_g = np.ogrid[-radius : radius + 1, -radius : radius + 1]
+    disk = (x_g * x_g + y_g * y_g) <= (radius * radius)
+
+    prec_num = np.zeros(NUM_FOREGROUND, dtype=np.int64)
+    prec_den = np.zeros(NUM_FOREGROUND, dtype=np.int64)
+    rec_num = np.zeros(NUM_FOREGROUND, dtype=np.int64)
+    rec_den = np.zeros(NUM_FOREGROUND, dtype=np.int64)
+
+    has_pats = patch_pidx is not None and int(num_patients) > 0
+    n_pat = int(num_patients) if has_pats else 0
+    p_prec_num = np.zeros((n_pat, NUM_FOREGROUND), dtype=np.int64) if has_pats else np.zeros((0, NUM_FOREGROUND), dtype=np.int64)
+    p_prec_den = np.zeros((n_pat, NUM_FOREGROUND), dtype=np.int64) if has_pats else np.zeros((0, NUM_FOREGROUND), dtype=np.int64)
+    p_rec_num = np.zeros((n_pat, NUM_FOREGROUND), dtype=np.int64) if has_pats else np.zeros((0, NUM_FOREGROUND), dtype=np.int64)
+    p_rec_den = np.zeros((n_pat, NUM_FOREGROUND), dtype=np.int64) if has_pats else np.zeros((0, NUM_FOREGROUND), dtype=np.int64)
+
+    per_patch_f1 = np.full(n_patches, np.nan, dtype=np.float64)
+
+    for i in range(n_patches):
+        gt_i = g_arr[i]
+        pr_i = p_arr[i]
+        valid = (gt_i >= 0) & (gt_i < NUM_FOREGROUND)
+        if not np.any(valid):
+            continue
+        pi = int(patch_pidx[i]) if has_pats and patch_pidx is not None else -1
+        patch_cls_f1: List[float] = []
+        for c in range(NUM_FOREGROUND):
+            gb = _extract_binary_boundary((gt_i == c) & valid)
+            pb = _extract_binary_boundary((pr_i == c) & valid)
+            g_cnt = int(gb.sum())
+            p_cnt = int(pb.sum())
+            if g_cnt == 0 and p_cnt == 0:
+                continue
+            pn_i = 0
+            rn_i = 0
+            if p_cnt > 0:
+                g_dil = binary_dilation(gb, structure=disk) if g_cnt > 0 else np.zeros_like(gb)
+                pn_i = int(np.logical_and(pb, g_dil).sum())
+                prec_num[c] += pn_i
+                prec_den[c] += p_cnt
+                if has_pats:
+                    p_prec_num[pi, c] += pn_i
+                    p_prec_den[pi, c] += p_cnt
+            if g_cnt > 0:
+                p_dil = binary_dilation(pb, structure=disk) if p_cnt > 0 else np.zeros_like(pb)
+                rn_i = int(np.logical_and(gb, p_dil).sum())
+                rec_num[c] += rn_i
+                rec_den[c] += g_cnt
+                if has_pats:
+                    p_rec_num[pi, c] += rn_i
+                    p_rec_den[pi, c] += g_cnt
+            prec_i = float(pn_i / p_cnt) if p_cnt > 0 else 0.0
+            rec_i = float(rn_i / g_cnt) if g_cnt > 0 else 0.0
+            patch_cls_f1.append((2.0 * prec_i * rec_i / (prec_i + rec_i)) if (prec_i + rec_i) > 0 else 0.0)
+        if patch_cls_f1:
+            per_patch_f1[i] = float(np.mean(patch_cls_f1))
+
+    macro_f1, per_class = _macro_boundary_f1_from_counts(prec_num, prec_den, rec_num, rec_den)
+    report: Dict[str, Any] = {
+        "radius_px": int(radius),
+        "macro_boundary_f1": round(macro_f1, 4),
+        "per_class_boundary_f1": per_class,
+    }
+
+    per_patient_f1 = np.zeros(n_pat, dtype=np.float64)
+    if has_pats:
+        for p in range(n_pat):
+            pf1, _ = _macro_boundary_f1_from_counts(p_prec_num[p], p_prec_den[p], p_rec_num[p], p_rec_den[p])
+            per_patient_f1[p] = pf1
+        rng = np.random.default_rng(int(seed))
+        b_idx = rng.integers(0, n_pat, size=(int(n_boot), n_pat))
+        bpn = p_prec_num[b_idx].sum(axis=1).astype(np.float64)
+        bpd = p_prec_den[b_idx].sum(axis=1).astype(np.float64)
+        brn = p_rec_num[b_idx].sum(axis=1).astype(np.float64)
+        brd = p_rec_den[b_idx].sum(axis=1).astype(np.float64)
+        b_prec = np.divide(bpn, np.where(bpd > 0, bpd, 1.0))
+        b_prec = np.where(bpd > 0, b_prec, 0.0)
+        b_rec = np.divide(brn, np.where(brd > 0, brd, 1.0))
+        b_rec = np.where(brd > 0, b_rec, 0.0)
+        b_den = b_prec + b_rec
+        b_f1 = np.where(b_den > 0, 2.0 * b_prec * b_rec / np.where(b_den > 0, b_den, 1.0), 0.0)
+        b_act = (bpd > 0) | (brd > 0)
+        b_cnt = np.maximum(1, b_act.sum(axis=1))
+        boot_macro = np.where(b_act.sum(axis=1) > 0, np.where(b_act, b_f1, 0.0).sum(axis=1) / b_cnt, 0.0)
+        lo, hi = np.percentile(boot_macro, [2.5, 97.5])
+        report["bootstrap_95ci"] = {
+            "point": round(macro_f1, 4),
+            "ci_low": round(float(lo), 4),
+            "ci_high": round(float(hi), 4),
+        }
+        report["patient_mean_f1"] = round(float(np.mean(per_patient_f1)), 4)
+
+    return report, per_patch_f1, per_patient_f1
+
+
+def compute_boundary_f1_at_radius(
+    preds: np.ndarray,
+    gts: np.ndarray,
+    radius: int = 2,
+) -> Dict[str, Any]:
+    """Compute pooled per-class Boundary F1 at pixel tolerance radius strictly within valid_fg."""
+    rep, _, _ = compute_boundary_f1_detailed(preds, gts, patch_pidx=None, num_patients=0, radius=radius)
+    return rep
+
+
+def compute_tum_centroid_per_patch(
+    preds: np.ndarray,
+    gts: np.ndarray,
+    min_tum_px: int = 64,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (per_patch_offset_nan, gt_tum_ok_bool, pred_tum_ok_bool) within valid_fg."""
+    p_arr = np.asarray(preds, dtype=np.uint8)
+    g_arr = np.asarray(gts, dtype=np.uint8)
+    if p_arr.ndim == 2:
+        p_arr = p_arr[None, ...]
+        g_arr = g_arr[None, ...]
+
+    n_patches = int(p_arr.shape[0])
+    offsets = np.full(n_patches, np.nan, dtype=np.float64)
+    gt_ok = np.zeros(n_patches, dtype=bool)
+    pr_ok = np.zeros(n_patches, dtype=bool)
+    min_px = int(min_tum_px)
+
+    for i in range(n_patches):
         valid = (g_arr[i] >= 0) & (g_arr[i] < NUM_FOREGROUND)
         gt_tum = (g_arr[i] == 0) & valid
         pr_tum = (p_arr[i] == 0) & valid
-        if int(gt_tum.sum()) < int(min_tum_px) or int(pr_tum.sum()) < int(min_tum_px):
-            continue
-        gy, gx = np.nonzero(gt_tum)
-        py, px = np.nonzero(pr_tum)
-        dy = float(py.mean() - gy.mean())
-        dx = float(px.mean() - gx.mean())
-        offsets.append(float(np.hypot(dx, dy)))
+        g_ok = int(gt_tum.sum()) >= min_px
+        p_ok = int(pr_tum.sum()) >= min_px
+        gt_ok[i] = g_ok
+        pr_ok[i] = p_ok
+        if g_ok and p_ok:
+            gy, gx = np.nonzero(gt_tum)
+            py, px = np.nonzero(pr_tum)
+            offsets[i] = float(np.hypot(float(px.mean() - gx.mean()), float(py.mean() - gy.mean())))
+    return offsets, gt_ok, pr_ok
 
-    if not offsets:
-        return {"n_patches": 0, "mean_px": 0.0, "median_px": 0.0, "p90_px": 0.0}
-    arr = np.asarray(offsets, dtype=np.float64)
+
+def compute_tum_centroid_offset(preds: np.ndarray, gts: np.ndarray, min_tum_px: int = 64) -> Dict[str, Any]:
+    """Compute Euclidean TUM centroid offset (pixels) and TUM patch detection recall within valid_fg."""
+    offsets, gt_ok, pr_ok = compute_tum_centroid_per_patch(preds, gts, min_tum_px=min_tum_px)
+    n_gt_tum = int(gt_ok.sum())
+    det_mask = gt_ok & pr_ok
+    valid_off = offsets[det_mask]
+    recall = float(valid_off.size / n_gt_tum) if n_gt_tum > 0 else 0.0
+    if valid_off.size == 0:
+        return {
+            "n_patches": 0,
+            "n_gt_tum_patches": n_gt_tum,
+            "tum_patch_detection_recall": round(recall, 4),
+            "mean_px": 0.0,
+            "median_px": 0.0,
+            "p90_px": 0.0,
+        }
     return {
-        "n_patches": int(arr.size),
-        "mean_px": round(float(arr.mean()), 3),
-        "median_px": round(float(np.median(arr)), 3),
-        "p90_px": round(float(np.percentile(arr, 90)), 3),
+        "n_patches": int(valid_off.size),
+        "n_gt_tum_patches": n_gt_tum,
+        "tum_patch_detection_recall": round(recall, 4),
+        "mean_px": round(float(valid_off.mean()), 3),
+        "median_px": round(float(np.median(valid_off)), 3),
+        "p90_px": round(float(np.percentile(valid_off, 90)), 3),
+    }
+
+
+def compute_matched_spatial_stats(
+    bf1_pat_by_model: Mapping[str, np.ndarray],
+    tum_offsets_by_model: Mapping[str, np.ndarray],
+    gt_tum_ok: np.ndarray,
+    pred_tum_ok_by_model: Mapping[str, np.ndarray],
+    patch_pidx: np.ndarray,
+    num_patients: int,
+    key_models: Sequence[str] = ("author_step0", "arm5_cgm", "ens4_no_cgm", "ens4_cgm"),
+    n_boot: int = 2000,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Compute unbiased common-intersection TUM centroid stats + patient-level Wilcoxon & 95% bootstrap CIs."""
+    present_models = [m for m in key_models if m in tum_offsets_by_model]
+    common_mask = np.asarray(gt_tum_ok, dtype=bool).copy()
+    for m in present_models:
+        common_mask &= np.asarray(pred_tum_ok_by_model[m], dtype=bool)
+    n_gt_tum = int(np.asarray(gt_tum_ok, dtype=bool).sum())
+    n_common = int(common_mask.sum())
+
+    # Patients with >= 1 common-intersection TUM patch
+    common_pidx = np.asarray(patch_pidx, dtype=np.int32)[common_mask]
+    active_pats = sorted(set(int(p) for p in common_pidx))
+    n_active_pats = len(active_pats)
+
+    matched_per_model: Dict[str, Any] = {}
+    pat_mean_by_model: Dict[str, np.ndarray] = {}
+    pat_med_by_model: Dict[str, np.ndarray] = {}
+    rng = np.random.default_rng(int(seed))
+
+    for m in present_models:
+        vals = np.asarray(tum_offsets_by_model[m], dtype=np.float64)[common_mask]
+        n_det = int(np.logical_and(gt_tum_ok, pred_tum_ok_by_model[m]).sum())
+        recall = float(n_det / n_gt_tum) if n_gt_tum > 0 else 0.0
+        if vals.size == 0 or n_active_pats == 0:
+            matched_per_model[m] = {
+                "n_common_patches": 0,
+                "n_active_patients": 0,
+                "n_detected_patches": n_det,
+                "n_gt_tum_patches": n_gt_tum,
+                "tum_patch_detection_recall": round(recall, 4),
+                "mean_px": 0.0,
+                "median_px": 0.0,
+                "p90_px": 0.0,
+                "bootstrap_95ci_mean_px": [0.0, 0.0],
+                "bootstrap_95ci_median_px": [0.0, 0.0],
+            }
+            pat_mean_by_model[m] = np.zeros(0, dtype=np.float64)
+            pat_med_by_model[m] = np.zeros(0, dtype=np.float64)
+            continue
+
+        pat_vals = [vals[common_pidx == p] for p in active_pats]
+        pat_means = np.asarray([float(v.mean()) for v in pat_vals], dtype=np.float64)
+        pat_meds = np.asarray([float(np.median(v)) for v in pat_vals], dtype=np.float64)
+        pat_mean_by_model[m] = pat_means
+        pat_med_by_model[m] = pat_meds
+
+        # Patient-level cluster bootstrap for pooled common-intersection mean & median offset
+        b_means = np.empty(int(n_boot), dtype=np.float64)
+        b_meds = np.empty(int(n_boot), dtype=np.float64)
+        for bi in range(int(n_boot)):
+            chosen = rng.integers(0, n_active_pats, size=n_active_pats)
+            sample = np.concatenate([pat_vals[int(c)] for c in chosen])
+            b_means[bi] = float(sample.mean())
+            b_meds[bi] = float(np.median(sample))
+        m_lo, m_hi = np.percentile(b_means, [2.5, 97.5])
+        d_lo, d_hi = np.percentile(b_meds, [2.5, 97.5])
+
+        matched_per_model[m] = {
+            "n_common_patches": n_common,
+            "n_active_patients": n_active_pats,
+            "n_detected_patches": n_det,
+            "n_gt_tum_patches": n_gt_tum,
+            "tum_patch_detection_recall": round(recall, 4),
+            "mean_px": round(float(vals.mean()), 3),
+            "median_px": round(float(np.median(vals)), 3),
+            "p90_px": round(float(np.percentile(vals, 90)), 3),
+            "patient_mean_of_means_px": round(float(pat_means.mean()), 3),
+            "bootstrap_95ci_mean_px": [round(float(m_lo), 3), round(float(m_hi), 3)],
+            "bootstrap_95ci_median_px": [round(float(d_lo), 3), round(float(d_hi), 3)],
+        }
+
+    pairs = [
+        ("ens4_cgm_vs_author_step0", "ens4_cgm", "author_step0"),
+        ("ens4_no_cgm_vs_author_step0", "ens4_no_cgm", "author_step0"),
+        ("arm5_cgm_vs_author_step0", "arm5_cgm", "author_step0"),
+        ("ens4_cgm_vs_arm5_cgm", "ens4_cgm", "arm5_cgm"),
+    ]
+    bf1_wilcoxon: Dict[str, Any] = {}
+    cent_wilcoxon: Dict[str, Any] = {}
+    for pname, ma, mb in pairs:
+        if ma in bf1_pat_by_model and mb in bf1_pat_by_model and int(num_patients) > 0:
+            wa = np.asarray(bf1_pat_by_model[ma], dtype=np.float64)
+            wb = np.asarray(bf1_pat_by_model[mb], dtype=np.float64)
+            bf1_wilcoxon[pname] = {
+                "delta_patient_mean_f1": round(float(np.mean(wa - wb)), 4),
+                **paired_wilcoxon_and_dz(wa, wb),
+            }
+        if ma in pat_mean_by_model and mb in pat_mean_by_model and n_active_pats > 0:
+            ca = pat_mean_by_model[ma]
+            cb = pat_mean_by_model[mb]
+            # Negative delta means ma has smaller (better) centroid error than mb
+            cent_wilcoxon[pname] = {
+                "delta_patient_mean_px": round(float(np.mean(ca - cb)), 3),
+                "delta_patient_median_px": round(float(np.mean(pat_med_by_model[ma] - pat_med_by_model[mb])), 3),
+                **paired_wilcoxon_and_dz(ca, cb),
+            }
+
+    return {
+        "n_patients": int(num_patients),
+        "boundary_f1_at_2px_paired_wilcoxon": bf1_wilcoxon,
+        "tum_centroid_matched_common_intersection": {
+            "n_gt_tum_patches": n_gt_tum,
+            "n_common_patches": n_common,
+            "n_active_patients": n_active_pats,
+            "per_model": matched_per_model,
+            "paired_wilcoxon": cent_wilcoxon,
+        },
+    }
+
+
+def compute_full_test_glass_guard_ablation(
+    preds: np.ndarray,
+    raw_rgbs: Sequence[np.ndarray],
+    gt_masks: np.ndarray,
+) -> Dict[str, Any]:
+    """Quantify None vs PureGlass vs Cand1 BrightGlass vs Otsu across ALL test patches (n=4,986)."""
+    n_patches = int(gt_masks.shape[0])
+    modes = ("none", "pure_glass", "cand1_bright_glass", "otsu")
+    cm_by_mode = {m: np.zeros((NUM_FOREGROUND, NUM_FOREGROUND + 1), dtype=np.int64) for m in modes}
+    bg_supp = {m: 0 for m in modes}
+    or_supp = {m: 0 for m in modes}
+    fg_erode = {m: 0 for m in modes}
+    nec_erode = {m: 0 for m in modes}
+    tot_bg, tot_or, tot_fg, tot_nec = 0, 0, 0, 0
+
+    for i in range(n_patches):
+        rgb = raw_rgbs[i]
+        gt = gt_masks[i]
+        pred_raw = preds[i]
+        b_info = classify_back_pixels(rgb, gt)
+        bg_m = b_info["bright_glass_mask"]
+        or_m = b_info["outside_roi_mask"]
+        fg_m = (gt >= 0) & (gt < NUM_FOREGROUND)
+        nec_m = gt == 3
+
+        tot_bg += int(bg_m.sum())
+        tot_or += int(or_m.sum())
+        tot_fg += int(fg_m.sum())
+        tot_nec += int(nec_m.sum())
+
+        pred_pure = MultiMethodWSSSEngineV2.apply_pure_glass_guard(pred_raw, rgb, background_class_idx=4)
+        pred_cand1 = MultiMethodWSSSEngineV2.apply_bright_glass_guard(pred_raw, rgb, background_class_idx=4)
+        otsu_tiss = compute_otsu_tissue_mask(rgb).astype(bool)
+        pred_otsu = pred_raw.copy()
+        pred_otsu[~otsu_tiss] = 4
+
+        gv = gt[fg_m].astype(np.int64) if np.any(fg_m) else None
+        for m_name, p_cur in (
+            ("none", pred_raw),
+            ("pure_glass", pred_pure),
+            ("cand1_bright_glass", pred_cand1),
+            ("otsu", pred_otsu),
+        ):
+            is_back = p_cur == 4
+            bg_supp[m_name] += int(np.logical_and(bg_m, is_back).sum())
+            or_supp[m_name] += int(np.logical_and(or_m, is_back).sum())
+            fg_erode[m_name] += int(np.logical_and(fg_m, is_back).sum())
+            nec_erode[m_name] += int(np.logical_and(nec_m, is_back).sum())
+            if gv is not None:
+                pv = np.minimum(p_cur[fg_m], NUM_FOREGROUND).astype(np.int64)
+                cm_by_mode[m_name] += np.bincount(
+                    gv * (NUM_FOREGROUND + 1) + pv,
+                    minlength=NUM_FOREGROUND * (NUM_FOREGROUND + 1),
+                ).reshape(NUM_FOREGROUND, NUM_FOREGROUND + 1)
+
+    def _pct(num: int, den: int) -> Optional[float]:
+        return round(float(num) / float(den) * 100.0, 3) if den > 0 else None
+
+    out_modes: Dict[str, Any] = {}
+    base_miou: Optional[float] = None
+    for m_name in modes:
+        cm = cm_by_mode[m_name]
+        cm4 = cm[:, :NUM_FOREGROUND]
+        inter = np.diag(cm4)
+        union = cm4.sum(axis=0) + cm.sum(axis=1) - inter
+        summ = summarize_iu(inter, union)
+        if base_miou is None:
+            base_miou = float(summ["mIoU_raw"])
+        out_modes[m_name] = {
+            **summ,
+            "delta_miou_vs_none": round(float(summ["mIoU_raw"]) - float(base_miou), 4),
+            "bright_glass_suppression_pct": _pct(bg_supp[m_name], tot_bg),
+            "outside_roi_suppression_pct": _pct(or_supp[m_name], tot_or),
+            "fg_erosion_pct": _pct(fg_erode[m_name], tot_fg),
+            "nec_erosion_pct": _pct(nec_erode[m_name], tot_nec),
+        }
+
+    return {
+        "n_patches": n_patches,
+        "pixel_totals": {
+            "bright_glass_px": tot_bg,
+            "outside_roi_px": tot_or,
+            "valid_fg_px": tot_fg,
+            "nec_px": tot_nec,
+        },
+        "modes": out_modes,
+    }
+
+
+def _make_2d_hann_window(h: int, w: int) -> np.ndarray:
+    """Strictly positive 2D separable raised-cosine Hann blending window (zero border singularity)."""
+    hy = np.hanning(int(h) + 2)[1:-1].astype(np.float32)
+    hx = np.hanning(int(w) + 2)[1:-1].astype(np.float32)
+    return np.outer(hy, hx).astype(np.float32)
+
+
+def compute_tile_seam_discontinuity_rate(
+    pred_full: np.ndarray,
+    gt_full: np.ndarray,
+    tile_size: int = 224,
+) -> Dict[str, Any]:
+    """Measure predicted class-flip rate across interior tile seams vs non-seam neighbors (valid_fg only)."""
+    p = np.asarray(pred_full, dtype=np.uint8)
+    g = np.asarray(gt_full, dtype=np.uint8)
+    fh, fw = p.shape
+    ts = int(tile_size)
+    seam_flips = 0
+    seam_pairs = 0
+    gt_seam_flips = 0
+    # Vertical seams at x = k * ts
+    for x in range(ts, fw, ts):
+        valid = (g[:, x - 1] < NUM_FOREGROUND) & (g[:, x] < NUM_FOREGROUND)
+        cnt = int(valid.sum())
+        if cnt > 0:
+            seam_pairs += cnt
+            seam_flips += int(np.logical_and(valid, p[:, x - 1] != p[:, x]).sum())
+            gt_seam_flips += int(np.logical_and(valid, g[:, x - 1] != g[:, x]).sum())
+    # Horizontal seams at y = k * ts
+    for y in range(ts, fh, ts):
+        valid = (g[y - 1, :] < NUM_FOREGROUND) & (g[y, :] < NUM_FOREGROUND)
+        cnt = int(valid.sum())
+        if cnt > 0:
+            seam_pairs += cnt
+            seam_flips += int(np.logical_and(valid, p[y - 1, :] != p[y, :]).sum())
+            gt_seam_flips += int(np.logical_and(valid, g[y - 1, :] != g[y, :]).sum())
+
+    pred_rate = float(seam_flips / seam_pairs) if seam_pairs > 0 else 0.0
+    gt_rate = float(gt_seam_flips / seam_pairs) if seam_pairs > 0 else 0.0
+    return {
+        "seam_valid_pairs": seam_pairs,
+        "pred_seam_flip_rate": round(pred_rate, 5),
+        "gt_seam_flip_rate": round(gt_rate, 5),
+    }
+
+
+def _resolve_visual_audit_provenance(a2_ckpt: Mapping[str, Any]) -> Dict[str, Any]:
+    """Capture git_ref, HEAD commit SHA, and checkpoint SHA-256 provenance."""
+    repo_root = Path(__file__).resolve().parents[2]
+    git_ref = os.environ.get("STAGE2_GIT_REF", "").strip()
+    git_sha = ""
+    try:
+        r_sha = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if r_sha.returncode == 0:
+            git_sha = r_sha.stdout.strip()
+        if not git_ref:
+            r_br = subprocess.run(
+                ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if r_br.returncode == 0:
+                git_ref = r_br.stdout.strip()
+    except Exception:
+        pass
+    return {
+        "git_ref": git_ref or "unknown",
+        "git_commit_sha": git_sha or "unknown",
+        "arm_sha256": dict(a2_ckpt.get("arm_sha256", {})),
+        "stage1_cls_sha256": str(a2_ckpt.get("stage1_cls_sha256", "")),
+        "author_stage1_sha256": str(a2_ckpt.get("author_stage1_sha256", "")),
+        "author_stage2_sha256": str(a2_ckpt.get("author_stage2_sha256", "")),
     }
 
 
@@ -1606,10 +2024,30 @@ def render_whole_roi_comparison_figure(
     tile_size: int = 224,
     dpi: int = 300,
     zoom_score_pred_full: Optional[np.ndarray] = None,
+    pred_tiled_no_cgm_full: Optional[np.ndarray] = None,
+    pred_hann_full: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
-    """Render 2-row 300-DPI Whole-ROI verification figure (Full ROI top + 5x5 Zoom bottom)."""
+    """Render 2-row 300-DPI Whole-ROI verification figure with legends, generous hspace, and Hann-50% ablation."""
     tiled_miou = _pooled_miou_interior(pred_tiled_full, gt_full)
     down_miou = _pooled_miou_interior(pred_downscale_full, gt_full)
+    tiled_no_cgm_miou = (
+        _pooled_miou_interior(pred_tiled_no_cgm_full, gt_full)
+        if pred_tiled_no_cgm_full is not None
+        else None
+    )
+    hann_miou = _pooled_miou_interior(pred_hann_full, gt_full) if pred_hann_full is not None else None
+    seam_tiled_cgm = compute_tile_seam_discontinuity_rate(pred_tiled_full, gt_full, tile_size=tile_size)
+    seam_tiled_no_cgm = (
+        compute_tile_seam_discontinuity_rate(pred_tiled_no_cgm_full, gt_full, tile_size=tile_size)
+        if pred_tiled_no_cgm_full is not None
+        else None
+    )
+    seam_hann = (
+        compute_tile_seam_discontinuity_rate(pred_hann_full, gt_full, tile_size=tile_size)
+        if pred_hann_full is not None
+        else None
+    )
+
     win = min(5, n_rows, n_cols)
     zoom_pred = zoom_score_pred_full if zoom_score_pred_full is not None else pred_tiled_full
     r0, c0 = _select_5x5_zoom_origin(gt_full, zoom_pred, n_rows, n_cols, mode=zoom_mode, tile_size=tile_size)
@@ -1628,14 +2066,15 @@ def render_whole_roi_comparison_figure(
     pt_d = pred_tiled_full[::disp_scale, ::disp_scale]
     pd_d = pred_downscale_full[::disp_scale, ::disp_scale]
 
-    fig, axes = plt.subplots(2, 4, figsize=(18.5, 9.6), squeeze=False)
+    fig, axes = plt.subplots(2, 4, figsize=(18.5, 10.8), squeeze=False)
     fig.patch.set_facecolor("white")
+    hann_note = f" | Hann-50% Overlap={hann_miou:.4f}" if hann_miou is not None else ""
     fig.suptitle(
         f"Whole-ROI Verification: {roi_prefix} ({n_rows}x{n_cols}, H-seam={seam_meta['h_seam_l1']:.2f}, "
-        f"V-seam={seam_meta['v_seam_l1']:.2f}) | Native Tiled mIoU={tiled_miou:.4f} vs Legacy Downscale={down_miou:.4f}",
-        fontsize=11.5,
+        f"V-seam={seam_meta['v_seam_l1']:.2f}) | Native Tiled={tiled_miou:.4f}{hann_note} vs Downscale={down_miou:.4f}",
+        fontsize=11.0,
         fontweight="bold",
-        y=0.99,
+        y=0.975,
     )
 
     top_panels = [
@@ -1654,7 +2093,7 @@ def render_whole_roi_comparison_figure(
         ax.add_patch(
             plt.Rectangle((rect_x, rect_y), rect_w, rect_h, fill=False, edgecolor="#FFD700", linewidth=2.0)
         )
-        ax.set_title(ttl, fontsize=9.5, fontweight="bold")
+        ax.set_title(ttl, fontsize=9.5, fontweight="bold", pad=7)
         ax.set_xticks([])
         ax.set_yticks([])
 
@@ -1667,17 +2106,93 @@ def render_whole_roi_comparison_figure(
     for c_i, (img_p, ttl) in enumerate(bot_panels):
         ax = axes[1, c_i]
         ax.imshow(img_p, interpolation="nearest")
-        ax.set_title(ttl, fontsize=9.5, fontweight="bold")
+        ax.set_title(ttl, fontsize=9.5, fontweight="bold", pad=8)
         ax.set_xticks([])
         ax.set_yticks([])
 
-    plt.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    # Generous vertical separation (hspace=0.24) prevents bottom-row titles from ever touching top-row borders
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.905, bottom=0.105, wspace=0.06, hspace=0.24)
+
+    tissue_handles = [
+        mpatches.Patch(facecolor="#E41A1C", edgecolor="#222222", label="TUM (0)"),
+        mpatches.Patch(facecolor="#4DAF4A", edgecolor="#222222", label="STR (1)"),
+        mpatches.Patch(facecolor="#377EB8", edgecolor="#222222", label="LYM (2)"),
+        mpatches.Patch(facecolor="#FF7F00", edgecolor="#222222", label="NEC (3)"),
+        mpatches.Patch(facecolor="#999999", edgecolor="#222222", label="BACK (4, dashed)"),
+    ]
+    error_handles = [
+        mpatches.Patch(facecolor="#22C55E", edgecolor="#222222", label="TP"),
+        mpatches.Patch(facecolor="#DC2626", edgecolor="#222222", label="FP-T"),
+        mpatches.Patch(facecolor="#D946EF", edgecolor="#222222", label="FN-T"),
+        mpatches.Patch(facecolor="#F59E0B", edgecolor="#222222", label="Other"),
+        mpatches.Patch(facecolor="#38BDF8", edgecolor="#222222", label="Glass"),
+        mpatches.Patch(facecolor="#64748B", edgecolor="#222222", label="Outside-ROI"),
+    ]
+    leg_tissue = fig.legend(
+        handles=tissue_handles,
+        title="Tissue Overlay",
+        title_fontsize=8.5,
+        fontsize=8.0,
+        ncol=5,
+        loc="lower left",
+        bbox_to_anchor=(0.02, 0.012),
+        frameon=True,
+        facecolor="white",
+        edgecolor="#333333",
+    )
+    fig.add_artist(leg_tissue)
+    fig.legend(
+        handles=error_handles,
+        title="Error Map",
+        title_fontsize=8.5,
+        fontsize=8.0,
+        ncol=6,
+        loc="lower right",
+        bbox_to_anchor=(0.98, 0.012),
+        frameon=True,
+        facecolor="white",
+        edgecolor="#333333",
+    )
+
     _atomic_save_figure(fig, save_path, dpi=dpi)
 
-    return {
+    seam_ablation: Dict[str, Any] = {
+        "gt_seam_flip_rate": seam_tiled_cgm["gt_seam_flip_rate"],
+        "seam_valid_pairs": seam_tiled_cgm["seam_valid_pairs"],
+        "tiled_cgm_seam_flip_rate": seam_tiled_cgm["pred_seam_flip_rate"],
+        "tiled_no_cgm_seam_flip_rate": (
+            seam_tiled_no_cgm["pred_seam_flip_rate"] if seam_tiled_no_cgm is not None else None
+        ),
+        "hann_overlap50_seam_flip_rate": seam_hann["pred_seam_flip_rate"] if seam_hann is not None else None,
+    }
+    if seam_hann is not None and seam_tiled_cgm["pred_seam_flip_rate"] > 0:
+        seam_ablation["hann_seam_reduction_pct_vs_tiled_cgm"] = round(
+            (1.0 - seam_hann["pred_seam_flip_rate"] / seam_tiled_cgm["pred_seam_flip_rate"]) * 100.0, 2
+        )
+    if (
+        seam_hann is not None
+        and seam_tiled_no_cgm is not None
+        and seam_tiled_no_cgm["pred_seam_flip_rate"] > 0
+    ):
+        seam_ablation["hann_seam_reduction_pct_vs_tiled_no_cgm"] = round(
+            (1.0 - seam_hann["pred_seam_flip_rate"] / seam_tiled_no_cgm["pred_seam_flip_rate"]) * 100.0, 2
+        )
+
+    out_entry: Dict[str, Any] = {
         "roi_prefix": roi_prefix,
         "seam_meta": dict(seam_meta),
         "native_tiled_miou": round(float(tiled_miou), 4),
+        "native_tiled_no_cgm_miou": round(float(tiled_no_cgm_miou), 4) if tiled_no_cgm_miou is not None else None,
+        "hann_overlap50_miou": round(float(hann_miou), 4) if hann_miou is not None else None,
+        "hann_minus_tiled_cgm_miou": (
+            round(float(hann_miou - tiled_miou), 4) if hann_miou is not None else None
+        ),
+        "hann_minus_tiled_no_cgm_miou": (
+            round(float(hann_miou - tiled_no_cgm_miou), 4)
+            if (hann_miou is not None and tiled_no_cgm_miou is not None)
+            else None
+        ),
+        "seam_discontinuity": seam_ablation,
         "legacy_downscale_miou": round(float(down_miou), 4),
         "tiled_minus_downscale": round(float(tiled_miou - down_miou), 4),
         "zoom_origin_rc": [int(r0), int(c0)],
@@ -1686,6 +2201,7 @@ def render_whole_roi_comparison_figure(
         "zoom_tiled_miou": round(float(zoom_tiled_miou), 4),
         "figure_filename": save_path.name,
     }
+    return out_entry
 
 
 # ---------------------------------------------------------------------------
@@ -1700,10 +2216,11 @@ def render_monochrome_alignment_summary(
     tum_centroid_by_model: Mapping[str, Mapping[str, Any]],
     save_paths: Sequence[Path],
     dpi: int = 300,
+    matched_centroid_by_model: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> None:
     """
     Render Academic Monochrome 300-DPI Summary Figure (Invariant 24: white bg, black/gray only):
-    - Panel A: Translation-shift dropoff curves along dx (dy=0) and dy (dx=0).
+    - Panel A: Separate dx (dy=0, solid) and dy (dx=0, dashed) translation-shift sensitivity curves.
     - Panel B: Patch-level canonical mIoU quantile boxplot across models.
     - Panel C: Per-class Boundary F1 (@2px) monochrome hatched bars + TUM centroid offset.
     """
@@ -1713,18 +2230,26 @@ def render_monochrome_alignment_summary(
     if not model_order:
         model_order = list(shift_report["per_model"].keys())[:4]
 
+    panel_a_models = [
+        m
+        for m in ("author_step0", "arm7_convnext_large_r2", "arm5_cgm", "ens4_cgm")
+        if m in shift_report["per_model"]
+    ]
+    if len(panel_a_models) < 2:
+        panel_a_models = list(model_order)
+
     pretty_names = {
         "author_step0": "Author",
+        "arm7_convnext_large_r2": "Arm 7 (ConvNeXt)",
         "arm5_cgm": "Arm 5",
         "ens4_no_cgm": "4-Arm",
         "ens4_cgm": "4-Arm+CGM",
     }
-    line_styles = ["dotted", "dashed", "dashdot", "solid"]
-    markers = ["s", "^", "D", "o"]
-    grays = ["#777777", "#555555", "#333333", "#000000"]
+    markers = ["s", "D", "^", "o"]
+    grays = ["#888888", "#606060", "#383838", "#000000"]
     hatches = ["///", "...", "xxx", ""]
 
-    fig, axes = plt.subplots(1, 3, figsize=(16.2, 4.8))
+    fig, axes = plt.subplots(1, 3, figsize=(16.5, 5.0))
     fig.patch.set_facecolor("white")
     for ax in axes:
         ax.set_facecolor("white")
@@ -1732,29 +2257,43 @@ def render_monochrome_alignment_summary(
         ax.spines["right"].set_visible(False)
         ax.grid(axis="y", linestyle=":", linewidth=0.6, color="#BFBFBF")
 
-    # Panel A: Translation-shift peak sensitivity
+    # Panel A: Separate dx (dy=0, solid) and dy (dx=0, dashed) translation-shift curves
     ax_a = axes[0]
     shifts = shift_report["shifts"]
-    for idx, m in enumerate(model_order):
+    for idx, m in enumerate(panel_a_models):
         rep = shift_report["per_model"][m]
         dx_y = rep["dx_slice_dy0"]
         dy_y = rep["dy_slice_dx0"]
-        avg_curve = [0.5 * (a + b) for a, b in zip(dx_y, dy_y)]
+        col = grays[idx % len(grays)]
+        mk = markers[idx % len(markers)]
+        lbl = pretty_names.get(m, m)
         ax_a.plot(
             shifts,
-            avg_curve,
-            color=grays[idx % len(grays)],
-            linestyle=line_styles[idx % len(line_styles)],
-            marker=markers[idx % len(markers)],
-            markersize=4.5,
-            linewidth=1.6,
-            label=pretty_names.get(m, m),
+            dx_y,
+            color=col,
+            linestyle="-",
+            marker=mk,
+            markersize=4.2,
+            linewidth=1.5,
+            label=f"{lbl} dx",
         )
-    ax_a.axvline(0, color="#000000", linestyle="--", linewidth=0.9)
-    ax_a.set_title("(a) Translation-Shift Peak Sensitivity", fontsize=10.5, fontweight="bold", color="#000000")
+        ax_a.plot(
+            shifts,
+            dy_y,
+            color=col,
+            linestyle="--",
+            marker=mk,
+            markerfacecolor="white",
+            markeredgecolor=col,
+            markersize=4.0,
+            linewidth=1.2,
+            label=f"{lbl} dy",
+        )
+    ax_a.axvline(0, color="#000000", linestyle=":", linewidth=0.9)
+    ax_a.set_title("(a) Separate dx (solid) & dy (dashed) Shift Sensitivity", fontsize=10.0, fontweight="bold", color="#000000")
     ax_a.set_xlabel("Spatial Shift Offset (pixels)", fontsize=9.5, color="#000000")
     ax_a.set_ylabel("Pooled 4-Class mIoU (Interior ROI)", fontsize=9.5, color="#000000")
-    ax_a.legend(frameon=True, facecolor="white", edgecolor="#000000", fontsize=8.0, loc="lower center")
+    ax_a.legend(frameon=True, facecolor="white", edgecolor="#000000", fontsize=6.6, ncol=2, loc="lower center")
 
     # Panel B: Patch-level canonical mIoU quantile boxplot
     ax_b = axes[1]
@@ -1803,14 +2342,16 @@ def render_monochrome_alignment_summary(
     ax_c.legend(frameon=True, facecolor="white", edgecolor="#000000", fontsize=7.8, loc="upper right")
 
     # Annotate TUM centroid offset cleanly in the top figure margin (zero bar overlap)
+    c_src = matched_centroid_by_model if matched_centroid_by_model else tum_centroid_by_model
     c_notes = []
     for m in model_order:
-        cm = tum_centroid_by_model.get(m, {})
+        cm = c_src.get(m, {})
         if cm:
             c_notes.append(f"{pretty_names.get(m, m)}:{float(cm.get('median_px', 0.0)):.1f}px")
     if c_notes:
+        prefix = "Matched Common-Intersection " if matched_centroid_by_model else ""
         fig.suptitle(
-            "Median TUM Centroid Offset: " + " | ".join(c_notes),
+            f"{prefix}Median TUM Centroid Offset: " + " | ".join(c_notes),
             fontsize=9.5,
             fontweight="bold",
             color="#000000",
@@ -2005,6 +2546,8 @@ def run_stage2_v2_visual_audit(
     author_stage1_ckpt: Optional[Union[str, Path]] = None,
     expected_author_stage1_sha: Optional[str] = SHA256_STAGE1_RETRAINED,
     author_stage1_model_override: Optional[nn.Module] = None,
+    enable_hann_whole_roi: bool = True,
+    reconciliation_allow_improvement_keys: Sequence[str] = ("ens4_no_cgm", "ens4_cgm"),
 ) -> Dict[str, Any]:
     """Run complete Gate-7 Track A visual overlay, spatial alignment, and Whole-ROI audit."""
     dev = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -2193,6 +2736,16 @@ def run_stage2_v2_visual_audit(
                 "thumb_rgb": thumb_rgb,
                 "arm_cal_logp": np.zeros((NUM_FOREGROUND, h, w), dtype=np.float32),
                 "arm_cls_probs": [],
+                "hann_cal_logp_num": (
+                    np.zeros((NUM_FOREGROUND, rgb_full.shape[0], rgb_full.shape[1]), dtype=np.float32)
+                    if enable_hann_whole_roi
+                    else None
+                ),
+                "hann_weight_den": (
+                    np.zeros((rgb_full.shape[0], rgb_full.shape[1]), dtype=np.float32)
+                    if enable_hann_whole_roi
+                    else None
+                ),
             }
 
     # Step 1: Stream all 4 Gate-7 arms into temporary centered FP16 log-prob memmaps
@@ -2261,19 +2814,56 @@ def run_stage2_v2_visual_audit(
                     pred_arm[offset : offset + b] = np.argmax(probs_np, axis=1).astype(np.uint8)
                     offset += b
 
-                # Apples-to-apples single-pass 224x224 downscale accumulation for complete Whole-ROIs
-                if downscale_predict_fn is None and pre_roi_bundles:
+                # Apples-to-apples single-pass 224x224 downscale & 50%-overlap Hann Whole-ROI accumulation
+                if pre_roi_bundles:
                     from src.stage2_v2.ensemble import reconstruct_probs_from_centered
 
                     wm = float(resolved_unif[m_idx])
                     bm = float(resolved_betas[m_idx])
+                    hann_2d = _make_2d_hann_window(h, w) if enable_hann_whole_roi else None
+                    stride_y = max(1, h // 2)
+                    stride_x = max(1, w // 2)
                     for bundle in pre_roi_bundles.values():
-                        x_th = _rgb_uint8_to_model_tensor(bundle["thumb_rgb"], "imagenet", dev)
-                        p_th, c_th = apply_tta_probs(model, x_th, tta_mode, dev, amp_dtype=amp_dtype)
-                        z_th = encode_centered_logprobs_fp16(p_th.detach().cpu().numpy().astype(np.float32), axis=1)
-                        cal_lp = reconstruct_probs_from_centered(z_th, beta=bm, eps_log=1e-3, axis=1)[0]
-                        bundle["arm_cal_logp"] += wm * cal_lp.astype(np.float32)
-                        bundle["arm_cls_probs"].append(c_th["tta"].detach().cpu().numpy().astype(np.float64))
+                        if downscale_predict_fn is None:
+                            x_th = _rgb_uint8_to_model_tensor(bundle["thumb_rgb"], "imagenet", dev)
+                            p_th, c_th = apply_tta_probs(model, x_th, tta_mode, dev, amp_dtype=amp_dtype)
+                            z_th = encode_centered_logprobs_fp16(
+                                p_th.detach().cpu().numpy().astype(np.float32), axis=1
+                            )
+                            cal_lp = reconstruct_probs_from_centered(z_th, beta=bm, eps_log=1e-3, axis=1)[0]
+                            bundle["arm_cal_logp"] += wm * cal_lp.astype(np.float32)
+                            bundle["arm_cls_probs"].append(c_th["tta"].detach().cpu().numpy().astype(np.float64))
+                        if enable_hann_whole_roi and hann_2d is not None and bundle["hann_cal_logp_num"] is not None:
+                            rgb_full = bundle["rgb_full"]
+                            fh, fw = int(rgb_full.shape[0]), int(rgb_full.shape[1])
+                            y_starts = list(range(0, max(1, fh - h + 1), stride_y))
+                            if y_starts[-1] != fh - h and fh >= h:
+                                y_starts.append(fh - h)
+                            x_starts = list(range(0, max(1, fw - w + 1), stride_x))
+                            if x_starts[-1] != fw - w and fw >= w:
+                                x_starts.append(fw - w)
+                            coords = [(ys, xs) for ys in y_starts for xs in x_starts]
+                            h_bs = 16
+                            h_num = bundle["hann_cal_logp_num"]
+                            h_den = bundle["hann_weight_den"]
+                            for ci in range(0, len(coords), h_bs):
+                                batch_coords = coords[ci : ci + h_bs]
+                                crops = np.stack(
+                                    [rgb_full[ys : ys + h, xs : xs + w] for ys, xs in batch_coords], axis=0
+                                ).astype(np.float32) / 255.0
+                                chw = (np.transpose(crops, (0, 3, 1, 2)) - IMAGENET_MEAN_NP) / IMAGENET_STD_NP
+                                x_hb = torch.from_numpy(chw).to(dev, non_blocking=True)
+                                p_hb, _ = apply_tta_probs(model, x_hb, tta_mode, dev, amp_dtype=amp_dtype)
+                                z_hb = encode_centered_logprobs_fp16(
+                                    p_hb.detach().cpu().numpy().astype(np.float32), axis=1
+                                )
+                                lp_hb = reconstruct_probs_from_centered(z_hb, beta=bm, eps_log=1e-3, axis=1).astype(
+                                    np.float32
+                                )
+                                w_hann = wm * hann_2d
+                                for bi, (ys, xs) in enumerate(batch_coords):
+                                    h_num[:, ys : ys + h, xs : xs + w] += lp_hb[bi] * w_hann[None, :, :]
+                                    h_den[ys : ys + h, xs : xs + w] += w_hann
 
             _close_memmap(mm)
             arm_cls_probs.append(cls_arr)
@@ -2358,7 +2948,8 @@ def run_stage2_v2_visual_audit(
         }
 
         s1_cls_probs = np.zeros((n_patches, NUM_FOREGROUND), dtype=np.float32)
-        pred_author_pure_1x = np.zeros((n_patches, h, w), dtype=np.uint8)
+        pred_author_raw_1x_no_cgm = np.zeros((n_patches, h, w), dtype=np.uint8)
+        pred_author_pure_1x_cgm_mul0 = np.zeros((n_patches, h, w), dtype=np.uint8)
         pred_author_step0 = np.zeros((n_patches, h, w), dtype=np.uint8)
 
         offset = 0
@@ -2398,7 +2989,13 @@ def run_stage2_v2_visual_audit(
                 logits_1x = logits_1x[:, :NUM_FOREGROUND].float()
                 probs_ms = _ms_tta_probs(author_model, author_inp, logits_1x, (0.75, 1.0, 1.25), dev, amp_dtype=None)
 
-                pred_author_pure_1x[offset : offset + b] = torch.argmax(logits_1x, dim=1).cpu().numpy().astype(np.uint8)
+                pred_author_raw_1x_no_cgm[offset : offset + b] = (
+                    torch.argmax(logits_1x, dim=1).cpu().numpy().astype(np.uint8)
+                )
+                raw_gate_a = (author_s1_p.float() > 0.10).float().view(-1, NUM_FOREGROUND, 1, 1)
+                pred_author_pure_1x_cgm_mul0[offset : offset + b] = (
+                    torch.argmax(logits_1x * raw_gate_a, dim=1).cpu().numpy().astype(np.uint8)
+                )
                 gate_a = _make_cgm_gate(author_s1_p.float(), 0.10)
                 pred_author_step0[offset : offset + b] = _apply_prob_cgm(probs_ms, gate_a).astype(np.uint8)
                 offset += b
@@ -2493,7 +3090,9 @@ def run_stage2_v2_visual_audit(
         # Step 4: Accumulate pooled & 23-patient metrics across ALL models
         all_model_preds: Dict[str, np.ndarray] = {
             **arm_preds_raw,
-            "author_pure_1x": pred_author_pure_1x,
+            "author_raw_1x_no_cgm": pred_author_raw_1x_no_cgm,
+            "author_pure_1x_cgm_mul0": pred_author_pure_1x_cgm_mul0,
+            "author_pure_1x": pred_author_raw_1x_no_cgm,
             "author_step0": pred_author_step0,
             "arm5_cgm": pred_arm5_cgm,
             "ens4_no_cgm": pred_ens4_no_cgm,
@@ -2509,6 +3108,12 @@ def run_stage2_v2_visual_audit(
             summ = summarize_iu(inter_p.sum(axis=0), union_p.sum(axis=0))
             if m_key == "ens4_simplex_cgm":
                 summ["secondary_exploratory"] = True
+            elif m_key == "author_raw_1x_no_cgm":
+                summ["description"] = "Author DeepLabV3+ 1x raw logits argmax (no TTA, no CGM)"
+            elif m_key == "author_pure_1x_cgm_mul0":
+                summ["description"] = "Author DeepLabV3+ 1x logits * (Stage-1 > 0.10) official mul0 CGM"
+            elif m_key == "author_pure_1x":
+                summ["alias_of"] = "author_raw_1x_no_cgm"
             pooled_summaries[m_key] = summ
             observed_mious[m_key] = float(summ["mIoU_raw"])
             per_patient_all[m_key] = _patient_class_iou_dict(unique_pids, inter_p, union_p)
@@ -2519,6 +3124,7 @@ def run_stage2_v2_visual_audit(
             expected_mious=expected_test_miou or {},
             tol=0.0015,
             enforce_strict=enforce_strict_reconciliation,
+            allow_improvement_keys=reconciliation_allow_improvement_keys,
         )
 
         # Assertion 4: Translation-Shift Peak Sensitivity Matrix & Orientation Collapse across ALL models
@@ -2547,7 +3153,51 @@ def run_stage2_v2_visual_audit(
             gt_masks=[gt_all[i] for i in eq_indices],
         )
 
-        # Per-patch audit table
+        # Boundary F1 (@2px) & TUM Centroid Offset (pooled, per-patch, patient-level CI & matched common-intersection)
+        spatial_keys = ("author_step0", "arm5_cgm", "ens4_no_cgm", "ens4_cgm")
+        boundary_f1_report: Dict[str, Any] = {}
+        bf1_per_patch_map: Dict[str, np.ndarray] = {}
+        bf1_per_pat_map: Dict[str, np.ndarray] = {}
+        tum_centroid_report: Dict[str, Any] = {}
+        tum_off_per_patch_map: Dict[str, np.ndarray] = {}
+        pred_tum_ok_map: Dict[str, np.ndarray] = {}
+        gt_tum_ok_arr = np.zeros(n_patches, dtype=bool)
+        for m_key in spatial_keys:
+            bf1_rep, bf1_pp, bf1_pat = compute_boundary_f1_detailed(
+                all_model_preds[m_key],
+                gt_all,
+                patch_pidx=patch_pidx,
+                num_patients=num_patients,
+                radius=2,
+            )
+            boundary_f1_report[m_key] = bf1_rep
+            bf1_per_patch_map[m_key] = bf1_pp
+            bf1_per_pat_map[m_key] = bf1_pat
+
+            t_off, g_ok, p_ok = compute_tum_centroid_per_patch(all_model_preds[m_key], gt_all, min_tum_px=64)
+            tum_off_per_patch_map[m_key] = t_off
+            pred_tum_ok_map[m_key] = p_ok
+            gt_tum_ok_arr = g_ok
+            tum_centroid_report[m_key] = compute_tum_centroid_offset(all_model_preds[m_key], gt_all, min_tum_px=64)
+
+        matched_spatial_stats = compute_matched_spatial_stats(
+            bf1_pat_by_model=bf1_per_pat_map,
+            tum_offsets_by_model=tum_off_per_patch_map,
+            gt_tum_ok=gt_tum_ok_arr,
+            pred_tum_ok_by_model=pred_tum_ok_map,
+            patch_pidx=patch_pidx,
+            num_patients=num_patients,
+            key_models=spatial_keys,
+        )
+        for m_key in spatial_keys:
+            tum_centroid_report[m_key]["matched_common_intersection"] = matched_spatial_stats[
+                "tum_centroid_matched_common_intersection"
+            ]["per_model"].get(m_key, {})
+
+        def _fmt_opt_float(val: float, ndigits: int) -> Any:
+            return "" if not np.isfinite(val) else round(float(val), ndigits)
+
+        # Per-patch audit table (including per-patch boundary_f1_at_2px & tum_centroid_offset_px!)
         patch_records: List[Dict[str, Any]] = []
         patch_mious_by_model: Dict[str, List[float]] = {
             "author_step0": [],
@@ -2586,6 +3236,16 @@ def run_stage2_v2_visual_audit(
                     "arm5_cgm_miou": round(float(m_arm5["miou_gt_present"]), 4),
                     "ens4_no_cgm_miou": round(float(m_e4["miou_gt_present"]), 4),
                     "ens4_cgm_miou": round(float(m_e4c["miou_gt_present"]), 4),
+                    "boundary_f1_at_2px": _fmt_opt_float(bf1_per_patch_map["ens4_cgm"][i], 4),
+                    "tum_centroid_offset_px": _fmt_opt_float(tum_off_per_patch_map["ens4_cgm"][i], 3),
+                    "author_step0_boundary_f1_at_2px": _fmt_opt_float(bf1_per_patch_map["author_step0"][i], 4),
+                    "arm5_cgm_boundary_f1_at_2px": _fmt_opt_float(bf1_per_patch_map["arm5_cgm"][i], 4),
+                    "ens4_no_cgm_boundary_f1_at_2px": _fmt_opt_float(bf1_per_patch_map["ens4_no_cgm"][i], 4),
+                    "ens4_cgm_boundary_f1_at_2px": _fmt_opt_float(bf1_per_patch_map["ens4_cgm"][i], 4),
+                    "author_step0_tum_centroid_offset_px": _fmt_opt_float(tum_off_per_patch_map["author_step0"][i], 3),
+                    "arm5_cgm_tum_centroid_offset_px": _fmt_opt_float(tum_off_per_patch_map["arm5_cgm"][i], 3),
+                    "ens4_no_cgm_tum_centroid_offset_px": _fmt_opt_float(tum_off_per_patch_map["ens4_no_cgm"][i], 3),
+                    "ens4_cgm_tum_centroid_offset_px": _fmt_opt_float(tum_off_per_patch_map["ens4_cgm"][i], 3),
                     "arm5_cgm_nec_fp_px": int(m_arm5["nec_fp_px"]),
                     "ens4_no_cgm_nec_fp_px": int(m_e4["nec_fp_px"]),
                     "ens4_cgm_nec_fp_px": int(m_e4c["nec_fp_px"]),
@@ -2596,13 +3256,6 @@ def run_stage2_v2_visual_audit(
                     "ens4_mean_confidence": round(float(patch_conf_ens4[i]), 4),
                 }
             )
-
-        # Boundary F1 (@2px) & TUM Centroid Offset across key models
-        boundary_f1_report: Dict[str, Any] = {}
-        tum_centroid_report: Dict[str, Any] = {}
-        for m_key in ("author_step0", "arm5_cgm", "ens4_no_cgm", "ens4_cgm"):
-            boundary_f1_report[m_key] = compute_boundary_f1_at_radius(all_model_preds[m_key], gt_all, radius=2)
-            tum_centroid_report[m_key] = compute_tum_centroid_offset(all_model_preds[m_key], gt_all, min_tum_px=64)
 
         # Step 5: Render 8 Zero-Cherry-Picking 300-DPI Contact Sheets (01..08)
         sheet_indices = select_audit_sheet_indices(patch_records, k=4, min_fg_px=1000)
@@ -2633,7 +3286,7 @@ def run_stage2_v2_visual_audit(
             )
             rendered_files[png_name] = out_png
 
-        # Sheet 07: GT-free Glass Guard comparison
+        # Sheet 07: GT-free Glass Guard comparison + full test quantitative ablation (n=4,986)
         sheet07_path = out_dir / "07_glass_guard_comparison_gt_free.png"
         glass_ablation_report = _render_glass_guard_ablation_sheet(
             indices=sheet_indices["heavy_back"],
@@ -2644,28 +3297,32 @@ def run_stage2_v2_visual_audit(
             save_path=sheet07_path,
             dpi=dpi,
         )
+        glass_ablation_report["full_test_quantitative"] = compute_full_test_glass_guard_ablation(
+            pred_ens4_cgm, raw_rgbs, gt_all
+        )
         rendered_files[sheet07_path.name] = sheet07_path
 
-        # Step 6: Whole-ROI Column-Major Stitches (09, 10)
+        # Step 6: Whole-ROI Column-Major Stitches (09, 10) + 50%-Overlap Hann Ablation
         whole_roi_results: List[Dict[str, Any]] = []
         for roi_prefix, n_rows, n_cols, png_name, zoom_mode in whole_roi_targets:
             if roi_prefix in pre_roi_bundles:
                 bundle = pre_roi_bundles[roi_prefix]
                 pred_tiles = {t_num: pred_ens4_cgm[idx] for t_num, idx in bundle["idx_tiles"].items()}
                 pt_full, _ = stitch_column_major_roi(pred_tiles, n_rows, n_cols, tile_size=h, fill_value=4)
-                zoom_score_pred_full: Optional[np.ndarray] = None
-                if zoom_mode == "nec_fp":
-                    pred_no_cgm_tiles = {
-                        t_num: pred_ens4_no_cgm[idx] for t_num, idx in bundle["idx_tiles"].items()
-                    }
-                    zoom_score_pred_full, _ = stitch_column_major_roi(
-                        pred_no_cgm_tiles, n_rows, n_cols, tile_size=h, fill_value=4
-                    )
+                pred_no_cgm_tiles = {t_num: pred_ens4_no_cgm[idx] for t_num, idx in bundle["idx_tiles"].items()}
+                pt_no_cgm_full, _ = stitch_column_major_roi(pred_no_cgm_tiles, n_rows, n_cols, tile_size=h, fill_value=4)
+                zoom_score_pred_full = pt_no_cgm_full if zoom_mode == "nec_fp" else None
                 pd_full = (
                     downscale_predict_fn(bundle["rgb_full"])
                     if downscale_predict_fn is not None
                     else bundle["pred_downscale_full"]
                 )
+                pred_hann_full: Optional[np.ndarray] = None
+                if bundle.get("hann_cal_logp_num") is not None and bundle.get("hann_weight_den") is not None:
+                    h_den = np.maximum(bundle["hann_weight_den"][None, :, :], 1e-6)
+                    pred_hann_full = np.argmax(bundle["hann_cal_logp_num"] / h_den, axis=0).astype(np.uint8)
+                    bundle["hann_cal_logp_num"] = None
+                    bundle["hann_weight_den"] = None
 
                 roi_png = out_dir / png_name
                 roi_entry = render_whole_roi_comparison_figure(
@@ -2682,6 +3339,8 @@ def run_stage2_v2_visual_audit(
                     tile_size=h,
                     dpi=dpi,
                     zoom_score_pred_full=zoom_score_pred_full,
+                    pred_tiled_no_cgm_full=pt_no_cgm_full,
+                    pred_hann_full=pred_hann_full,
                 )
                 rendered_files[png_name] = roi_png
                 whole_roi_results.append(roi_entry)
@@ -2710,6 +3369,7 @@ def run_stage2_v2_visual_audit(
             tum_centroid_by_model=tum_centroid_report,
             save_paths=[mono_11, mono_compat],
             dpi=dpi,
+            matched_centroid_by_model=matched_spatial_stats["tum_centroid_matched_common_intersection"]["per_model"],
         )
         rendered_files[mono_11.name] = mono_11
         rendered_files[mono_compat.name] = mono_compat
@@ -2738,6 +3398,7 @@ def run_stage2_v2_visual_audit(
         metrics_payload: Dict[str, Any] = {
             "audit_type": "gate7_track_a_visual_overlay_audit",
             "track": track,
+            "provenance": _resolve_visual_audit_provenance(a2_ckpt),
             "n_test_patches": n_patches,
             "n_test_patients": num_patients,
             "frozen_protocol": {
@@ -2762,6 +3423,7 @@ def run_stage2_v2_visual_audit(
             "pooled_test_metrics": pooled_summaries,
             "boundary_f1_at_2px": boundary_f1_report,
             "tum_centroid_offset_px": tum_centroid_report,
+            "matched_spatial_stats": matched_spatial_stats,
             "translation_shift_summary": {
                 "shifts": shift_report["shifts"],
                 "margin": shift_report["margin"],

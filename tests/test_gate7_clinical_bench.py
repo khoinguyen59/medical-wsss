@@ -111,6 +111,12 @@ def test_gate7_clinical_bench_line_budget_and_ascii_dashes() -> None:
     for bad in BAD_DASHES:
         assert bad not in text
 
+    plots_p = PROJECT_ROOT / "src" / "stage2_v2" / "clinical_bench_plots.py"
+    plots_txt = plots_p.read_text(encoding="utf-8")
+    assert len(plots_txt.splitlines()) <= 350, f"clinical_bench_plots.py exceeds 350 lines: {len(plots_txt.splitlines())}"
+    for bad in BAD_DASHES:
+        assert bad not in plots_txt
+
 
 def test_bland_altman_pearson_and_cohens_kappa_edge_cases() -> None:
     # Perfect identity
@@ -469,13 +475,23 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
     from src.stage2_v2 import gate7_clinical_bench as bench_mod
     from src.visualization import draw_gate7_monochrome_figures as fig_mod
 
-    captured: Dict[str, str] = {}
+    captured: Dict[str, object] = {}
     orig_save = bench_mod.va._atomic_save_figure
 
     def _capture_save(fig, save_path, dpi=300):
         ax = fig.axes[0]
+        fig.canvas.draw()
+        rend = fig.canvas.get_renderer()
+        bboxes = [t.get_bbox_patch().get_window_extent(rend) for t in ax.texts]
+        ax_box = ax.get_window_extent(rend)
+        leg = ax.get_legend()
+        leg_box = leg.get_window_extent(rend) if leg is not None else None
         captured["xlabel"] = ax.get_xlabel()
         captured["ylabel"] = ax.get_ylabel()
+        captured["n_labels"] = len(bboxes)
+        captured["any_overlap"] = any(bboxes[i].overlaps(bboxes[j]) for i in range(len(bboxes)) for j in range(i + 1, len(bboxes)))
+        captured["any_clipped"] = any(b.x0 < ax_box.x0 or b.x1 > ax_box.x1 or b.y0 < ax_box.y0 or b.y1 > ax_box.y1 for b in bboxes)
+        captured["any_leg_overlap"] = bool(leg_box is not None and any(b.overlaps(leg_box) for b in bboxes))
         return orig_save(fig, save_path, dpi=dpi)
 
     monkeypatch.setattr(bench_mod.va, "_atomic_save_figure", _capture_save)
@@ -496,14 +512,70 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
     )
     assert captured["xlabel"] == "1x Forward Latency per Patch (ms, lower is faster)"
     assert captured["ylabel"] == "BCSS TEST TTA 4-Class mIoU (%)"
+    assert captured["n_labels"] == 6 and not captured["any_overlap"] and not captured["any_clipped"] and not captured["any_leg_overlap"]
     _assert_monochrome_bw_png(pareto_png, expected_dpi=300)
+
+    # Real G4 Blackwell tight bottom-left cluster (Arm-8 1.33ms/70.47% vs Author 1.44ms/70.43%) must also have zero label overlap
+    pareto_g4_png = bench_mod.render_gpu_pareto_bw(
+        {
+            "device_name": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+            "models": {
+                "author_stage2": {"latency_ms_per_patch": 1.436, "throughput_fps": 696.54, "peak_vram_mb": 351.86, "reference_miou_pct": 70.43},
+                "arm8_deeplab_r101_r2": {"latency_ms_per_patch": 1.330, "throughput_fps": 751.79, "peak_vram_mb": 440.24, "reference_miou_pct": 70.47},
+                "arm6_segformer_b5_r2": {"latency_ms_per_patch": 4.425, "throughput_fps": 225.96, "peak_vram_mb": 915.09, "reference_miou_pct": 72.04},
+                "arm7_convnext_large_r2": {"latency_ms_per_patch": 1.488, "throughput_fps": 672.00, "peak_vram_mb": 1360.52, "reference_miou_pct": 71.80},
+                "arm5_dinov2_large_r2": {"latency_ms_per_patch": 2.988, "throughput_fps": 334.66, "peak_vram_mb": 1872.21, "reference_miou_pct": 72.53},
+                "primary_4arm_ensemble": {"latency_ms_per_patch": 9.064, "throughput_fps": 110.33, "peak_vram_mb": 3202.10, "reference_miou_pct": 72.80},
+            },
+        },
+        tmp_path / "pareto_g4_check.png",
+        dpi=300,
+    )
+    assert captured["n_labels"] == 6 and not captured["any_overlap"] and not captured["any_clipped"] and not captured["any_leg_overlap"]
+    _assert_monochrome_bw_png(pareto_g4_png, expected_dpi=300)
+
+    # Adversarial Pareto stress cases: 3-point tight cluster, 2 near-zero-ms models, and near-right-edge penultimate model
+    for case_nm, case_models in (
+        (
+            "tight3",
+            {
+                "arm8_deeplab_r101_r2": {"latency_ms_per_patch": 1.33, "throughput_fps": 751.8, "peak_vram_mb": 440.2, "reference_miou_pct": 70.47},
+                "author_stage2": {"latency_ms_per_patch": 1.44, "throughput_fps": 696.5, "peak_vram_mb": 351.9, "reference_miou_pct": 70.43},
+                "arm7_convnext_large_r2": {"latency_ms_per_patch": 1.49, "throughput_fps": 672.0, "peak_vram_mb": 1360.5, "reference_miou_pct": 70.55},
+                "arm5_dinov2_large_r2": {"latency_ms_per_patch": 2.99, "throughput_fps": 334.7, "peak_vram_mb": 1872.2, "reference_miou_pct": 72.53},
+                "arm6_segformer_b5_r2": {"latency_ms_per_patch": 4.42, "throughput_fps": 226.0, "peak_vram_mb": 915.1, "reference_miou_pct": 72.04},
+                "primary_4arm_ensemble": {"latency_ms_per_patch": 9.06, "throughput_fps": 110.3, "peak_vram_mb": 3202.1, "reference_miou_pct": 72.80},
+            },
+        ),
+        (
+            "near_zero",
+            {
+                "arm8_deeplab_r101_r2": {"latency_ms_per_patch": 0.01, "throughput_fps": 100000.0, "peak_vram_mb": 440.0, "reference_miou_pct": 70.47},
+                "author_stage2": {"latency_ms_per_patch": 0.02, "throughput_fps": 50000.0, "peak_vram_mb": 351.0, "reference_miou_pct": 70.43},
+            },
+        ),
+        (
+            "right_penult",
+            {
+                "author_stage2": {"latency_ms_per_patch": 1.0, "throughput_fps": 1000.0, "peak_vram_mb": 351.0, "reference_miou_pct": 70.43},
+                "arm8_deeplab_r101_r2": {"latency_ms_per_patch": 1.2, "throughput_fps": 833.0, "peak_vram_mb": 440.0, "reference_miou_pct": 70.96},
+                "arm5_dinov2_large_r2": {"latency_ms_per_patch": 8.9, "throughput_fps": 112.0, "peak_vram_mb": 1872.0, "reference_miou_pct": 72.53},
+                "primary_4arm_ensemble": {"latency_ms_per_patch": 9.0, "throughput_fps": 111.0, "peak_vram_mb": 3202.0, "reference_miou_pct": 72.80},
+            },
+        ),
+    ):
+        bench_mod.render_gpu_pareto_bw({"device_name": case_nm, "models": case_models}, tmp_path / f"pareto_{case_nm}.png", dpi=150)
+        assert captured["n_labels"] == len(case_models)
+        assert not captured["any_overlap"] and not captured["any_clipped"] and not captured["any_leg_overlap"], f"{case_nm}: {captured}"
 
     ev_sentinel = PROJECT_ROOT / "checkpoints" / "vps_evidence" / "se374_g7_ensemble_tracka" / "artifacts" / "STAGE2_TRAINING_METRICS.json"
     if not ev_sentinel.is_file():
         pytest.skip("Gitignored checkpoints/vps_evidence/ not present on clean CI checkout.")
 
+    sha_file = PROJECT_ROOT / "checkpoints" / "vps_evidence" / "SHA256SUMS.txt"
+    expected_sha_count = sum(1 for ln in sha_file.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.lstrip().startswith("#"))
     ev = fig_mod.load_evidence(PROJECT_ROOT)
-    assert ev["sha256_count"] == 123
+    assert expected_sha_count >= 123 and ev["sha256_count"] == expected_sha_count
     assert len((PROJECT_ROOT / "src" / "visualization" / "draw_gate7_monochrome_figures.py").read_text(encoding="utf-8").splitlines()) <= 400
     sens = fig_mod._compute_patient_sensitivity(ev["patient_json"], ev.get("true_gt_counts"))
     assert sens["n_json_records"] == 12
@@ -553,7 +625,7 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
         "Primary 4-Arm (no-CGM): 72.80% | p_Holm=0.0005",
         "Secondary Simplex (+CGM): 72.90% TEST (exploratory)",
         "WSI Multi-Tile Stitch, VTP/TSR %, CAP PDF",
-        "123/123 SHA256 Artifacts (BAD = 0)",
+        f"{expected_sha_count}/{expected_sha_count} SHA256 Artifacts (BAD = 0)",
     ):
         assert required in svg4_txt, f"Missing {required!r} in regenerated fig4 SVG"
     for forbidden in ("p=0.0004", "sTILs", "0% TCGA Pretraining |"):
@@ -578,3 +650,210 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
     for pid in sens["pids"]:
         Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8), mode="RGB").save(rgb_dir / f"{pid}-DX1_0+0.png")
     assert fig_mod._load_true_test_gt_counts(rgb_root, sens["pids"], expected_total=len(sens["pids"])) is None
+
+
+def test_phase1a_gate7_clinical_bench_upgrades(tmp_path: Path, monkeypatch) -> None:
+    """Verify Lin's CCC, Mesker/UNITED attribution, ROI-bounded+Cand1+VTP_RCB+HotspotTSR, calibration, 2-panel Pareto, LUAD 2x zoom & provenance."""
+    from src.stage2_v2 import clinical_bench_plots as plots_mod
+    from src.stage2_v2 import gate7_clinical_bench as bench_mod
+
+    # 1. Lin's CCC edge cases: identity=1.0, constant shift < 1.0 even though r=1.0, empty=0.0
+    assert plots_mod.compute_lins_ccc([10.0, 40.0, 70.0], [10.0, 40.0, 70.0]) == pytest.approx(1.0, abs=1e-4)
+    ccc_shift = plots_mod.compute_lins_ccc([20.0, 50.0, 80.0], [10.0, 40.0, 70.0])
+    assert 0.0 < ccc_shift < 0.99
+    assert plots_mod.compute_lins_ccc([], []) == pytest.approx(0.0)
+    assert "Mesker" in plots_mod.GUIDELINE_ATTRIBUTION and "UNITED" in plots_mod.GUIDELINE_ATTRIBUTION
+
+    # 2. PixelCalibrationAccumulator: perfect predictions vs uniform predictions
+    cal_perf = plots_mod.PixelCalibrationAccumulator()
+    gt_c = np.array([[[0, 1], [2, 3]], [[0, 4], [1, 4]]], dtype=np.uint8)
+    pr_perf = np.full((2, 4, 2, 2), 1e-4, dtype=np.float32)
+    for b in range(2):
+        for r in range(2):
+            for c in range(2):
+                if gt_c[b, r, c] < 4:
+                    pr_perf[b, gt_c[b, r, c], r, c] = 0.9997
+    cal_perf.update(pr_perf, gt_c)
+    s_perf = cal_perf.compute()
+    assert s_perf["n_valid_pixels"] == 6 and s_perf["ece"] < 0.01 and s_perf["brier"] < 0.01 and s_perf["nll"] < 0.01
+
+    cal_unif = plots_mod.PixelCalibrationAccumulator()
+    cal_unif.update(np.full((2, 4, 2, 2), 0.25, dtype=np.float32), gt_c)
+    s_unif = cal_unif.compute()
+    assert s_unif["brier"] == pytest.approx(0.75, abs=1e-4)
+
+    # 3. 2-panel GPU Pareto zero-collision across BOTH panels (raw_1x & deployed_tta) + strict B&W
+    panel_checks: List[Dict[str, object]] = []
+    orig_save = bench_mod.va._atomic_save_figure
+
+    def _capture_2panel(fig, save_path, dpi=300):
+        fig.canvas.draw()
+        rend = fig.canvas.get_renderer()
+        for ax in fig.axes:
+            bboxes = [t.get_bbox_patch().get_window_extent(rend) for t in ax.texts]
+            ax_box = ax.get_window_extent(rend)
+            leg = ax.get_legend()
+            leg_box = leg.get_window_extent(rend) if leg is not None else None
+            panel_checks.append(
+                {
+                    "n_labels": len(bboxes),
+                    "any_overlap": any(bboxes[i].overlaps(bboxes[j]) for i in range(len(bboxes)) for j in range(i + 1, len(bboxes))),
+                    "any_clipped": any(b.x0 < ax_box.x0 or b.x1 > ax_box.x1 or b.y0 < ax_box.y0 or b.y1 > ax_box.y1 for b in bboxes),
+                    "any_leg_overlap": bool(leg_box is not None and any(b.overlaps(leg_box) for b in bboxes)),
+                }
+            )
+        return orig_save(fig, save_path, dpi=dpi)
+
+    monkeypatch.setattr(bench_mod.va, "_atomic_save_figure", _capture_2panel)
+    two_panel_data = {
+        "device_name": "NVIDIA RTX PRO 6000 Blackwell",
+        "amp_dtype": "torch.bfloat16",
+        "raw_1x": {
+            "author_stage2": {"latency_ms_per_patch": 0.90, "throughput_fps": 1111.0, "peak_vram_mb": 350.0, "reference_miou_pct": 69.35},
+            "arm8_deeplab_r101_r2": {"latency_ms_per_patch": 1.05, "throughput_fps": 952.0, "peak_vram_mb": 440.0, "reference_miou_pct": 70.10},
+            "arm6_segformer_b5_r2": {"latency_ms_per_patch": 3.80, "throughput_fps": 263.0, "peak_vram_mb": 915.0, "reference_miou_pct": 71.50},
+            "arm7_convnext_large_r2": {"latency_ms_per_patch": 1.35, "throughput_fps": 740.0, "peak_vram_mb": 1360.0, "reference_miou_pct": 71.20},
+            "arm5_dinov2_large_r2": {"latency_ms_per_patch": 2.85, "throughput_fps": 350.0, "peak_vram_mb": 1872.0, "reference_miou_pct": 72.10},
+            "primary_4arm_ensemble": {"latency_ms_per_patch": 8.95, "throughput_fps": 111.7, "peak_vram_mb": 3200.0, "reference_miou_pct": 72.45},
+        },
+        "deployed_tta": {
+            "author_stage2": {"latency_ms_per_patch": 6.40, "throughput_fps": 156.0, "peak_vram_mb": 520.0, "reference_miou_pct": 70.43},
+            "arm8_deeplab_r101_r2": {"latency_ms_per_patch": 7.10, "throughput_fps": 140.0, "peak_vram_mb": 590.0, "reference_miou_pct": 70.47},
+            "arm6_segformer_b5_r2": {"latency_ms_per_patch": 31.20, "throughput_fps": 32.0, "peak_vram_mb": 1100.0, "reference_miou_pct": 72.04},
+            "arm7_convnext_large_r2": {"latency_ms_per_patch": 9.40, "throughput_fps": 106.0, "peak_vram_mb": 1500.0, "reference_miou_pct": 71.80},
+            "arm5_dinov2_large_r2": {"latency_ms_per_patch": 18.50, "throughput_fps": 54.0, "peak_vram_mb": 2100.0, "reference_miou_pct": 72.80},
+            "primary_4arm_ensemble": {"latency_ms_per_patch": 66.80, "throughput_fps": 15.0, "peak_vram_mb": 3400.0, "reference_miou_pct": 72.80},
+        },
+    }
+    p2_path = bench_mod.render_gpu_pareto_bw(two_panel_data, tmp_path / "pareto_2panel.png", dpi=300)
+    assert len(panel_checks) == 2
+    for idx_p, chk in enumerate(panel_checks):
+        assert chk["n_labels"] == 6 and not chk["any_overlap"] and not chk["any_clipped"] and not chk["any_leg_overlap"], f"panel {idx_p}: {chk}"
+    _assert_monochrome_bw_png(p2_path, expected_dpi=300)
+    monkeypatch.setattr(bench_mod.va, "_atomic_save_figure", orig_save)
+
+    # 4. Full E2E check of new deliverables: ROI-bounded+Cand1+VTP_RCB+HotspotTSR, BCSS calibration, LUAD linear/logprob + 2x zoom + overlay + provenance
+    bcss_items = []
+    for idx, pid in enumerate(("TCGA-E2-A1LK", "TCGA-EW-A1P8", "TCGA-E2-A14N", "TCGA-EW-A1P1")):
+        rgb = np.full((32, 32, 3), (120, 120, 120), dtype=np.uint8)
+        gt = np.ones((32, 32), dtype=np.uint8)
+        if idx < 2:
+            rgb[:10, :] = (230, 50, 50)
+            gt[:10, :] = 0
+        else:
+            rgb[:22, :] = (230, 50, 50)
+            gt[:22, :] = 0
+        bcss_items.append((rgb, gt, f"{pid}_0_0.png"))
+
+    luad_img_d, luad_msk_d = tmp_path / "l_img", tmp_path / "l_msk"
+    luad_img_d.mkdir()
+    luad_msk_d.mkdir()
+    for i in range(4):
+        fn = f"CASE0{i}+patch_{i}.png"
+        rgb_l = np.full((32, 32, 3), (50, 220, 50), dtype=np.uint8)
+        rgb_l[:16, :] = (220, 50, 50)
+        Image.fromarray(rgb_l).save(luad_img_d / fn)
+        m_l = np.full((32, 32), 3, dtype=np.uint8)
+        m_l[:16, :] = 0
+        _save_indexed_mask(m_l, luad_msk_d / fn)
+
+    arm_specs = [{"name": nm, "model": _TinyDualHeadStub()} for nm in GATE7_ARM_ORDER]
+    res = run_gate7_clinical_and_luad_benchmark(
+        arm_specs=arm_specs,
+        bcss_test_loader=DataLoader(_TinyBCSSDataset(bcss_items), batch_size=2, shuffle=False),
+        luad_test_loader=DataLoader(LUADBCSSAlignedDataset(luad_img_d, luad_msk_d, target_size=(32, 32)), batch_size=2, shuffle=False),
+        stage1_cls_ckpt=None,
+        author_stage1_ckpt=None,
+        author_stage2_ckpt=None,
+        output_dir=tmp_path / "e2e_v2",
+        zip_path=tmp_path / "e2e_v2.zip",
+        device=torch.device("cpu"),
+        amp_dtype=None,
+        selected_ttas=("raw_1x", "raw_1x", "raw_1x", "raw_1x"),
+        n_warmup=1,
+        n_iters=2,
+        n_repeats=2,
+        dpi=150,
+        stage1_model_override=_TinyStage1Stub(),
+        author_stage1_model_override=_TinyStage1Stub(),
+        author_model_override=_TinyDualHeadStub(),
+    )
+    assert "provenance" in res and "git_commit_sha" in res["provenance"]
+    assert "bcss_raw_1x_miou_pct" in res and "ens4_raw_1x" in res["bcss_raw_1x_miou_pct"] and "author_raw" in res["bcss_raw_1x_miou_pct"]
+    assert {"author_step0", "ens4_uncal_linear", "ens4_cal_logprob_eps1e3"}.issubset(set(res["bcss_pixel_calibration"].keys()))
+    cb = res["clinical_biomarkers"]
+    assert cb["guideline_attribution"] == plots_mod.GUIDELINE_ATTRIBUTION
+    assert "models_roi_bounded" in cb and "vtp_rcb" in cb["models"]["ens4_cgm"] and "hotspot_tsr" in cb["models"]["ens4_cgm"]
+    assert "lins_ccc" in cb["models"]["ens4_cgm"]["vtp"] and "lins_ccc" in cb["models"]["ens4_cgm"]["tsr"]
+    assert "raw_1x" in res["gpu_efficiency"] and "deployed_tta" in res["gpu_efficiency"]
+    assert "latency_ms_std" in res["gpu_efficiency"]["raw_1x"]["author_stage2"]
+    # Verify Primary 4-Arm (no-CGM) does NOT charge Stage-1 CGM overhead while Author Step-0 DOES
+    assert res["gpu_efficiency"]["deployed_tta"]["author_stage2"]["uses_stage1_cgm"] is True
+    assert res["gpu_efficiency"]["deployed_tta"]["primary_4arm_ensemble"]["uses_stage1_cgm"] is False
+    assert res["gpu_efficiency"]["deployed_tta"]["primary_4arm_ensemble"]["tta_mode"] == "4arm_tta_no_cgm"
+    luad = res["luad_cross_organ"]
+    for mk in (*GATE7_ARM_ORDER, "author_raw", "author_step0", "arm5_no_cgm", "arm5_cgm", "ens4_uncal_linear", "ens4_no_cgm", "ens4_cgm"):
+        assert mk in luad["models"], f"Missing LUAD model {mk}"
+    assert "arm5_no_cgm_2x_zoom" in luad["magnification_2x_zoom_ablation"] and "ens4_uncal_linear_2x_zoom" in luad["magnification_2x_zoom_ablation"]
+    assert "arm5_no_cgm_vs_author_step0" in luad["paired_patient_stats"] and "ens4_uncal_linear_vs_author_step0" in luad["paired_patient_stats"]
+    assert (tmp_path / "e2e_v2" / "luad_per_patient_metrics.json").is_file()
+    assert (tmp_path / "e2e_v2" / "luad_zero_shot_overlays.png").is_file()
+    with zipfile.ZipFile(tmp_path / "e2e_v2.zip", "r") as zf:
+        znames = set(zf.namelist())
+        assert "luad_per_patient_metrics.json" in znames and "luad_zero_shot_overlays.png" in znames
+
+    # 5. Verify author_step0 calibration applies CGM gate (zeroes out gated FP class) & LUAD 2x zoom keeps batch_size <= B
+    class _SpyBatchModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.max_bs = 0
+            self.p = nn.Parameter(torch.zeros(1))
+
+        def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+            self.max_bs = max(self.max_bs, int(x.shape[0]))
+            b, _, hh, ww = x.shape
+            lg = torch.zeros((b, 4, hh, ww), device=x.device, dtype=torch.float32)
+            lg[:, 3] = 2.0  # Strong false-positive NEC before CGM
+            lg[:, 0] = 1.0  # True TUM
+            return {"seg_logits": lg, "cls_logits": torch.tensor([[3.0, -3.0, -3.0, -3.0]], device=x.device).expand(b, 4)}
+
+    class _GateOffNecS1(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.p = nn.Parameter(torch.zeros(1))
+
+        def forward_cam(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            b = int(x.shape[0])
+            return torch.zeros((b, 4, 8, 8), device=x.device), torch.tensor([[0.95, 0.01, 0.01, 0.01]], device=x.device).expand(b, 4)
+
+    spy_arm = _SpyBatchModel()
+    gt_tum_items = [(np.full((32, 32, 3), 120, dtype=np.uint8), np.zeros((32, 32), dtype=np.uint8), f"TCGA-E2-A1LK_{i}.png") for i in range(4)]
+    stream_cal = bench_mod._stream_gate7_predictions(
+        arm_specs=[{"name": "arm5_dinov2_large_r2", "model": spy_arm}],
+        loader=DataLoader(_TinyBCSSDataset(gt_tum_items), batch_size=2, shuffle=False),
+        stage1_cls_ckpt=None,
+        author_stage1_ckpt=None,
+        author_stage2_ckpt=None,
+        device=torch.device("cpu"),
+        amp_dtype=None,
+        selected_ttas=("raw_1x",),
+        stage1_model_override=_GateOffNecS1(),
+        author_stage1_model_override=_GateOffNecS1(),
+        author_model_override=_SpyBatchModel(),
+        collect_raw_1x_and_cal=True,
+    )
+    # With NEC gated off by Stage-1, author_step0 predicts 100% TUM (NLL ~ 0) whereas author_raw predicts NEC (NLL > 1.0)
+    assert stream_cal["pixel_calibration"]["author_raw"]["nll"] > 1.0
+    assert stream_cal["pixel_calibration"]["author_step0"]["nll"] < 0.05
+
+    spy_zoom = _SpyBatchModel()
+    bench_mod._run_luad_2x_zoom_ablation(
+        [{"name": "arm5_dinov2_large_r2", "model": spy_zoom}],
+        DataLoader(LUADBCSSAlignedDataset(luad_img_d, luad_msk_d, target_size=(32, 32)), batch_size=2, shuffle=False),
+        np.zeros((4, 32, 32), dtype=np.uint8),
+        np.arange(4, dtype=np.int32),
+        4,
+        torch.device("cpu"),
+        None,
+    )
+    assert spy_zoom.max_bs == 2, f"Expected quadrant sequential batch_size=2 (no 4x batch explosion), got {spy_zoom.max_bs}"

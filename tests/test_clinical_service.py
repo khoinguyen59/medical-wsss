@@ -303,6 +303,51 @@ def test_tcga_brca_clinical_manifest_data_integrity():
         get_patient_survival_data("NON-EXISTENT-PATIENT")
 
 
+def test_live_nci_gdc_151_clinical_manifest_and_loader():
+    """Verifies immutable live NCI GDC 151-patient clinical manifest clears RF-2 completely."""
+    from src.clinical.survival_analysis import (
+        GDC_CLINICAL_MANIFEST_META,
+        GDC_CLINICAL_MANIFEST_PATH,
+        load_gdc_clinical_manifest,
+    )
+
+    assert GDC_CLINICAL_MANIFEST_PATH.is_file()
+    raw_txt = GDC_CLINICAL_MANIFEST_PATH.read_text(encoding="utf-8")
+    for bad in ("\u2013", "\u2014", "\u2012", "\u2015", "\u2212"):
+        assert bad not in raw_txt
+
+    payload = json.loads(raw_txt)
+    assert payload["num_patients"] == 151
+    assert len(payload["patients"]) == 151
+    assert payload["split_counts"] == {"train": 106, "val": 22, "test": 23}
+    assert "Data Release" in payload["gdc_release"]
+    assert payload["queried_utc"].endswith("Z")
+    assert GDC_CLINICAL_MANIFEST_META["num_patients"] == 151
+
+    # Exploratory n=45 (Val + Test) loader returns exact 45 disjoint patients with 0 missing stage/diagnosis
+    val_test = load_gdc_clinical_manifest(splits=("val", "test"))
+    assert len(val_test["patients"]) == 45
+    for pid, rec in val_test["patients"].items():
+        assert rec["split"] in ("val", "test")
+        assert rec["overall_survival_months"] > 0.0
+        assert rec["ajcc_pathologic_stage"] and rec["ajcc_pathologic_stage"] != "Not Reported", f"Missing stage for {pid}"
+        assert rec["histological_subtype"] and rec["histological_subtype"] != "Not Reported"
+
+    # Spot-check live NCI GDC ground-truth corrections against previously stale/fabricated values
+    e9 = TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA["TCGA-E9-A5FL"]
+    assert e9["overall_survival_days"] == 24 and e9["clinical_stage"] == "Stage IIB" and "Metaplastic" in e9["histological_subtype"]
+    ow = TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA["TCGA-EW-A1OW"]
+    assert ow["overall_survival_days"] == 694 and ow["clinical_stage"] == "Stage IIA"
+    p4 = TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA["TCGA-EW-A1P4"]
+    assert p4["overall_survival_days"] == 907 and p4["clinical_stage"] == "Stage IIA" and "Medullary" in p4["histological_subtype"]
+    c9 = TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA["TCGA-GI-A2C9"]
+    assert c9["overall_survival_days"] == 3342 and c9["clinical_stage"] == "Stage IIB"
+    lk = TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA["TCGA-E2-A1LK"]
+    assert lk["vital_status"] == 1 and lk["overall_survival_days"] == 266 and lk["clinical_stage"] == "Stage IIIC"
+    p8 = TCGA_BRCA_23_TEST_PATIENTS_CLINICAL_DATA["TCGA-EW-A1P8"]
+    assert p8["vital_status"] == 1 and p8["overall_survival_days"] == 239 and p8["clinical_stage"] == "Stage IIIC"
+
+
 # ==============================================================================
 # 5. Kaplan-Meier Survival Analysis Engine Tests
 # ==============================================================================

@@ -1050,3 +1050,77 @@ def test_r2_blend_config_and_notebook_wiring() -> None:
     assert "blend=cfg.r2_blend" in cell_src
     assert "[R2 TELEMETRY]" in cell_src
     assert "blend=0.5" not in cell_src
+
+
+def test_convnext_symmetric_pad_to_multiple_of_32_zero_shift_and_edge_cases(tmp_path: Path) -> None:
+    """Verify ConvNeXtFPNDualHead symmetric pad_to_multiple_of_32 eliminates spatial shift & keeps 224px exact."""
+    m = ConvNeXtFPNDualHead(backbone_id="convnext_base", num_classes=4, pretrained=False).eval()
+
+    # 1. Exact multiple of 32 (224x224) is an exact no-op
+    x224 = torch.randn(1, 3, 224, 224)
+    xp, pt, pl, oh, ow = m._pad_to_multiple_of_32(x224)
+    assert (pt, pl, oh, ow) == (0, 0, 224, 224) and xp.data_ptr() == x224.data_ptr()
+
+    # 2. Symmetric padding for 280 (1.25x), 168 (0.75x), odd 225x227, and tiny 8x8 (replicate fallback)
+    for (hh, ww), (exp_pt, exp_pl), exp_hw in (
+        ((280, 280), (4, 4), (288, 288)),
+        ((168, 168), (12, 12), (192, 192)),
+        ((225, 227), (15, 14), (256, 256)),
+        ((8, 8), (12, 12), (32, 32)),
+    ):
+        xi = torch.randn(1, 3, hh, ww)
+        xpi, pti, pli, ohi, owi = m._pad_to_multiple_of_32(xi)
+        assert (pti, pli, ohi, owi) == (exp_pt, exp_pl, hh, ww) and tuple(xpi.shape[-2:]) == exp_hw
+        with torch.no_grad():
+            out = m(xi)
+        assert out["seg_logits"].shape == (1, 4, hh, ww) and out["cls_logits"].shape == (1, 4)
+        assert torch.isfinite(out["seg_logits"]).all()
+
+    # 3. Verify symmetric spatial localization (zero directional bias on centered blob at 280px & 168px)
+    # Build symmetric input impulse (hflip == input and vflip == input); symmetric padding preserves exact symmetry
+    for hw in (168, 280):
+        grid = torch.zeros(1, 3, hw, hw)
+        c0, c1 = hw // 2 - 20, hw // 2 + 20
+        grid[:, 0, c0:c1, c0:c1] = 2.0
+        with torch.no_grad():
+            lg_orig = m(grid)["seg_logits"]
+            lg_h = torch.flip(m(torch.flip(grid, dims=[-1]))["seg_logits"], dims=[-1])
+            lg_v = torch.flip(m(torch.flip(grid, dims=[-2]))["seg_logits"], dims=[-2])
+        # Since input is flip-symmetric and padding is symmetric (pad_top==pad_bottom, pad_left==pad_right),
+        # spatial outputs remain centered (center-of-mass difference near 0, not shifted by 8-12px!)
+        diff_h = float((lg_orig - lg_h).abs().mean().item())
+        diff_v = float((lg_orig - lg_v).abs().mean().item())
+        assert diff_h < 0.25 and diff_v < 0.25
+
+    # 4. strict=True checkpoint roundtrip unchanged
+    ck_p = tmp_path / "cnx_pad32.pth"
+    torch.save({**m.model_metadata(), "state_dict": m.state_dict()}, ck_p)
+    reloaded, _ = load_stage2_v2_checkpoint(ck_p, device="cpu", strict=True)
+    with torch.no_grad():
+        assert torch.allclose(m(x224)["seg_logits"], reloaded(x224)["seg_logits"], atol=1e-6)
+
+
+def test_job_h_ablation_env_overrides_and_02b_local_bundle() -> None:
+    """Verify STAGE2_INTERNAL_SCALE, STAGE2_SAVE_BEST_RAW, and 02b LOCAL_BUNDLE support."""
+    cfg_h1 = resolve_stage2_v2_config_from_env(
+        environ={
+            "STAGE2_EXP_PRESET": "arm5_dinov2_large_r2",
+            "STAGE2_INTERNAL_SCALE": "1.0",
+            "STAGE2_SAVE_BEST_RAW": "1",
+            "STAGE2_MEMMAP_SOURCE": "stage1",
+        }
+    )
+    assert cfg_h1.internal_scale == pytest.approx(1.0)
+    assert cfg_h1.save_best_raw_checkpoint is True
+    assert cfg_h1.memmap_source == "stage1"
+    assert cfg_h1.ema_only_best_selection is True
+
+    with pytest.raises(ValueError, match="STAGE2_INTERNAL_SCALE"):
+        resolve_stage2_v2_config_from_env(
+            environ={"STAGE2_EXP_PRESET": "arm5_dinov2_large_r2", "STAGE2_INTERNAL_SCALE": "3.5"}
+        )
+
+    nb02b = json.loads(Path("notebooks/02b_Stage2_Breakthrough_G4.ipynb").read_text(encoding="utf-8"))
+    cell1 = "".join(nb02b["cells"][1]["source"])
+    assert 'LOCAL_BUNDLE = Path("/content/local_repo.bundle")' in cell1
+    assert "git" in cell1 and "clone" in cell1 and "LOCAL_BUNDLE" in cell1

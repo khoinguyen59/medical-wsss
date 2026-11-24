@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict
 
 import numpy as np
+import pytest
 import torch
 import torch.nn as nn
 from PIL import Image
@@ -927,3 +928,188 @@ def test_val_preregistration_matched_cgm_and_author_stats_e2e(tmp_path: Path, mo
     assert [e[0] for e in captured_plot_entries[0]] == [
         "Author Anchor", "ARM1", "ARM2", "ARM3", "ARM4", "Best CNN+ViT", "Equal 4-Arm", "Primary 4-Arm"
     ]
+
+
+def test_ensemble_v2_hvflip_tta_nec_1dof_cgm_multiseed_and_02c_local_bundle(tmp_path: Path) -> None:
+    """Verify 12-view ms_3_hvflip TTA parity, 1-DoF VAL NEC CGM [0.05,0.05,0.05,t_NEC], 3-seed variance & 02c local bundle."""
+    import nbformat
+
+    from src.stage2_v2.ensemble import (
+        NEC_FOCUSED_CGM_GRID,
+        TTA_VIEW_COUNTS,
+        _collect_all_tta_candidates_batch,
+        calibrate_nec_focused_1dof_cgm_cv,
+    )
+
+    # 1. Verify 12-view ms_3_hvflip exact parity between apply_tta_probs and _collect_all_tta_candidates_batch
+    assert TTA_VIEW_COUNTS["ms_3_hvflip"] == 12
+    assert NEC_FOCUSED_CGM_GRID[0] == 0.20 and NEC_FOCUSED_CGM_GRID[-1] == 0.75 and len(NEC_FOCUSED_CGM_GRID) == 12
+
+    m_asym = _TinyDummyArm("asym_hv", (0.3, -0.1, 0.2, -0.2)).eval()
+    x_probe = torch.randn(2, 3, 24, 24)
+    seg_hv, cls_hv = apply_tta_probs(m_asym, x_probe, "ms_3_hvflip", torch.device("cpu"), include_d4_cls=True)
+    seg_all, cls_all = _collect_all_tta_candidates_batch(
+        m_asym, x_probe, device=torch.device("cpu"), include_hvflip_tta=True
+    )
+    assert "ms_3_hvflip" in seg_all
+    assert torch.allclose(seg_hv, seg_all["ms_3_hvflip"], atol=1e-5)
+    assert torch.allclose(cls_hv["tta"], cls_all["ms_3_hvflip"], atol=1e-5)
+    assert torch.allclose(seg_hv.sum(dim=1), torch.ones((2, 24, 24)), atol=1e-5)
+
+    # 2. Verify 1-DoF NEC-focused CGM [0.05, 0.05, 0.05, t_NEC] clears NEC FP when gate_p[:, 3] ~ 0.35 on NEC-absent patches
+    n_p, h, w = 8, 8, 8
+    gt = np.zeros((n_p, h, w), dtype=np.uint8)
+    gt[:, :, 4:] = 1
+    gt[0:4, 4:, 4:] = 3  # First 4 patches have true NEC; last 4 patches are NEC-absent
+    probs = np.full((n_p, 4, h, w), 0.05, dtype=np.float32)
+    probs[:, 0, :, :4] = 0.80
+    probs[:, 1, :, 4:] = 0.40
+    probs[:, 3, 4:, 4:] = 0.55  # False-positive NEC on patches 4..7!
+    probs /= probs.sum(axis=1, keepdims=True)
+    ibm, ubm = _eval_bitmasks_on_probs(probs, gt)
+    gate_s1 = np.full((n_p, 4), 0.85, dtype=np.float32)
+    gate_s1[4:, 3] = 0.35  # NEC-absent patches have gate prob 0.35; NEC-present have 0.85
+    y_gt = np.stack([np.any(gt == c, axis=(1, 2)) for c in range(4)], axis=1).astype(np.float32)
+    nec_cal = calibrate_nec_focused_1dof_cgm_cv(
+        inter_bm=ibm,
+        union_bm=ubm,
+        patch_patient_idx=np.arange(n_p) % 4,
+        folds=[[0], [1], [2], [3]],
+        s1_cls_probs=gate_s1,
+        s2_cls_probs=[gate_s1 for _ in range(4)],
+        y_gt_patches=y_gt,
+        arm_weights=[0.25, 0.25, 0.25, 0.25],
+        strategy="balanced_s1_s2_40_60",
+    )
+    assert nec_cal["selected_thresholds"][:3] == [0.05, 0.05, 0.05]
+    assert 0.35 <= nec_cal["full_val_t_nec"] <= 0.75
+    assert nec_cal["oof_miou"] > nec_cal["no_cgm_val_miou"]
+
+    # 3. Verify run_stage2_v2_ensemble_eval with include_hvflip_tta=True, 1-DoF NEC diagnostic & 3-seed Arm-5 variance
+    v_im, v_mk, te_im, te_mk, v_pids, te_pids = _make_tiny_cohort(tmp_path / "bcss_ms", n_val=8, n_test=8)
+    val_ds_f = BCSSStage2ValDataset(v_im, v_mk, patient_ids=v_pids, strict_patient_filter=True)
+    test_ds_f = BCSSStage2ValDataset(te_im, te_mk, patient_ids=te_pids, strict_patient_filter=True)
+
+    class _Fast16MS(torch.utils.data.Dataset):
+        def __init__(self, files, clear_nec_patient: str = ""):
+            self.files = list(files)
+            self._cache = []
+            for p in self.files:
+                with Image.open(p) as im:
+                    arr = np.asarray(im.convert("RGB").resize((16, 16)), dtype=np.float32) / 255.0
+                mk = np.zeros((16, 16), dtype=np.int64)
+                mk[:8, 8:] = 1
+                mk[8:, :8] = 2
+                mk[8:, 8:] = 3
+                mk[:2, :2] = 4
+                if clear_nec_patient and p.name.startswith(clear_nec_patient):
+                    mk[mk == 3] = 1
+                self._cache.append((torch.from_numpy(arr.transpose(2, 0, 1)), torch.from_numpy(mk)))
+
+        def __len__(self) -> int:
+            return len(self.files)
+
+        def __getitem__(self, idx: int):
+            return self._cache[idx]
+
+    val_loader = DataLoader(_Fast16MS(val_ds_f.files), batch_size=8, shuffle=False, num_workers=0)
+    test_loader = DataLoader(_Fast16MS(test_ds_f.files, clear_nec_patient="TCGA-CC-0004"), batch_size=8, shuffle=False, num_workers=0)
+
+    arm_specs = [
+        {"name": "arm8_deeplab_r101_r2", "family": "cnn", "model": _TinyDummyArm("a8", (0.2, 0.0, 0.0, 0.0))},
+        {"name": "arm6_segformer_b5_r2", "family": "vit", "model": _TinyDummyArm("a6", (0.0, 0.2, 0.0, 0.0))},
+        {"name": "arm7_convnext_large_r2", "family": "cnn", "model": _TinyDummyArm("a7", (0.0, 0.0, 0.2, 0.0))},
+        {"name": "arm5_dinov2_large_r2", "family": "vit", "model": _TinyDummyArm("a5_s42", (0.0, 0.0, 0.0, 0.2))},
+    ]
+    seed_variants = [
+        {"label": "arm5_s42", "model": _TinyDummyArm("a5_s42", (0.0, 0.0, 0.0, 0.2))},
+        {"label": "arm5_s123", "model": _TinyDummyArm("a5_s123", (0.05, 0.0, 0.0, 0.15))},
+        {"label": "arm5_s456", "model": _TinyDummyArm("a5_s456", (0.0, 0.05, 0.0, 0.15))},
+    ]
+    rep = run_stage2_v2_ensemble_eval(
+        arm_specs=arm_specs,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        stage1_cls_model=_TinyDummyStage1Cls(),
+        output_dir=tmp_path / "ms_out",
+        zip_path=tmp_path / "ms_out.zip",
+        work_dir=tmp_path / "ms_work",
+        device=torch.device("cpu"),
+        n_bootstrap=100,
+        n_perm=100,
+        seed=42,
+        include_hvflip_tta=True,
+        arm5_multi_seed_ckpts=seed_variants,
+    )
+    assert "provenance" in rep and "git_commit_sha" in rep["provenance"]
+    assert "ms_3_hvflip" in rep["val_tta_selection"]["arm7_convnext_large_r2"]["candidates"]
+    assert "val_nec_focused_1dof_cgm" in rep
+    assert "cgm_nec_focused_1dof" in rep["test_equal_4arm"] and "cgm_nec_focused_1dof" in rep["test_simplex_cv_4arm"]
+    nec_diag = rep["test_nec_focused_1dof_diagnostic"]
+    assert nec_diag["n_gt_nec_absent_patients"] == 1
+    assert nec_diag["thresholds"][:3] == [0.05, 0.05, 0.05]
+    assert "n_cleared_to_zero_px_cgm_val_cal" in nec_diag
+    mc2 = nec_diag["multiclass_k_ge_2"]
+    assert mc2["n_patches"] == 8 and "primary_4arm_cgm_nec_focused_1dof" in mc2 and "best_single_matched" in mc2
+    ms_var = rep["test_multi_seed_4arm_variance"]
+    assert ms_var is not None and ms_var["n_seeds"] == 3 and len(ms_var["seeds"]) == 3
+    assert "mean" in ms_var["summary"]["primary_4arm_no_cgm"] and "std" in ms_var["summary"]["primary_4arm_no_cgm"]
+
+    # 3b. Verify disk-checkpoint multi-seed loading preserves distinct parent seed labels & enforces Track A quarantine
+    from src.stage2_v2.models import DeepLabV3PlusDualHead
+
+    disk_m = DeepLabV3PlusDualHead(num_classes=4, pretrained=False, track="track_a_clean", tcga_pretrained=False).eval()
+    p_s42 = tmp_path / "se374_g7_arm5_dinov2l_s42" / "stage2_retrained_best.pth"
+    p_s123 = tmp_path / "se374_g7_arm5_dinov2l_s123" / "stage2_retrained_best.pth"
+    p_tb = tmp_path / "arm5_sneaky_trackb.pth"
+    for p_d in (p_s42, p_s123):
+        p_d.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({**disk_m.model_metadata(), "state_dict": disk_m.state_dict()}, p_d)
+    torch.save(
+        {**disk_m.model_metadata(), "track": "track_b_tcga_ssl", "tcga_pretrained": True, "backbone_id": "owkin/phikon-v2", "state_dict": disk_m.state_dict()},
+        p_tb,
+    )
+    rep_disk = run_stage2_v2_ensemble_eval(
+        arm_specs=arm_specs,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        stage1_cls_model=_TinyDummyStage1Cls(),
+        output_dir=tmp_path / "ms_disk_out",
+        zip_path=tmp_path / "ms_disk_out.zip",
+        work_dir=tmp_path / "ms_disk_work",
+        device=torch.device("cpu"),
+        n_bootstrap=50,
+        n_perm=50,
+        seed=42,
+        arm5_multi_seed_ckpts=[p_s42, p_s123],
+    )
+    seed_labels = [row["seed_label"] for row in rep_disk["test_multi_seed_4arm_variance"]["seeds"]]
+    assert seed_labels == ["se374_g7_arm5_dinov2l_s42", "se374_g7_arm5_dinov2l_s123"]
+    assert all(len(row["ckpt_sha256"]) == 64 for row in rep_disk["test_multi_seed_4arm_variance"]["seeds"])
+
+    with pytest.raises((RuntimeError, ValueError), match="TRACK A QUARANTINE"):
+        run_stage2_v2_ensemble_eval(
+            arm_specs=arm_specs,
+            val_loader=val_loader,
+            test_loader=test_loader,
+            stage1_cls_model=_TinyDummyStage1Cls(),
+            output_dir=tmp_path / "ms_tb_out",
+            zip_path=tmp_path / "ms_tb_out.zip",
+            work_dir=tmp_path / "ms_tb_work",
+            device=torch.device("cpu"),
+            n_bootstrap=20,
+            n_perm=20,
+            seed=42,
+            track="track_a_clean",
+            arm5_multi_seed_ckpts=[p_tb],
+        )
+
+    # 4. Verify 02c notebook nbformat 4.5, LOCAL_BUNDLE, new env vars & zero drive.mount
+    nb02c_raw = (PROJECT_ROOT / "notebooks" / "02c_Stage2_Ensemble_Eval_G4.ipynb").read_text(encoding="utf-8")
+    for tok in ("/content/local_repo.bundle", "EVAL_ARM5_MULTI_SEED_CKPTS", "STAGE2_INCLUDE_HVFLIP_TTA", "nec_focused_1dof"):
+        assert tok in nb02c_raw
+    for forb in ("drive.mount", "/content/drive"):
+        assert forb not in nb02c_raw
+    nb_obj = nbformat.reads(nb02c_raw, as_version=4)
+    nbformat.validate(nb_obj)
+    assert nb_obj["nbformat"] == 4 and nb_obj["nbformat_minor"] == 5
