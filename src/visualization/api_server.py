@@ -163,18 +163,18 @@ GATE7_ARM_FULL_NAMES: Dict[str, str] = {
     "arm8": "arm8_deeplab_r101_r2",
 }
 GATE7_ARM_TTAS: Dict[str, str] = {
-    "arm8": "ms_3_hflip",
-    "arm6": "d4_8view_1x",
-    "arm7": "ms_3_hflip",
-    "arm5": "ms_3_hflip",
+    "arm8": "ms_3_hvflip",
+    "arm6": "ms_3_hvflip",
+    "arm7": "ms_3_hvflip",
+    "arm5": "ms_3_hvflip",
 }
 GATE7_FULL_VAL_BETAS: Dict[str, float] = {
-    "arm8": 0.869,
-    "arm6": 0.6163,
-    "arm7": 0.6754,
-    "arm5": 0.6368,
+    "arm8": 0.8782,
+    "arm6": 0.7029,
+    "arm7": 0.6747,
+    "arm5": 0.6386,
 }
-GATE7_ARM5_SELF_CGM_THRESHOLDS: Tuple[float, float, float, float] = (0.50, 0.60, 0.05, 0.65)
+GATE7_ARM5_SELF_CGM_THRESHOLDS: Tuple[float, float, float, float] = (0.10, 0.10, 0.10, 0.10)
 GATE7_4ARM_CGM_THRESHOLDS: Tuple[float, float, float, float] = (0.10, 0.10, 0.10, 0.10)
 IMAGENET_MEAN_T = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1)
 IMAGENET_STD_T = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1)
@@ -516,7 +516,7 @@ class ClinicalWorkstationInferenceManager:
         elif method_key == "gate7_arm5_tta":
             model = self._get_gate7_model("arm5")
             with self._lock:
-                probs_t, cls_dict = apply_tta_probs(model, img_imnet, "ms_3_hflip", DEVICE)
+                probs_t, cls_dict = apply_tta_probs(model, img_imnet, "ms_3_hvflip", DEVICE)
             probs_np = probs_t.squeeze(0).detach().cpu().numpy().astype(np.float32)
             cls_p = cls_dict["tta"].detach().cpu().numpy()
             probs_np, pred_raw = _apply_cgm_to_probs_np(

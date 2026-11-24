@@ -85,15 +85,15 @@ GATE7_ARM_ORDER: Tuple[str, ...] = (
     "arm5_dinov2_large_r2",
 )
 GATE7_SELECTED_TTAS: Tuple[str, ...] = (
-    "ms_3_hflip",
-    "d4_8view_1x",
-    "ms_3_hflip",
-    "ms_3_hflip",
+    "ms_3_hvflip",
+    "ms_3_hvflip",
+    "ms_3_hvflip",
+    "ms_3_hvflip",
 )
-GATE7_FULL_VAL_BETAS: Tuple[float, ...] = (0.869, 0.6163, 0.6754, 0.6368)
+GATE7_FULL_VAL_BETAS: Tuple[float, ...] = (0.8782, 0.7029, 0.6747, 0.6386)
 GATE7_UNIFORM_WEIGHTS: Tuple[float, ...] = (0.25, 0.25, 0.25, 0.25)
-GATE7_SIMPLEX_WEIGHTS: Tuple[float, ...] = (0.28, 0.08, 0.05, 0.59)
-GATE7_ARM5_SELF_CGM_THRESHOLDS: Tuple[float, ...] = (0.50, 0.60, 0.05, 0.65)
+GATE7_SIMPLEX_WEIGHTS: Tuple[float, ...] = (0.28, 0.06, 0.05, 0.61)
+GATE7_ARM5_SELF_CGM_THRESHOLDS: Tuple[float, ...] = (0.10, 0.10, 0.10, 0.10)
 GATE7_4ARM_CGM_THRESHOLDS: Tuple[float, ...] = (0.10, 0.10, 0.10, 0.10)
 
 GATE7_SELECTED_TTAS_BY_ARM: Dict[str, str] = dict(zip(GATE7_ARM_ORDER, GATE7_SELECTED_TTAS))
@@ -110,9 +110,9 @@ GATE7_ARM_SHA256: Dict[str, str] = {
 
 GATE7_EXPECTED_TEST_MIOU: Dict[str, float] = {
     "author_step0": 0.7043,
-    "arm5_cgm": 0.7280,
-    "ens4_no_cgm": 0.7280,
-    "ens4_cgm": 0.7281,
+    "arm5_cgm": 0.7263,
+    "ens4_no_cgm": 0.7279,
+    "ens4_cgm": 0.7280,
 }
 
 # Raw indexed palette header stored inside canonical BCSS-WSSS mask PNGs (indices 0..4)
