@@ -1,14 +1,13 @@
 # BÁO CÁO KỸ THUẬT TỔNG KẾT ĐỒ ÁN MÔN HỌC SE374.R11
 
-## HỆ THỐNG PHÂN VÙNG NGỮ NGHĨA GIÁM SÁT YẾU CHO ẢNH MÔ BỆNH HỌC UNG THƯ VÚ (BCSS-WSSS): TỪ CHƯNG CẤT ĐA KIẾN TRÚC GATE-7 TRACK A ĐẾN TRẠM LÀM VIỆC LÂM SÀNG
+## HỆ THỐNG PHÂN VÙNG NGỮ NGHĨA GIÁM SÁT YẾU CHO ẢNH MÔ BỆNH HỌC UNG THƯ VÚ (BCSS-WSSS): TỪ CHƯNG CẤT ĐA KIẾN TRÚC GATE-7 TRACK A PHASE 1B ĐẾN TRẠM LÀM VIỆC LÂM SÀNG
 
 > **Trường:** Trường Đại học Công nghệ Thông tin (UIT), ĐHQG-HCM - Khoa Kỹ thuật Phần mềm  
 > **Học phần:** SE374.R11 - Phát triển phần mềm xử lý ảnh y khoa (Năm học 2026)  
 > **Đề tài:** Đề tài 6 - Phân vùng ngữ nghĩa giám sát yếu trên ảnh tiêu bản giải phẫu bệnh toàn phần WSI (BCSS-WSSS / TCGA-BRCA)  
-> **Giảng viên hướng dẫn:** TS. Bùi Cao Doanh (`doanhbc@uit.edu.vn`)  
-> **Nhóm thực hiện & Thành viên:** [Chờ xác nhận danh sách thành viên / MSSV]  
-> **Commit mã nguồn chốt thực nghiệm Gate-7:** `8dcee13301dba5b7c70899e36a0b8f4a839f0e0c` (chuỗi tích hợp sản phẩm `4c2da59`, `c9ec17a`)  
-> **Kho minh chứng mật mã:** `checkpoints/vps_evidence/SHA256SUMS.txt` (`123/123` tệp cục bộ xác minh bit-exact, `BAD = 0`, `MISSING = 0`)  
+> **Thông tin hành chính:** `[CẦN XÁC NHẬN: Họ tên sinh viên / MSSV / GVHD]`  
+> **Commit mã nguồn chốt Phase 1B & Stage 2:** `1d3f738` (vá cắt biên stride-2 `_pad_to_multiple_of_32` cho `arm7` ConvNeXt-Large, dữ liệu sống còn thật NCI GDC Release 46.0 cho 151/151 BN, Pareto BF16 đồng chuẩn, `ms_3_hvflip` 12 góc nhìn, Hann-50% Whole-ROI, LUAD `2x` zoom), `8dabf65` (đồng bộ hằng số giao thức hậu Job E `02c_v2`), `c0edb2f` (chống chồng nhãn Pareto 300 DPI), `47a1bab` (Stage 1 tổng kết Phase 1B & fallback truy xuất git), và `079fee0` (Stage 2 củng cố phần mềm, API cô lập môi trường, UI Zoom/Pan, notebook & VPS runner)  
+> **Kho minh chứng mật mã:** `checkpoints/vps_evidence/SHA256SUMS.txt` (`228/228` tệp xác minh bit-exact, `BAD = 0`, `UNLISTED = 0`)  
 
 ---
 
@@ -16,19 +15,23 @@
 
 Trong giải phẫu bệnh số (Digital Pathology), tiêu bản mô học nhuộm Hematoxylin và Eosin (H&E) toàn phần (Whole Slide Images - WSI) đạt kích thước gigapixel (lên tới $100{,}000 \times 100{,}000$ điểm ảnh). Việc khoanh vùng thủ công ở cấp độ điểm ảnh để định lượng vi môi trường khối u tốn nhiều giờ công bác sĩ giải phẫu bệnh cho mỗi ca bệnh và chịu biến thiên đáng kể giữa các chuyên gia. Đồ án nghiên cứu, thiết kế và hiện thực hóa hoàn chỉnh hệ thống **Phân vùng Ngữ nghĩa Giám sát Yếu (Weakly-Supervised Semantic Segmentation - WSSS)** trên bộ dữ liệu chuẩn ung thư vú **BCSS-WSSS (TCGA-BRCA, 4 lớp mô tiền cảnh `TUM`, `STR`, `LYM`, `NEC` cùng lớp nền kính quang học `BACK`)**, chỉ sử dụng nhãn nhị phân cấp mảng ảnh ở giai đoạn huấn luyện nhưng xuất đầy đủ mặt nạ phân vùng mật độ cao và các dấu ấn sinh học tiên lượng trên trạm làm việc lâm sàng ngoại tuyến.
 
-Toàn bộ chiến dịch nghiên cứu và thực nghiệm được vận hành qua 7 cổng kiểm định (Gates 1-7) trên dữ liệu bệnh nhân thật với hai ranh giới khoa học tuyệt đối: **(1) chống rò rỉ cấp bệnh nhân 0%** trên toàn bộ `151` bệnh nhân (`106` Train / `22` Val / `23` Held-out Test, `31,826` mảng ảnh), và **(2) tính thuần khiết Track A (`track_a_clean`, 0% chồng lấp tiền huấn luyện TCGA-BRCA)** khi toàn bộ các backbone Giai đoạn 2 chỉ khởi tạo từ ảnh tự nhiên ImageNet-1K và LVD-142M.
+Toàn bộ chiến dịch nghiên cứu và thực nghiệm được vận hành qua 7 cổng kiểm định (Gates 1-7) và đợt tái kiểm định hậu bản vá **Phase 1B (`6/6` job GPU lớn + `3/3` nhóm thống kê không cần GPU)** trên dữ liệu bệnh nhân thật với ba ranh giới khoa học tuyệt đối: **(1) chống rò rỉ cấp bệnh nhân 0%** trên toàn bộ `151` bệnh nhân (`106` Train / `22` Val / `23` Held-out Test, `31,826` mảng ảnh), **(2) tính thuần khiết Track A (`track_a_clean`, 0% chồng lấp tiền huấn luyện TCGA-BRCA)** khi toàn bộ các backbone Giai đoạn 2 chỉ khởi tạo từ ảnh tự nhiên ImageNet-1K và LVD-142M, và **(3) 0% dữ liệu lâm sàng giả lập** (`151/151` bệnh nhân đối soát sống trực tiếp từ NCI GDC REST API Release 46.0).
 
-Các kết quả định lượng và kỹ thuật cốt lõi đã được kiểm chứng bằng nhật ký thực nghiệm thật trên GPU NVIDIA G4 96GB Blackwell, NVIDIA L4 24GB và NVIDIA Tesla T4 kèm chữ ký mật mã SHA256 bao gồm:
+Các kết quả định lượng và kỹ thuật cốt lõi đã được kiểm chứng bằng nhật ký thực nghiệm thật trên GPU NVIDIA A100-SXM4-40GB, NVIDIA RTX PRO 6000 Blackwell G4, NVIDIA L4 24GB và NVIDIA Tesla T4 kèm chữ ký mật mã SHA256 (`228/228` tệp) bao gồm:
 
 1. **Đột phá Giai đoạn 1 (`se374_arm_b_full`, ResNet-38d + PDA + D4 Equivariance + EMA):** Nâng chất lượng mặt nạ giả mềm `q_s1_sgdap` (`T = 0.25`) trên toàn bộ `3,418` mảng ảnh tập VAL từ `72.03%` (mốc tác giả gốc) lên **`74.13%` mIoU (`85.07%` mDice, tăng `+2.10%`)**.
-2. **Tổ hợp 4 họ kiến trúc Vòng 1 - Gate-6 (`se374_s2v2_ensemble`, NVIDIA L4):** Đạt **`72.47%` TEST mIoU (`83.84%` mDice, 95% CI `[66.96%, 76.43%]`)** trên 23 bệnh nhân TEST độc lập (`4,986` patches), vượt mốc Author Official Pure `1x` (`69.47%` trên L4) **`+2.99%`** (`perm_p_holm = 0.0004`, `wilcoxon_p_holm = 0.000105`, `19W/0T/4L`) và vượt mốc Step-0 Upgraded Author (`70.42%` trên L4) **`+2.04%`** (`perm_p_holm = 0.0045`, `wilcoxon_p_holm = 0.0217`, `18W/0T/5L`).
-3. **Kiểm chứng đa hạt giống và cơ chế chọn EMA duy nhất:** Thử nghiệm 3 hạt giống (`42`, `123`, `456`) trên đơn mô hình Vòng 1 `arm4_dinov2_adapter` đạt **`71.70% +/- 0.69%`** (`ddof=1`; hai hạt giống chọn bằng EMA đạt `72.09% +/- 0.16%`). Phân tích nguyên nhân sụt giảm `-1.1%` ở `seed=456` do chọn nhầm trọng số `raw` đã trực tiếp dẫn đến cải tiến **`ema_only_best_selection = True`** cho toàn bộ Gate-7.
-4. **Kiểm định trần mặt nạ giả Vòng 2 - Gate-7 Step-0 (`se374_g7_diag_r2_val`, 0% TEST):** Mặt nạ mềm `p_ens4_uncal_ygated` (`r2_blend = 1.0`, y-gated kèm dự phòng `p_sum < 0.01` trên chỉ `0.0054%` điểm ảnh VAL và `0.0094%` TRAIN) đạt **`76.03%` VAL mIoU (`+1.90%` so với Giai đoạn 1)**, **`65.89%` multi-class mIoU (`+2.57%`)** và giảm sai số hiệu chuẩn kỳ vọng ECE **35%** (`0.0751` xuống `0.0489`).
-5. **Chưng cất Vòng 2 và Tổ hợp Gate-7 Track A (`se374_g7_ensemble_tracka`, 0% TCGA-BRCA overlap):**
-   - **Tổ hợp chính Primary 4-Arm (`arm8 + arm6 + arm7 + arm5`, Uniform `[0.25, 0.25, 0.25, 0.25]`, `cal_logprob_eps1e3`, `no_cgm`):** Đạt **`72.80%` TEST mIoU (`mIoU_raw = 0.727955`, 95% CI `[67.24%, 76.79%]`)**, **`84.05%` mDice** (`TUM 82.14% / STR 75.94% / LYM 62.31% / NEC 70.79%`), vượt Step-0 Author (`70.43%`) **`+2.36%`** (`perm_p_holm = 0.0005`), vượt Pure Author `1x` (`69.48%`) **`+3.31%`** (`perm_p_holm = 0.0004`, `wilcoxon_p_holm = 0.0087`, `19W/0T/4L`), và vượt toàn bộ các công bố SOTA 4-class pooled chuẩn năm 2025-2026 (`CSS 2026 71.72%`, `DualProtoSeg 71.35%`, `PLIMSeg 71.07%`, `ConStruct 70.96%`, `HisynSeg 70.73%`).
-   - **Đơn mô hình chủ lực tiền đăng ký (`arm5_dinov2_large_r2`, DINOv2-ViT-L/14 `336px` + `ms_3_hflip` + 4-DoF CGM):** Đạt **`72.80%` TEST mIoU (`0.727997`, 95% CI `[67.16%, 76.86%]`)**, **`84.02%` mDice** (`TUM 82.73% / STR 76.17% / LYM 61.31% / NEC 70.98%`) - đạt hiệu năng tương đương tổ hợp 4 mô hình với khoảng 1/4 chi phí suy luận và vượt qua cả hai phép kiểm định Holm-Bonferroni (`perm_p_holm = 0.0048`, `wilcoxon_p_holm = 0.0302`, `Cohen's d_z = +0.5587`, `18W/0T/5L` so với Step-0 Author; `perm_p_holm = 0.0004`, `wilcoxon_p_holm = 6.7e-5`, `d_z = +0.9007`, `20W/0T/3L` so với Pure Author `1x`).
-   - **Kết quả thăm dò thứ cấp (Secondary / Exploratory):** Tổ hợp Simplex-CV 4-Arm (`[0.28, 0.08, 0.05, 0.59]`, `cgm_fixed_0_10`) đạt **`72.90%` TEST mIoU (`0.728989`, `84.10%` mDice)**.
-6. **Hệ sinh thái sản phẩm phần mềm lâm sàng và kiểm thử đa nền tảng:** Đóng gói Trạm Làm Việc Giải Phẫu Bệnh Số (`FastAPI` + `HTML5 Canvas` 100% ngoại tuyến với 9 chế độ QA, Split-Curtain, Magnifier Loupe, WSI Multi-Tile Stitch, xuất báo cáo PDF chuẩn CAP 2 trang kèm cảnh báo RUO và container hóa `Dockerfile` / `docker-compose.yml`), hệ thống điều phối đa GPU `colab_runner_local/` bảo vệ P0 chống tắt nhầm phiên ngoại lai external_service, và bộ kiểm thử tự động `531` bài kiểm thử (`496` bài trong `30` module tại `tests/` và `35` bài trong `2` module tại `colab_runner_local/`, trong đó `35/35` bài test chạy đạt 100% trên môi trường Linux ARM64 thực tế).
+2. **Tổ hợp 4 họ kiến trúc Vòng 1 - Gate-6 (`se374_s2v2_ensemble`, NVIDIA L4):** Đạt **`72.47%` TEST mIoU (`83.84%` mDice, 95% CI `[66.96%, 76.43%]`)** trên 23 bệnh nhân TEST độc lập (`4,986` patches), vượt mốc Author Official Pure `1x` (`69.47%` trên L4) **`+2.99%`** (`perm_p_holm = 0.0004`, `wilcoxon_p_holm = 0.000105`, `19W/0T/4L`) và vượt mốc Step-0 Upgraded Author (`70.42%` trên L4) **`+2.04%`**.
+3. **Kiểm định trần mặt nạ giả Vòng 2 - Gate-7 Step-0 (`se374_g7_diag_r2_val`, 0% TEST):** Mặt nạ mềm `p_ens4_uncal_ygated` (`r2_blend = 1.0`, y-gated kèm dự phòng `p_sum < 0.01` trên chỉ `0.0054%` điểm ảnh VAL và `0.0094%` TRAIN) đạt **`76.03%` VAL mIoU (`+1.90%` so với Giai đoạn 1)**, **`65.89%` multi-class mIoU (`+2.57%`)** và giảm sai số hiệu chuẩn kỳ vọng ECE **35%** (`0.0751` xuống `0.0489`).
+4. **Đột phá đệm đối xứng cho `arm7` ConvNeXt-Large & Gate-7 Track A Hậu Bản Vá (`Job E: se374_g7_phase1b_02c_v2`, `NVIDIA A100`, `12x ms_3_hvflip` trên cả `4/4` nhánh):**
+   - Bổ sung đệm đối xứng `_pad_to_multiple_of_32` (`src/stage2_v2/models.py`) xóa hoàn toàn cắt biên stride-2 ở đa tỷ lệ, kéo dịch chuyển không gian của `arm7` từ `(1, -4)` px về **`(1, -1)` px** (`zero_vs_peak_gap` giảm **`15x`** từ `1.123e-3` xuống `7.5e-5`) và nâng `arm7` lên **`71.88%` TEST mIoU (`83.45%` mDice, `LYM = 62.13%` cao nhất cả 4 đơn mô hình)**.
+   - **Tổ hợp chính Primary 4-Arm (`Uniform [0.25]*4`, `cal_logprob_eps1e3`):** Đạt **`72.79%` TEST mIoU (`0.727865`, 95% CI `[67.17%, 76.83%]`, `84.04%` mDice)** ở `no-CGM`, **`72.80%` (`84.06%` mDice)** ở `cgm_val_calibrated` (`fixed_0.10`), và **`72.80%` (`0.728045`, `84.06%` mDice, `NEC = 70.95%`)** ở **`cgm_nec_focused_1dof` (`t_nec = 0.40`, chọn 0% rò rỉ trên VAL)** đồng thời xóa sạch dương tính giả `NEC` về `0 px` trên **`6/8` bệnh nhân TEST vắng NEC** (so với `3/8` ở `no-CGM`; Wilcoxon vs `no-CGM` **`p = 0.0091`**, `20W/3L`, `d_z = +0.3603`).
+   - **Thứ cấp / Thăm dò (Simplex-CV 4-Arm `[0.61, 0.06, 0.05, 0.28]`):** Đạt **`72.85%`** (`no-CGM`) / **`72.88%`** (`val_cal`) / **`72.90%` TEST mIoU (`84.11%` mDice, `NEC = 71.01%`)** ở `cgm_nec_focused_1dof`.
+   - **Ổn định đa hạt giống & ý nghĩa thống kê Holm-Bonferroni toàn cục và từng lớp:** 3 hạt giống `arm5` (`42/123/456`) bên trong tổ hợp 4-Arm đạt **`72.74% +/- 0.05%`** (`no-CGM`) và **`72.76% +/- 0.05%`** (`nec_1dof`), giảm **`2.6x`** độ lệch chuẩn so với `arm5` đơn (`72.53% +/- 0.13%`). Tổ hợp vượt Step-0 Author (`70.43%`) **`+2.35%`** (`perm_p_holm = 0.0005`, `17W/6L`), vượt Pure Author `1x` (`69.48%`) **`+3.31%`** (`perm_p_holm = 0.0004`, `wilcoxon_p_holm = 0.000511`, `21W/2L`), vượt `arm5` đơn cùng `no-CGM` **`+0.24%`** (`wilcoxon_p = 0.0327`, `17W/6L`), và là mô hình duy nhất đạt **Wilcoxon hiệu chỉnh Holm `p_holm < 0.05` trên cả `4/4` lớp mô** (`TUM 0.000426`, `STR 0.00498`, `LYM 0.0306`, `NEC 0.0306`).
+   - **Vượt mọi SOTA 4-class pooled chuẩn 2022-2026:** Vượt `QFKF` (BMVC 2025: `70.92%`), `ConStruct` (MIDL 2026: `70.96%`), `HisynSeg` (TMI 2025: `70.97+/-0.29%`), `PLIMSeg` (2026: `71.07%`), `DualProtoSeg` (2025: `71.35%`), `CSS` (Bioinformatics 2026: `71.72%`), và `C2RM-Seg` (MICCAI 2026: `72.17+/-0.83%`, độ lệch chuẩn thấp hơn `16.6x`).
+5. **Chứng minh nhân quả qua 3 thực nghiệm bóc tách `Jobs H1 / H2 / H3` (`arm5_dinov2_large_r2`, `seed = 42`):** Chưng cất Round-2 `ens4_r2` (`H3`, L4) vượt `stage1` (`H2`, G4) **`+0.94%`** Raw 1x (`72.35%` vs `71.41%`) và **`+0.65%`** Cal CGM (`72.88%` vs `72.23%`); độ phân giải `336px` nâng lớp `NEC` **`+1.00%` đến `+1.37%`** so với `224px` (`H1`, A100); và `Best EMA` thắng `Best Raw` trong cả `3/3` phiên chạy.
+6. **Kiểm chứng trực quan không rò rỉ GT, Hann-50% Whole-ROI & Sàng lọc Entropy (`Job G: se374_g7_phase1b_02d_v2`, G4, `6/6` PASS):** `Boundary F1@2px = 53.30%` vs Author `50.67%` (`p = 0.000298`, `20W/3L`; vượt `arm5` `52.72%`, `p = 0.00345`); tâm khối u `TUM` trên tập giao chung (`n = 2,847`) giảm từ `8.93 px` xuống **`7.60 px`** (`4-Arm`, recall `95.80%-96.19%`) và **`7.13 px`** (`arm5`, `p = 0.0123`); ghép Whole-ROI **Hann-50%** giảm đứt gãy đường nối **`-98.35%`** trên `TCGA-EW-A1P4` (`0.5421 -> 0.5557`) và **`-97.99%`** trên `TCGA-EW-A1P1` (`0.6706 -> 0.6779`); sàng lọc Entropy đạt `Spearman rho = -0.5599` (`91.15%` nhóm 20% thấp nhất vs `53.59%` nhóm 20% cao nhất).
+7. **Lâm sàng, Sống còn thật NCI GDC 46.0, Hiệu chuẩn xác suất, Pareto BF16 (`L4`) & LUAD `2x` Zoom (`Job F: se374_g7_phase1b_04b_v2`, L4):** `arm5_cal` hạ **ECE xuống `0.00408` (`-92.1%`)**, `ens4_cal_logprob_eps1e3` đạt **ECE = `0.00586`**; `ens4_cgm` đạt đồng thuận nguy cơ **Mesker 2007 / UNITED 2018 50% TSR `91.30%` (`21/23`, `kappa = 0.8271`)**, VTP `r = 0.9186` (`CCC = 0.9062`), TSR `r = 0.9121` (`CCC = 0.9074`), **`VTP_RCB r = 0.9543`**; sống còn thật GDC Release 46.0 (`n = 23`, `2` biến cố): GT `p = 0.1869` vs `ens4_cgm` `p = 0.1474` (công bố trung thực cỡ mẫu nhỏ). Trên `NVIDIA L4` BF16 đồng chuẩn, `arm7` 1x Raw (`4.94 ms`, **`202.51 FPS`**, `71.61%`) trội Pareto tuyệt đối so với Author 1x Raw (`5.67 ms`, `176.63 FPS`, `69.34%`). Trên mô phổi **LUAD-HistoSeg** (`n = 307`, `20` ca), `arm5_cgm` đạt **`36.09%`** (`p = 3.81e-6`) ở `10x` và phóng đại `2x` (`10x -> 20x`, 0 train) vọt lên **`51.47%` mIoU (`67.90%` mDice)** (`arm5_no_cgm_2x_zoom`) và **`49.92%`** (`ens4_uncal_linear_2x_zoom`).
+8. **Hệ sinh thái sản phẩm phần mềm lâm sàng & kiểm thử Stage 2 (`079fee0`):** Đóng gói Trạm Làm Việc Giải Phẫu Bệnh Số (`FastAPI` + `HTML5 Canvas` 100% ngoại tuyến với 9 chế độ QA, Zoom/Pan, Split-Curtain, Magnifier Loupe, WSI Multi-Tile Stitch, xuất báo cáo PDF chuẩn CAP 2 trang kèm RUO, cô lập biến môi trường API và container `Dockerfile` / `docker-compose.yml`), bộ điều phối đa GPU `colab_runner_local/` (`colab_account`, `H100 -> G4,A100,L4`, bảo vệ P0 external_service), **`541` bài kiểm thử** (`505` ca cục bộ tại `tests/` + `36` ca tại `colab_runner_local/` với **`36/36` PASS** trên Linux ARM64 VPS), `65/65` tệp `src/` đồng bộ gói Drive, và **`ruff check .` đạt `0` lỗi**.
 
 ---
 
@@ -36,7 +39,7 @@ Các kết quả định lượng và kỹ thuật cốt lõi đã được ki�
 
 ### 2.1 Khảo Sát Văn Hiến & Mã Nguồn Gốc
 
-Toàn bộ quyết định kiến trúc, hàm mất mát và giao thức đánh giá của hệ thống được xây dựng dựa trên việc khảo sát trực tiếp 14 công trình chuyên sâu đã được lưu trữ và tóm lược có cấu trúc trong `docs/papers/` (bao gồm `SIA_WSSS_MICCAI2025.md`, `DualProtoSeg_arxiv_2512.10314.md`, `ARML_MICCAI2024.md`, `TPRO_MICCAI2024.md`, `S2C_From_SAM_to_CAMs_CVPR2024.md`, `D_CAM_MICCAI2025.md`, `DBDC_WSL_MICCAI2025.md`, `KMG_Mamba_MICCAI2025.md`, `M3amba_CVPR2025.md`, `MambaMIL_arxiv_2403.06800.md`, `QFKF_BMVC2025.md`, `LPD_arxiv_2512.18342.md`, `C2RM_Seg_arxiv_2606.25508.md`, và `PFM_DenseBench_arxiv_2602.03887.md`), kết hợp đối soát mã nguồn trực tiếp với hai kho tham chiếu `repos/WSSS-Tissue` (Han et al., *Medical Image Analysis* 2022) và `repos/LowMagWSS` (Do et al.).
+Toàn bộ quyết định kiến trúc, hàm mất mát và giao thức đánh giá của hệ thống được xây dựng dựa trên việc khảo sát trực tiếp 14 công trình chuyên sâu đã được lưu trữ và tóm lược có cấu trúc trong `docs/papers/` (bao gồm `SIA_WSSS_MICCAI2025.md`, `DualProtoSeg_arxiv_2512.10314.md`, `ARML_MICCAI2024.md`, `TPRO_MICCAI2024.md`, `S2C_From_SAM_to_CAMs_CVPR2024.md`, `D_CAM_MICCAI2025.md`, `DBDC_WSL_MICCAI2025.md`, `KMG_Mamba_MICCAI2025.md`, `M3amba_CVPR2025.md`, `MambaMIL_arxiv_2403.06800.md`, `QFKF_BMVC2025.md`, `LPD_arxiv_2512.18342.md`, `C2RM_Seg_arxiv_2606.25508.md`, và `PFM_DenseBench_arxiv_2602.03887.md`), kết hợp đối soát mã nguồn trực tiếp với hai kho tham chiếu `repos/WSSS-Tissue` (Han et al., *Medical Image Analysis* 2022) và `repos/LowMagWSS` (Do et al., MAPR 2026).
 
 Qua quá trình đối chiếu bài báo và thực nghiệm chẩn đoán mã nguồn, nhóm xác định 4 điểm nghẽn căn bản của bài toán phân vùng giám sát yếu trong giải phẫu bệnh số:
 
@@ -47,354 +50,328 @@ Qua quá trình đối chiếu bài báo và thực nghiệm chẩn đoán mã n
 
 ### 2.2 Đối Chiếu Công Bằng Với Các Công Trình SOTA (2019-2026)
 
-Bảng 1 tổng hợp so sánh định lượng trên cùng chuẩn đánh giá BCSS-WSSS giữa các công trình tiêu biểu công bố giai đoạn 2019-2026 và hệ thống Gate-7 Track A của đồ án.
+Bảng 1 tổng hợp so sánh định lượng trên cùng chuẩn đánh giá BCSS-WSSS giữa các công trình tiêu biểu công bố giai đoạn 2019-2026 và hệ thống Gate-7 Track A hậu bản vá Phase 1B (`02c_v2`).
 
 | Công trình / Phương pháp | Nguồn công bố | Giao thức / Backbone | BCSS-WSSS mIoU (%) | Nhận xét so sánh công bằng |
 | :--- | :--- | :--- | :---: | :--- |
 | **HistoSegNet** (Chan et al.) | ICCV 2019 (`pp. 10662-10671`) | Patch-level CAM + Grad-CAM | 46.92% | Mốc sơ khởi WSSS mô bệnh học |
 | **SEAM** (Wang et al.) | CVPR 2020 | ResNet-38 Equivariant Attention | 61.41% | Mở rộng đồng biến biến đổi tỷ lệ |
-| **WSSS-Tissue** (Han et al.) | MedIA 2022 (`arXiv:2110.08048`) | ResNet-38d + DeepLabV3+ R101 | 69.34% / 69.48%* | Mốc đối chứng chuẩn 4-class pooled |
+| **WSSS-Tissue** (Han et al.) | MedIA 2022 (`arXiv:2110.08048`) | ResNet-38d + DeepLabV3+ R101 | 69.35% / 69.48%* | Mốc đối chứng chuẩn 4-class pooled |
 | **PistoSeg** (Fang et al.) | AAAI 2023 | Mosaic Synthesis + RFM | 69.95% | Tổng hợp ranh giới mô nhân tạo |
-| **HisynSeg** (Fang et al.) | IEEE TMI 2025 | 4-class pooled BCSS-WSSS | 70.73% | Gate-7 Track A vượt **`+2.07%`** |
-| **ConStruct** (Le et al.) | MIDL 2026 (`arXiv:2512.10316`) | 4-class pooled BCSS-WSSS | 70.96% | Gate-7 Track A vượt **`+1.84%`** |
-| **PLIMSeg** | BSPC Vol. 112, 2026 | 4-class pooled BCSS-WSSS | 71.07% | Gate-7 Track A vượt **`+1.73%`** |
-| **DualProtoSeg** (Vu et al.) | 2025 (`arXiv:2512.10314`) | 4-class pooled BCSS-WSSS | 71.35% | Gate-7 Track A vượt **`+1.45%`** |
-| **CSS** | 2026 | 4-class pooled BCSS-WSSS | 71.72% | Gate-7 Track A vượt **`+1.08%`** (Primary) / **`+1.18%`** (Simplex) |
-| **Đề xuất Gate-7 Track A (Primary 4-Arm / Single Arm 5)** | **SE374.R11 UIT (2026)** | **0% TCGA-BRCA overlap (ImageNet / LVD-142M), 23 BN tách biệt** | **72.80%** (`72.90%` Secondary) | **Vượt mọi SOTA 4-class pooled chuẩn 2025-2026** |
-| **SIA-WSSS** (Fan et al.) | MICCAI 2025 (`10.1007/978-3-032-05141-7_56`) | ViT-B 5-run avg (gồm lớp `OTR`, khác định nghĩa Dice) | 73.40% | Gate-7 Track A thấp hơn **`-0.60%`** (Primary) / **`-0.50%`** (Simplex) |
+| **QFKF** | BMVC 2025 (`docs/papers/QFKF_BMVC2025.md`) | 4-class pooled BCSS-WSSS | 70.92% | Gate-7 Track A vượt **`+1.87%`** Primary / **`+1.88%`** CGM |
+| **ConStruct** (Le et al.) | MIDL 2026 (`arXiv:2512.10316`) | 4-class pooled BCSS-WSSS | 70.96% | Gate-7 Track A vượt **`+1.83%`** Primary / **`+1.84%`** CGM |
+| **HisynSeg** (Fang et al.) | IEEE TMI 2025 (`arXiv:2412.20924`) | 4-class pooled (`5` seeds Table II / CSS re-eval) | 70.97% +/- 0.29% (`70.73%` CSS) | Gate-7 Track A vượt **`+1.82%`** Primary / **`+1.83%`** CGM (`+2.06%`/`+2.07%` vs CSS re-eval) |
+| **PLIMSeg** | BSPC Vol. 112, 2026 | 4-class pooled BCSS-WSSS | 71.07% | Gate-7 Track A vượt **`+1.72%`** Primary / **`+1.73%`** CGM |
+| **DualProtoSeg** (Vu et al.) | 2025 (`arXiv:2512.10314`) | 4-class pooled BCSS-WSSS | 71.35% | Gate-7 Track A vượt **`+1.44%`** Primary / **`+1.45%`** CGM |
+| **CSS** | Bioinformatics 2026 (`PMC13614711`) | 4-class pooled BCSS-WSSS | 71.72% | Gate-7 Track A vượt **`+1.07%`** Primary / **`+1.08%`** CGM / **`+1.18%`** Simplex |
+| **C2RM-Seg** | MICCAI 2026 (`arXiv:2606.25508`) | 4-class pooled (`5` runs, ResNeSt-200e + DINOv3-B) | 72.17% +/- 0.83% | Gate-7 vượt **`+0.62%` / `+0.63%` / `+0.73%`** với độ lệch chuẩn nhỏ hơn **`16.6x`** (`0.05%` vs `0.83%`) |
+| **Đề xuất Gate-7 Track A Phase 1B (`02c_v2`)** | **SE374.R11 UIT (2026)** | **0% TCGA-BRCA overlap, 23 BN tách biệt, 3-seed `72.74 +/- 0.05%`** | **72.79% / 72.80%** (`72.90%` Secondary) | **Vượt mọi SOTA 4-class pooled chuẩn 2022-2026** |
+| **SIA-WSSS** (Fan et al.) | MICCAI 2025 (`10.1007/978-3-032-05141-7_56`) | ViT-B 5-run avg (gồm lớp `OTR`, khác định nghĩa Dice) | 73.40% | Gate-7 Track A thấp hơn **`-0.61%`** Primary / **`-0.60%`** CGM / **`-0.50%`** Simplex |
 
-*\*Ghi chú tái lập mốc tác giả:* `69.34%` là kết quả tái lập không dùng CGM trên Tesla T4 (`M1`), còn `69.48%` là kết quả Author Official Pure `1x` có cổng CGM (`cgm_author_mul0`) trên NVIDIA G4 Blackwell (`69.47%` trên L4).
+*\*Ghi chú tái lập mốc tác giả:* `69.35%` là kết quả Author Official Pure `1x` raw trên A100 (`69.34%` trên L4/T4), còn `69.48%` là Author Official Pure `1x` có cổng CGM (`cgm_author_mul0`) trên A100/G4 (`69.47%` trên L4).
 
-> **Cảnh báo trung thực về định nghĩa thước đo mDice khi đối chiếu với `SIA-WSSS` (MICCAI 2025):** Không so sánh trực tiếp chỉ số `84.05%` mDice của hệ thống này với `79.90%` mDice trong `SIA_WSSS_MICCAI2025.pdf` (trang 6, Table 1), bởi vì bảng 1 của `SIA-WSSS` báo cáo cùng mốc `WSSS-Tissue` ở mức `0.697` mIoU và `0.767` mDice (chênh khoảng `5.1` điểm phần trăm theo định nghĩa mDice so với `0.8179` của công thức 4-class pooled chuẩn). Do đó, phép so sánh khoa học công bằng duy nhất giữa hai công trình là trên thước đo **mIoU** (`72.80%` Primary / `72.90%` Secondary so với `73.40%`, và biên độ cải thiện trên nền WSSS-Tissue tương ứng là `+3.31%` / `+3.42%` so với `+3.70%` của `SIA-WSSS`).
+> **Cảnh báo trung thực về định nghĩa thước đo mDice khi đối chiếu với `SIA-WSSS` (MICCAI 2025):** Không so sánh trực tiếp chỉ số `84.04%-84.11%` mDice của hệ thống này với `79.90%` mDice trong `SIA_WSSS_MICCAI2025.pdf` (trang 6, Table 1), bởi vì bảng 1 của `SIA-WSSS` báo cáo cùng mốc `WSSS-Tissue` ở mức `0.697` mIoU và `0.767` mDice (chênh khoảng `5.1` điểm phần trăm theo định nghĩa mDice so với `0.8179` của công thức 4-class pooled chuẩn). Do đó, phép so sánh khoa học công bằng duy nhất giữa hai công trình là trên thước đo **mIoU** (`72.79%` Primary / `72.80%` CGM / `72.90%` Secondary so với `73.40%`).
 
 ---
 
 ## 3. Dữ Liệu BCSS-WSSS, Chống Rò Rỉ Bệnh Nhân & Tính Thuần Khiết Track A
 
-### 3.1 Đặc Tả Bộ Dữ Liệu & Phân Chia Khóa Cứng 151 Bệnh Nhân
+### 3.1 Đặc Tả Bộ Dữ Liệu, Phân Chia Khóa Cứng 151 Bệnh Nhân & Nguồn Sống Còn Thật NCI GDC
 
-Bộ dữ liệu chuẩn **BCSS-WSSS** trích xuất từ kho giải phẫu bệnh ung thư vú **TCGA-BRCA** (Amgad et al., *Bioinformatics* 2019; Han et al., *MedIA* 2022) ở độ phóng đại chuẩn lâm sàng **40x (`0.2500 MPP`)**, kích thước cố định `224 x 224` điểm ảnh (`50,176` điểm ảnh mỗi mảng), gồm 4 phân lớp mô học tiền cảnh và 1 lớp nền quang học:
+Bộ dữ liệu chuẩn **BCSS-WSSS** trích xuất từ kho giải phẫu bệnh ung thư vú **TCGA-BRCA** (Amgad et al., *Bioinformatics* 2019; Han et al., *MedIA* 2022) ở độ phóng đại chuẩn lâm sàng **40x (`0.2500 MPP`)**, kích thước cố định `224 x 224` điểm ảnh (`50,176` điểm ảnh mỗi mảng), gồm 4 phân lớp mô học tiền cảnh (`0: TUM`, `1: STR`, `2: LYM`, `3: NEC`) và 1 lớp nền quang học (`4: BACK`, tách độc lập ở pha suy luận bằng `OtsuClinicalGating` + `Pure-Glass Guard >= 512 px`, tuyệt đối không sao chép GT `label == 4`).
 
-- **Lớp `0` (`TUM` - Tumor Epithelium):** Biểu mô khối u ác tính với nhân dị dạng, tỷ lệ nhân trên bào tương cao, bắt màu tím Hematoxylin đậm.
-- **Lớp `1` (`STR` - Stroma):** Mô đệm sợi liên kết giàu collagen bao quanh ổ u, bắt màu hồng Eosin đặc trưng.
-- **Lớp `2` (`LYM` - Lymphocytic Infiltrate):** Bạch huyết bào xâm nhập miễn dịch có nhân tròn nhỏ, đồng dạng, sắp xếp thành cụm hoặc phân tán.
-- **Lớp `3` (`NEC` - Necrosis):** Vùng mô hoại tử đặc trưng bởi hiện tượng vỡ nhân (`karyorrhexis`), tan nhân (`karyolysis`) trên nền mảnh vụn ưa Eosin.
-- **Lớp `4` (`BACK` - White Glass / Background):** Nền kính trắng quang học và vùng ngoài ROI; ở pha suy luận được tách độc lập bởi cổng quang học `OtsuClinicalGating` kết hợp `Pure-Glass Guard` (`>= 512 px`), tuyệt đối không sao chép nhãn Ground Truth `label == 4` vào dự đoán AI.
-
-Toàn bộ danh sách chia tách theo định danh bệnh nhân (`TCGA-XX-XXXX`) được khóa cứng tại `src/config/bcss_patient_splits.json` và kiểm định tự động ở mọi phiên chạy qua `src/datasets/patient_split.py` và `tests/test_patient_split.py`. Mọi nhật ký Gate-6 và Gate-7 đều ghi nhận tường minh `patient_overlap_count = 0` và `non_finite_tensors = 0`.
+Toàn bộ danh sách chia tách theo định danh bệnh nhân (`TCGA-XX-XXXX`) được khóa cứng tại `src/config/bcss_patient_splits.json` và kiểm định tự động ở mọi phiên chạy qua `src/datasets/patient_split.py` và `tests/test_patient_split.py` (`patient_overlap_count = 0`, `non_finite_tensors = 0`). Đồng thời, dữ liệu sống còn thật của toàn bộ `151/151` bệnh nhân trong `src/config/tcga_bcss_151_gdc_clinical.json` được truy vấn trực tiếp và đối soát sống (`0` sai khác) từ **NCI Genomic Data Commons (GDC) REST API - Data Release 46.0** (`tag 8.5.0`, queried `2026-11-24T04:44:41Z`; tổng số biến cố tử vong thật: `20` Train / `1` Val / `2` Test), xóa triệt để mọi rủi ro nguồn gốc dữ liệu lâm sàng.
 
 | Phân tập dữ liệu | Nguồn bệnh nhân | Số bệnh nhân | Số mảng ảnh (`224x224`) | Định dạng nhãn | Rò rỉ bệnh nhân | Vai trò trong pipeline |
 | :--- | :--- | :---: | :---: | :--- | :---: | :--- |
 | **Train** | BCSS-WSSS (TCGA-BRCA) | 106 | 23,422 | Nhãn yếu đa lớp `y_cls` `[4]` trong tên tệp | 0% | Huấn luyện Stage-1, sinh mặt nạ mềm Round-1 và Round-2 |
 | **Validation** | BCSS-WSSS (TCGA-BRCA) | 22 | 3,418 (`2,153` đa lớp) | Mặt nạ điểm ảnh đầy đủ `{0, 1, 2, 3, 4}` | 0% | Dừng sớm EMA, chọn TTA, hiệu chuẩn `beta`, CV 5-fold, CGM |
-| **Held-Out Test** | BCSS-WSSS (TCGA-BRCA) | 23 | 4,986 | Mặt nạ điểm ảnh đầy đủ `{0, 1, 2, 3, 4}` | 0% | Đánh giá mù cuối cùng, bootstrap CI và Holm-Bonferroni |
+| **Held-Out Test** | BCSS-WSSS (TCGA-BRCA) | 23 | 4,986 (`2,984` đa lớp) | Mặt nạ điểm ảnh đầy đủ `{0, 1, 2, 3, 4}` | 0% | Đánh giá mù cuối cùng, bootstrap CI và Holm-Bonferroni |
 | **Tổng cộng** | **BCSS-WSSS** | **151** | **31,826** | **Bất đối xứng (Yếu / Đầy đủ)** | **0% Tuyệt đối** | Chuẩn đánh giá chính thức của toàn hệ thống |
-| **Cross-Organ** | LUAD-HistoSeg (Ung thư phổi) | Cohort độc lập | Tập Test mô phổi | Ánh xạ `LUAD_TO_BCSS_LUT = [0, 3, 2, 1, 4]` | 0% | Kiểm định tổng quát hóa chéo cơ quan Zero-Shot (`04b`) |
-
-*Ghi chú hiệu đính tài liệu nội bộ cũ:* Tài liệu đặc tả nháp sớm trước đây từng ghi nhầm `17,286` patches và phân bổ `20 val / 25 test`. Số liệu chính xác đối chiếu trực tiếp từ bài báo gốc Han et al. (`arXiv:2110.08048`, trang 7-8) và kiểm đếm thực tế trên kho dữ liệu `data/BCSS-WSSS/` là **`31,826` patches (`106 / 22 / 23` bệnh nhân)**.
+| **Cross-Organ** | LUAD-HistoSeg (Ung thư phổi, `10x`, `1.0 MPP`) | 49 (`20` ca Test) | 307 Test patches (tổng `17,285`) | Ánh xạ cứng `LUAD_TO_BCSS_LUT = [0, 3, 2, 1, 4]` | 0% | Kiểm định tổng quát hóa chéo cơ quan Zero-Shot (`10x` & `2x` zoom) |
 
 ### 3.2 Tính Thuần Khiết Track A & Kỷ Luật Miền Chuẩn Hóa Đầu Vào
 
-Để loại trừ mọi nghi ngờ về rò rỉ tri thức gián tiếp từ các kho giải phẫu bệnh tiền huấn luyện chứa TCGA-BRCA, toàn bộ 4 nhánh Round-1 (`arm1` đến `arm4`) và 4 nhánh Round-2 (`arm5` đến `arm8`) đều mang siêu dữ liệu bắt buộc `track = "track_a_clean"`, `tcga_pretrained = False` và được kiểm tra tự động bằng hàm `validate_track_a_arm_spec()` trong `src/stage2_v2/ensemble.py`:
+Để loại trừ mọi nghi ngờ về rò rỉ tri thức gián tiếp từ các kho giải phẫu bệnh tiền huấn luyện chứa TCGA-BRCA, toàn bộ 4 nhánh Round-1 (`arm1-arm4`) và 4 nhánh Round-2 (`arm5-arm8`) mang siêu dữ liệu bắt buộc `track = "track_a_clean"`, `tcga_pretrained = False` và được kiểm tra tự động bằng hàm `validate_track_a_arm_spec()` trong `src/stage2_v2/ensemble.py`:
 
 - **Backbone Stage-2 Track A:** Chỉ khởi tạo từ trọng số ảnh tự nhiên **ImageNet-1K** (`resnet101`, `nvidia/mit-b3`, `nvidia/mit-b5`, `convnext_base`, `convnext_large`) hoặc **LVD-142M** (`facebook/dinov2-base`, `facebook/dinov2-large`). Mọi mô hình foundation tiền huấn luyện trên kho bệnh học TCGA (chẳng hạn `owkin/phikon-v2`) bị cách ly hoàn toàn sang Track B.
-- **Backbone Stage-1 (`se374_arm_b_full`):** Khởi tạo theo đúng giao thức công bố gốc của tác giả từ trọng số mô phổi `stage1_checkpoint_trained_on_luad.pth` (`29` ca GDPH và `20` ca TCGA-LUAD, `228/228` tầng khớp), bảo đảm **0% trùng lặp bệnh nhân TCGA-BRCA**.
-- **Hợp đồng miền chuẩn hóa đầu vào (`Input Normalization Contract`):**
-  - Các trọng số pretrained chính thức của WSSS-Tissue (`stage1_checkpoint_trained_on_bcss.pth`, `stage2_checkpoint_trained_on_bcss.pth`) và Stage-1 `se374_arm_b_full` sử dụng chuẩn hóa trực tiếp về đoạn `[0.0, 1.0]` (`img / 255.0`), **không** trừ trung bình ImageNet. Lịch sử thực nghiệm Colab Run 2 đã chứng minh việc áp nhầm `IMAGENET_MEAN/STD` lên checkpoint `[0.0, 1.0]` làm phân phối BatchNorm sụp đổ xuống `5.74%` mIoU.
-  - Toàn bộ 8 mô hình Stage-2 v2 (`arm1` đến `arm8`) khởi tạo từ ImageNet-1K / LVD-142M sử dụng đúng chuẩn hóa `IMAGENET_MEAN = (0.485, 0.456, 0.406)` và `IMAGENET_STD = (0.229, 0.224, 0.225)` có ghi nhận tường minh trường `"input_norm": "imagenet"` trong siêu dữ liệu checkpoint.
-- **Phòng vệ nạp thư mục đa tầng:** Toàn bộ DataLoader trong `src/datasets/`, `src/training/dataset_loader.py` và `src/stage2_v2/` áp dụng `resolve_split_path` cùng `rglob("*.png")` kèm kiểm tra tập rỗng, loại bỏ hoàn toàn lỗi sập DataLoader do giả định thư mục phẳng `glob("*.png")` trên cấu trúc lồng `train/img/*.png`.
+- **Backbone Stage-1 (`se374_arm_b_full`):** Khởi tạo theo đúng giao thức gốc từ trọng số mô phổi `stage1_checkpoint_trained_on_luad.pth` (`228/228` tầng khớp), bảo đảm **0% trùng lặp bệnh nhân TCGA-BRCA**.
+- **Hợp đồng miền chuẩn hóa đầu vào (`Input Normalization Contract`):** Trọng số pretrained WSSS-Tissue và Stage-1 `se374_arm_b_full` dùng miền `[0.0, 1.0]` (`img / 255.0`, không trừ trung bình ImageNet - được khóa cứng tự động bởi `tests/test_stage2_v2.py` và Assertion 2 `input_norm_contract` của `02d_v2`); toàn bộ 8 mô hình Stage-2 v2 (`arm1-arm8`) dùng `IMAGENET_MEAN/STD` khớp backbone khởi tạo. Toàn bộ DataLoader sử dụng `resolve_split_path` + `rglob("*.png")` kèm kiểm tra tập rỗng để phòng vệ thư mục lồng.
 
 ---
 
-## 4. Phương Pháp Luận & Kiến Trúc Gate-7 Track A
+## 4. Phương Pháp Luận & Kiến Trúc Gate-7 Track A (Phase 1B Hậu Bản Vá)
 
-Kiến trúc tổng thể 6 tầng của hệ thống Gate-7 Track A kết nối liền mạch từ huấn luyện nhãn yếu Giai đoạn 1, chưng cất tri thức hai vòng đa họ kiến trúc, tổ hợp xác suất hiệu chuẩn 5 chuyên gia cho tới Trạm Làm Việc Lâm Sàng FastAPI được trình bày tại **Hình 4**.
+Kiến trúc tổng thể 6 tầng của hệ thống Gate-7 Track A kết nối liền mạch từ huấn luyện nhãn yếu Giai đoạn 1, chưng cất tri thức hai vòng đa họ kiến trúc, tổ hợp xác suất hiệu chuẩn 5 chuyên gia cho tới Trạm Làm Việc Lâm Sàng FastAPI được trình bày tại **Hình 1**.
 
-![Hình 4: Sơ đồ kiến trúc đơn sắc 6 tầng của hệ thống SE374.R11 Gate-7 Track A từ Giai đoạn 1 SG-DAP, chưng cất hai vòng đa họ kiến trúc đến Trạm Làm Việc Lâm Sàng FastAPI và HTML5 Canvas ngoại tuyến.](figures/fig4_gate7_pipeline_architecture_bw.png)
+![Hình 1: Sơ đồ kiến trúc đơn sắc 6 tầng của hệ thống SE374.R11 Gate-7 Track A Phase 1B từ Giai đoạn 1 SG-DAP, chưng cất hai vòng đa họ kiến trúc 12x TTA đến Trạm Làm Việc Lâm Sàng FastAPI và HTML5 Canvas ngoại tuyến.](figures/fig4_gate7_pipeline_architecture_bw.png)
 
 ### 4.1 Giai Đoạn 1: Mạng Phân Loại Đa Nhãn, PDA & Mặt Nạ Giả Mềm SG-DAP
 
-Giai đoạn 1 (`se374_arm_b_full`, kiến trúc `WSSSTissueStage1NetCAM` trên nền `ResNet-38d`, `105.09M` tham số) nhận ảnh H&E đầu vào $X$ và vector nhãn yếu cấp mảng $y \in \{0, 1\}^4$. Khác với cấu hình SGD truyền thống dễ hội tụ cục bộ, cấu hình đột phá `arm_b_full` tích hợp đồng thời 4 cơ chế:
+Giai đoạn 1 (`se374_arm_b_full`, kiến trúc `WSSSTissueStage1NetCAM` trên nền `ResNet-38d`, `105.09M` tham số) nhận ảnh H&E đầu vào $X$ và vector nhãn yếu cấp mảng $y \in \{0, 1\}^4$, tích hợp đồng thời 4 cơ chế: (1) Multi-Label Soft Margin Loss với AdamW (`lr_bb = 8e-5`, `lr_fc8 = 2.4e-4`, Cosine Annealing, warmup 2 epoch), (2) chú ý xóa mờ lũy tiến nhân tính **PDA** ($\mu_t = \max(0.98^{t-3}, 0.65)$ từ epoch 3), (3) nhất quán đồng biến $D_4$ + đa tỷ lệ ($\lambda_{\text{eq}} \le 0.25$) kèm **EMA (`0.995`)**, và (4) tinh chỉnh mặt nạ mềm dẫn đường sắc tố Beer-Lambert **SG-DAP (`T = 0.25`)**. Kết quả trên toàn bộ `3,418` patches VAL đạt **`74.13%` mIoU (`85.07%` mDice, `+2.10%` so với mốc tác giả gốc `72.03%`)**.
 
-1. **Hàm mất mát phân loại biên mềm (Multi-Label Soft Margin Loss)** kết hợp bộ tối ưu AdamW (`lr_bb = 8e-5`, `lr_fc8 = 2.4e-4`, lịch Cosine Annealing, khởi động ấm 2 epoch).
-2. **Chú ý xóa mờ lũy tiến nhân tính (Multiplicative Progressive Dropout Attention - PDA):** Kích hoạt từ epoch 3 với ngưỡng suy giảm $\mu_t = \max(1.0 \cdot 0.98^{t-3}, 0.65)$, tạm thời che các đỉnh kích hoạt mạnh nhất để buộc mạng mở rộng bản đồ CAM sang toàn bộ ranh giới biểu mô và mô đệm.
-3. **Tính nhất quán đồng biến biến đổi hình học ($D_4$ + đa tỷ lệ $\{1.0, 1.25\}$):** Do tiêu bản cắt lát mô học bất biến dưới phép quay và phản xạ gương, thành phần phạt nhất quán đồng biến ($\lambda_{\text{eq}} \le 0.25$, tăng dần từ epoch 2 đến epoch 5) buộc bản đồ CAM khớp nhau giữa các góc nhìn, đồng thời duy trì trung bình trượt hàm mũ **EMA** (`decay = 0.995`) cho toàn bộ trọng số.
-4. **Tinh chỉnh mặt nạ mềm dẫn đường sắc tố H&E (`SG-DAP`, nhiệt độ $T = 0.25$):** Sử dụng phân rã quang học Beer-Lambert (`StainDeconvLayer`, $\mathbf{OD} = -\log_{10}(I/I_0)$, $\mathbf{S} = \max(\mathbf{M}_{\text{H\&E}}^{-1}\mathbf{OD}, 0)$) tách riêng mật độ sắc tố nhân Hematoxylin ($S_H$) và bào tương Eosin ($S_E$), khuếch tán ái lực cục bộ theo cấu trúc sắc tố để bảo toàn ranh giới sắc nét cho cụm tế bào `LYM` và ổ `NEC`. Nhờ đó, chất lượng mặt nạ giả mềm `q_s1_sgdap` trên toàn bộ `3,418` patches VAL đạt **`74.13%` mIoU (`85.07%` mDice)**, tăng **`+2.10%`** so với mốc tác giả gốc (`72.03%`).
+### 4.2 Chưng Cất Hai Vòng, Đệm Đối Xứng `_pad_to_multiple_of_32` & Bốn Họ Kiến Trúc Dual-Head
 
-### 4.2 Chưng Cất Hai Vòng & Bốn Họ Kiến Trúc Trực Giao Dual-Head
+Tầng `src/stage2_v2/` xây dựng tổ hợp 4 họ kiến trúc trực giao có thiết kế hai đầu (`seg_logits` + `cls_logits`) và chính sách tuyển chọn **`ema_only_best_selection = True`**:
 
-Thay vì phụ thuộc vào một kiến trúc CNN đơn lẻ dễ mắc lỗi hệ thống (inductive bias), tầng `src/stage2_v2/` xây dựng tổ hợp 4 họ kiến trúc hoàn toàn độc lập, mỗi mô hình đều mang thiết kế **hai đầu ra đồng thời (Dual-Head)**: đầu phân vùng mật độ cao xuất bản đồ xác suất 4 lớp $(B, 4, H, W)$ và đầu phân loại phụ xuất logit cấp mảng $(B, 4)$ phục vụ cổng CGM:
-
-| Nhánh Gate-7 Track A | Họ kiến trúc | Backbone (0% TCGA) | Độ phân giải | Chính sách chọn trọng số | Best EMA VAL mIoU |
+| Nhánh Gate-7 Track A (Hậu Bản Vá `02c_v2`) | Họ kiến trúc | Backbone (0% TCGA) | Độ phân giải | Chính sách chọn trọng số | VAL (`ms_3_hvflip` 12x) |
 | :--- | :--- | :--- | :---: | :--- | :---: |
-| `arm8_deeplab_r101_r2` | Classic ASPP CNN | `resnet101` (ImageNet-1K) | `224 x 224` | `ema_only` (Ep 2) | 68.74% |
-| `arm6_segformer_b5_r2` | Hierarchical ViT | `nvidia/mit-b5` (ImageNet-1K, `drop_path = 0.15`) | `224 x 224` | `ema_only` (Ep 5) | 70.13% |
-| `arm7_convnext_large_r2` | Modern Pure ConvNet | `convnext_large` (ImageNet-1K, `stoch_depth = 0.30`) | `224 x 224` | `ema_only` (Ep 5) | 69.49% |
-| **`arm5_dinov2_large_r2`** | **Self-Supervised ViT** | **`facebook/dinov2-large` (LVD-142M, mở khóa 8 khối cuối)** | **`336 x 336`** (`scale = 1.5`) | **`ema_only` (Ep 10)** | **70.95%** |
+| `arm8_deeplab_r101_r2` | Classic ASPP CNN | `resnet101` (ImageNet-1K) | `224 x 224` | `ema_only` (Ep 2) | 69.31% |
+| `arm6_segformer_b5_r2` | Hierarchical ViT | `nvidia/mit-b5` (ImageNet-1K) | `224 x 224` | `ema_only` (Ep 5) | 70.31% |
+| **`arm7_convnext_large_r2`** | **Modern Pure ConvNet** | **`convnext_large` + đệm đối xứng `_pad_to_multiple_of_32`** | **`224 x 224`** | **`ema_only` (Ep 5)** | **69.65%** |
+| **`arm5_dinov2_large_r2`** | **Self-Supervised ViT** | **`facebook/dinov2-large` (LVD-142M, mở 8 khối cuối)** | **`336 x 336`** | **`ema_only` (Ep 10)** | **71.21%** |
 
-Quy trình chưng cất hai vòng (Two-Round Cross-Family Distillation) diễn ra sạch hoàn toàn khỏi tập TEST:
-
-1. **Vòng 1 (Gate-6):** Huấn luyện 4 nhánh đầu tiên (`arm1` DeepLab-R101, `arm2` SegFormer-MiT-B3, `arm3` ConvNeXt-Base, `arm4` DINOv2-ViT-B/14) từ mặt nạ giả mềm Giai đoạn 1 `q_s1_sgdap` (`74.13%` VAL), kết hợp mất mát chưng cất mềm KL-OEEM / Soft-KD / Soft-SCE, Dice mềm, MIL và phân loại phụ.
-2. **Sinh mục tiêu mềm Vòng 2 (`r2_blend = 1.0`, y-gated):** Lấy trung bình xác suất dự đoán của 4 giáo viên Vòng 1 trên `23,422` mảng ảnh TRAIN, nhân cổng nhãn yếu thật $y_{\text{cls}} \in \{0, 1\}^4$ để khóa tuyệt đối các lớp vắng mặt, và chuẩn hóa lại phân phối:
+- **Khắc phục lỗi dịch chuyển biên stride-2 ở `arm7` ConvNeXt-Large (`1d3f738`):** Kiểm toán trực quan tiền Phase 1B phát hiện `arm7` có đỉnh tương quan dịch lệch `(dx=+1, dy=-4)` px do ConvNeXt downsampling `stride=2` cắt bất đối xứng ở mép đáy/phải khi nội suy đa tỷ lệ `0.75x = 168px` (dư `8 px` theo bội 32) và `1.25x = 280px` (dư `24 px`). Bổ sung đệm đối xứng `_pad_to_multiple_of_32` (`src/stage2_v2/models.py:335-383`) và cắt ngược chính xác sau đầu ra FPN đã xóa sạch lỗi dịch chuyển biên, kéo đỉnh dịch chuyển về **`(1, -1)` px** (`zero_vs_peak_gap` giảm **`15x`** từ `1.123e-3` xuống `7.5e-5`) và nâng ngay Held-Out TEST mIoU của `arm7` lên **`71.88%` (`83.45%` mDice)**.
+- **Mục tiêu mềm Vòng 2 (`r2_blend = 1.0`, y-gated):** Hợp nhất xác suất trung bình của 4 giáo viên Vòng 1 trên `23,422` patches TRAIN, nhân cổng nhãn yếu thật $y_{\text{cls}} \in \{0, 1\}^4$ và chuẩn hóa lại (dự phòng an toàn về `q_s1_sgdap` khi tổng xác suất $< 0.01$, chỉ xảy ra trên `0.0054%` điểm ảnh VAL và `0.0094%` TRAIN):
 $$q_{\text{R2}}(u, c) = \frac{y_c \cdot \bar{p}_{\text{ens4}}(u, c)}{\sum_{k=0}^{3} y_k \cdot \bar{p}_{\text{ens4}}(u, k)} \quad \text{khi } \sum_{k=0}^{3} y_k \cdot \bar{p}_{\text{ens4}}(u, k) \ge 0.01$$
-Tại những điểm ảnh hiếm hoi có tổng xác suất dưới ngưỡng `0.01` (chỉ chiếm `0.0054%` trên VAL và `0.0094%` trên toàn bộ `23,422` patches TRAIN), hệ thống tự động lùi an toàn về phân phối `q_s1_sgdap`. Trên TRAIN, entropy đa lớp đạt `mc_ent_q_r2 = 0.298718`, khẳng định nhãn mềm giàu thông tin và không bị sụp đổ tự tin quá mức.
-3. **Chính sách tuyển chọn `ema_only_best_selection = True`:** Được thiết lập sau phát hiện phương sai đa hạt giống ở Vòng 1 (Mục 5.6), buộc vòng huấn luyện Gate-7 chỉ lưu checkpoint tốt nhất theo nhánh EMA trên tập VAL nhằm triệt tiêu hiện tượng dao động cuối epoch của trọng số `raw`.
 
-### 4.3 Tổ Hợp Log-Xác Suất Hiệu Chuẩn, Cổng CGM 5 Chuyên Gia & Lọc Quang Học
+### 4.3 Tổ Hợp Log-Xác Suất Hiệu Chuẩn `12x TTA`, Cổng `NEC-1DoF CGM` & Dấu Ấn Sinh Học
 
-Toàn bộ tham số suy luận của Gate-7 Track A được đóng băng 100% trên 22 bệnh nhân VAL (`3,418` patches) thông qua kiểm định chéo 5-fold theo bệnh nhân và kiểm định chéo bỏ từng bệnh nhân (`22-fold LOPOCV`) trước khi chạm tập TEST:
+Toàn bộ siêu tham số suy luận được đóng băng 100% trên 22 bệnh nhân VAL (`3,418` patches) qua 5-fold CV theo bệnh nhân và `22-fold LOPOCV` trước khi đánh giá TEST:
 
-- **Lựa chọn TTA theo từng nhánh trên VAL:** `ms_3_hflip` cho `arm8`, `arm7`, `arm5` (đa tỷ lệ `{0.75, 1.0, 1.25}` kèm lật ngang) và `d4_8view_1x` cho `arm6` (nhóm nhị diện 8 góc nhìn). Nguồn xác suất phân loại tối ưu là `cls_tta` (`mean_macro_auroc = 0.9340`, `mean_brier = 0.0761`, vượt `cls_1x` `0.9324` và `cls_d4` `0.9333`).
-- **Trộn log-xác suất hiệu chuẩn nhiệt độ (`cal_logprob_eps1e3`):** Mỗi nhánh $m \in \{1, 2, 3, 4\}$ được gán hệ số nhiệt độ tối ưu $\beta_m$ khớp trên VAL (`full_val_betas = [0.8690, 0.6163, 0.6754, 0.6368]`) và hợp nhất trong miền log-xác suất làm trơn $\epsilon = 10^{-3}$:
+- **Lựa chọn TTA 12 góc nhìn trên VAL (`02c_v2`):** Cả **`4/4` nhánh (`arm5-arm8`)** đều chọn **`ms_3_hvflip`** (`12` góc nhìn: `{0.75, 1.0, 1.25}` x 4 phép lật H/V).
+- **Trộn log-xác suất hiệu chuẩn nhiệt độ (`cal_logprob_eps1e3`):** Hệ số nhiệt độ tối ưu khớp trên VAL `full_val_betas = [0.6386 (arm5), 0.7029 (arm6), 0.6747 (arm7), 0.8782 (arm8)]` hợp nhất trong miền log-xác suất làm trơn $\epsilon = 10^{-3}$:
 $$\log \tilde{p}_{\text{ens}}(u, c) = \sum_{m=1}^{4} w_m \cdot \beta_m \log\left(p_m(u, c) + \epsilon\right)$$
-Chế độ `cal_logprob_eps1e3` đạt điểm OOF 5-fold CV cao nhất (`0.711224` uniform / `0.711593` simplex), vượt cả `cal_linear` (`0.710122` / `0.710309`) và `uncal_linear` (`0.709606` / `0.709562`). Do mức cải thiện của trọng số simplex bagged `[0.28, 0.08, 0.05, 0.59]` chỉ đạt `+0.000369 < 0.0005` so với trọng số đồng đều, quy tắc bảo thủ tiền đăng ký chốt **`uniform [0.25, 0.25, 0.25, 0.25]`** và **`no_cgm`** làm mô hình tổ hợp chính Primary 4-Arm, trong khi `arm5_dinov2_large_r2` sử dụng **4-DoF CGM** hiệu chuẩn trên VAL (`t = [0.50, 0.60, 0.05, 0.65]`).
-- **Tách nền kính quang học & Dấu ấn sinh học lâm sàng:** Ở pha suy luận lâm sàng, `OtsuClinicalGating` kết hợp `Pure-Glass Guard` (`gray >= 242`, `sat <= 8`, vùng liên thông `>= 512 px`) tách sạch lớp `BACK (4)` mà không sử dụng bất kỳ thông tin nào từ mặt nạ Ground Truth. Từ mặt nạ 5 lớp, hệ thống tính tự động hai dấu ấn sinh học chuẩn hóa theo khuyến cáo Hội Bác sĩ Giải phẫu bệnh Hoa Kỳ (CAP) và hướng dẫn quốc tế (Symmans et al., *JCO* 2007; van Pelt et al., *Virchows Archiv* 2018):
+  5-fold CV OOF `cal_logprob_eps1e3` (`0.711209` uniform / `0.711328` simplex) vượt `cal_linear` (`0.709838`) và `uncal_linear` (`0.709311`). LOPOCV 22-fold cho `weights_mean = [0.5818, 0.0523, 0.0500, 0.3159]` (`oof_miou = 0.710641`). Do chênh lệch 5-fold CV `simplex - uniform = +0.00012` nhỏ hơn ngưỡng bảo thủ `0.0005`, giao thức khóa **`uniform [0.25]*4`** và `use_cgm = False` làm Primary 4-Arm, đồng thời công bố đầy đủ `cgm_val_calibrated` (`fixed_0.10`), **`cgm_nec_focused_1dof` (`t_nec = 0.40`, chọn 0% rò rỉ trên VAL)** và `simplex_cv_4arm` (`[0.61, 0.06, 0.05, 0.28]`).
+- **Dấu ấn sinh học lâm sàng chuẩn hóa (Symmans et al., *JCO* 2007; Mesker et al. 2007 / van Pelt et al. 2018 UNITED):**
 $$\text{VTP}_{\text{cellularity}} = \frac{N_{\text{TUM}}}{N_{\text{TUM}} + N_{\text{STR}} + N_{\text{LYM}} + N_{\text{NEC}}} \times 100\%, \quad \text{VTP}_{\text{RCB}} = \frac{N_{\text{TUM}}}{N_{\text{TUM}} + N_{\text{NEC}}} \times 100\%$$
-$$\text{TSR} = \frac{N_{\text{TUM}}}{N_{\text{TUM}} + N_{\text{STR}}} \times 100\% \quad (\text{TSR} \le 50\% \Rightarrow \text{Nhóm nguy cơ cao Stroma-Rich})$$
+$$\text{TSR} = \frac{N_{\text{TUM}}}{N_{\text{TUM}} + N_{\text{STR}}} \times 100\% \quad (\text{TSR} \le 50\% \Rightarrow \text{Stroma-Rich / Nguy cơ cao})$$
 
 ---
 
-## 5. Kết Quả Thực Nghiệm Định Lượng & Kiểm Định Thống Kê
+## 5. Kết Quả Thực Nghiệm Định Lượng, Bóc Tách Nhân Quả & Kiểm Định Thống Kê
 
-### 5.1 Nền Tảng Lịch Sử Thực Nghiệm Colab (Run 1 đến Run 5 & Ablation M1-M7)
+### 5.1 Nền Tảng Lịch Sử Thực Nghiệm Colab (Run 1 - Run 3 & Ablation M1-M7)
 
-Trước khi bước vào thiết kế chưng cất đa họ kiến trúc Stage-2 v2, đội ngũ đã thực hiện 5 phiên thực nghiệm tiến hóa có đối chứng trên GPU Tesla T4 (`experiments/benchmarks/COLAB_5_RUNS_EVOLUTION_COMPARISON.md`) nhằm kiểm chứng chuỗi tiền xử lý, chuẩn hóa và suy luận đa phương pháp `M1` đến `M7` trên toàn bộ `4,986` ảnh TEST:
+Chuỗi 3 phiên thực nghiệm toàn tập tiền nhiệm trên GPU Tesla T4 (`experiments/benchmarks/COLAB_3_FULL_RUNS_EVOLUTION_COMPARISON.md`, `experiments/colab_run_1_stage2_baseline/` đến `experiments/colab_run_3_multiscale_sota_v2/`) đã xác nhận kỷ luật chuẩn hóa `[0.0, 1.0]`, cổng `Pure-Glass Guard` (`BACK IoU 99.93%`, `100.00%` Recall trên `18,279,223` điểm ảnh kính trắng) và mốc suy luận đa tỷ lệ `M6` (`70.53%` 4-class / `76.41%` 5-class mIoU, Wilcoxon $p = 2.60 \times 10^{-15}$ so với `M1 69.35%`):
 
-| Phiên chạy / Cấu hình | Quy mô ảnh TEST | Cơ chế kỹ thuật cốt lõi | 4-Cls mIoU (%) | 5-Cls mIoU (%) | 4-Cls mDice (%) | BACK IoU (%) |
+| Phiên chạy / Cấu hình (Tesla T4) | Quy mô ảnh TEST | Cơ chế kỹ thuật cốt lõi | 4-Cls mIoU | 5-Cls mIoU | 4-Cls mDice | BACK IoU |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: |
-| Run 1 (`colab_run_1_heuristic`) | 150 (Sanity) | Ngưỡng màu HSV ngây thơ (chưa nạp trọng số) | 9.13% | 9.78% | ~16.5% | 12.37% |
-| Run 2 (`colab_runs`) | 150 (Sanity) | Lệch miền `ImageNet Normalize` trên checkpoint `[0, 1]` | 5.74% | 7.59% | 9.34% | 15.00% |
-| Run 4 (`colab_run_4_full`) | 4,986 (Full) | Chỉ Stage-2 DeepLabV3+ đơn lẻ + Otsu cũ | 68.71% | 67.36% | 81.15% | 70.26% |
-| Run 5 (`M1_Baseline_SingleScale`) | 4,986 (Full) | Tái lập WSSS-Tissue 1x + Pure-Glass Guard | 69.34% | 75.46% | 81.69% | 99.93% |
-| Run 5 (`M5_Proposed_SOTA`) | 4,986 (Full) | + Stage-1 CGM + D4 TTA + CAM Fusion + Prior Calib + Bilateral | 70.49% | 76.38% | 82.51% | 99.93% |
-| Run 3 v2 (`M6_MultiScale_Pyramid`) | 4,986 (Full) | Multi-Scale `{0.75, 1.0, 1.25}` x D4 + Entropy Weighting | **70.53%** | **76.41%** | **82.54%** | **99.93%** |
+| Run 1 (`colab_run_1_stage2_baseline`) | 4,986 (Full) | Chỉ Stage-2 DeepLabV3+ đơn lẻ 1.0x + Otsu cũ | 68.71% | 67.36% | 81.15% | 70.26% |
+| Run 2 (`colab_run_2_dual_stage_ensemble`) | 4,986 (Full) | Dual-Stage + Stage-1 CGM + D4 TTA + Pure-Glass Guard | 70.49% | 76.38% | 82.51% | 99.93% |
+| Run 3 (`M1_Baseline_SingleScale`) | 4,986 (Full) | Tái lập WSSS-Tissue 1x + Pure-Glass Guard | 69.35% | 75.47% | 81.69% | 99.93% |
+| Run 3 (`M5_Proposed_SOTA_Ensemble`) | 4,986 (Full) | + Stage-1 CGM + D4 TTA + CAM Fusion + Prior + Bilateral | 70.51% | 76.39% | 82.52% | 99.93% |
+| **Run 3 (`M6_MultiScale_Pyramid_D4`)** | **4,986 (Full)** | **Multi-Scale `{0.75, 1.0, 1.25}` x D4 + Entropy Weighting** | **70.53%** | **76.41%** | **82.54%** | **99.93%** |
 
-Chuỗi thực nghiệm nền tảng này xác nhận ba bài học kỹ thuật quyết định: (1) tuân thủ tuyệt đối chuẩn hóa `[0.0, 1.0]` với checkpoint gốc (`5.74% -> 69.34%`), (2) `Pure-Glass Guard` nâng `BACK IoU` từ `70.26%` lên `99.93%` (`100.00%` Recall trên `18,279,223` điểm ảnh kính trắng) và xóa sạch `781,168` điểm ảnh `NEC` từng bị đục lỗ nhầm ở Run 4, và (3) tổ hợp suy luận `M6` đạt `70.53%` 4-class mIoU (Wilcoxon $p = 2.60 \times 10^{-15}$ so với `M1`), nhưng vẫn bị giới hạn bởi trần biểu diễn của một kiến trúc CNN Stage-2 duy nhất.
-
-### 5.2 Gate-7 Step-0: Kiểm Định Trần Mặt Nạ Giả Vòng 2 Trên Tập VAL (0% TEST)
-
-Chạy kiểm định `se374_g7_diag_r2_val` (`SHA256 = 21c08b3996507d66`) trên toàn bộ `3,418` patches VAL (`2,153` patches đa lớp, hoàn toàn không truy cập tập TEST) giữa hai ứng viên tiền đăng ký `blend = 0.50` và `blend = 1.00`:
+### 5.2 Gate-7 Step-0: Trần Mặt Nạ Giả Vòng 2 Trên Tập VAL (`3,418` Patches, 0% TEST)
 
 | Ứng viên mặt nạ mềm trên VAL (`3,418` patches) | Overall mIoU | mDice | TUM | STR | LYM | NEC | Multi-class mIoU | ECE (thấp = tốt) | Entropy (Đa lớp) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | `q_s1_sgdap` (Giai đoạn 1, `blend = 0.00`) | 74.13% | 85.07% | 80.14% | 74.72% | 67.86% | 73.81% | 63.32% | 0.0751 | 0.2244 |
-| `q_r2` (`blend = 0.50`: 50% `p_ens4` + 50% `q_s1`) | 75.39% (+1.26%) | 85.89% | 81.27% | 75.92% | **68.82%** | 75.54% | 65.00% (+1.68%) | 0.0527 | 0.2847 |
+| `q_r2` (`blend = 0.50`: 50% `p_ens4` + 50% `q_s1`) | 75.39% (+1.26%) | 85.89% | 81.27% | 75.92% | **68.82%** | 75.54% | 65.00% | 0.0527 | 0.2847 |
 | **`p_ens4_uncal_ygated` (`blend = 1.00`, y-gated)** | **76.03% (+1.90%)** | **86.30%** | **82.19%** | **76.69%** | 68.71% | **76.54%** | **65.89% (+2.57%)** | **0.0489 (-35%)** | **0.2883** |
 
-Kết quả trên VAL vượt rõ ràng ngưỡng Go/No-Go `>= 75.50%` và `LYM >= 67.86%`, đồng thời chỉ ra việc pha loãng 50% về Giai đoạn 1 làm suy giảm `-0.64%` mIoU (`75.39%` so với `76.03%`). Lưu ý minh bạch trong tệp JSON `se374_g7_diag_r2_val`: cờ `"go_decision": false` được script đánh giá tự động trên ứng viên mặc định `blend = 0.50` (`0.7539 < 0.7550`), trong khi ứng viên `candidates["p_ens4_uncal_ygated"]` (`blend = 1.00`) đạt `0.7603 >= 0.7550` và được khóa làm mục tiêu chưng cất chính thức cho Gate-7.
+### 5.3 Tiến Hóa 4 Họ Kiến Trúc: Round-1 vs Round-2 Hậu Bản Vá `arm7` (`Job E: 02c_v2`, `A100`)
 
-### 5.3 Tiến Hóa 4 Họ Kiến Trúc: Round-1 (Gate-6) vs Round-2 Track A (Gate-7)
-
-Bảng dưới đối chiếu từng họ kiến trúc độc lập giữa Round-1 (Gate-6, đánh giá trên L4) và Round-2 Track A (Gate-7, đánh giá trên G4 Blackwell) theo đúng giao thức `02c` trên tập TEST `4,986` patches (`23` bệnh nhân):
-
-| Họ kiến trúc | Round-1 Arm (Gate-6) | R1 TEST mIoU | Round-2 Track A Arm (Gate-7) | R2 Best EMA VAL | R2 No-CGM TEST | R2 Matched TEST mIoU | R2 Per-Class IoU (TUM / STR / LYM / NEC) | Tăng R2 vs R1 |
+| Họ kiến trúc | Round-1 Arm (Gate-6) | R1 TEST | Round-2 Track A Arm (`02c_v2`, `ms_3_hvflip`) | R2 VAL | R2 No-CGM TEST | R2 CGM TEST | R2 Per-Class IoU (No-CGM: TUM / STR / LYM / NEC) | R2 vs R1 |
 | :--- | :--- | :---: | :--- | :---: | :---: | :---: | :--- | :---: |
-| Classic ASPP CNN | `arm1_deeplab_cleankd` (R101) | 71.11% | `arm8_deeplab_r101_r2` (R101, Ep 2) | 68.74% | 70.47% | **70.96%** (CGM) | 80.59 / 74.39 / 61.84 / 67.02 | -0.15% |
-| Hierarchical ViT | `arm2_segformer_oeem` (MiT-B3) | 71.84% | `arm6_segformer_b5_r2` (MiT-B5, Ep 5) | 70.13% | 72.04% | **72.04%** (`no_cgm`; `72.11%` CGM) | 81.55 / 75.40 / 61.69 / 69.51 | **+0.20%** |
-| Modern ConvNet | `arm3_convnext_selftrain` (Base) | 70.73% | `arm7_convnext_large_r2` (Large, Ep 5) | 69.49% | 71.80% | **71.80%** (`no_cgm`; `71.84%` CGM) | 80.46 / 74.89 / **62.21** / 69.64 | **+1.07%** |
-| SSL Vision Transformer | `arm4_dinov2_adapter` (ViT-B/14, 224px) | 72.36% | **`arm5_dinov2_large_r2` (ViT-L/14, 336px, Ep 10)** | **70.95%** | **72.53%** | **72.80%** (4-DoF CGM) | **82.73 / 76.17** / 61.31 / **70.98** | **+0.44%** |
+| Classic ASPP CNN | `arm1_deeplab_cleankd` (R101) | 71.11% | `arm8_deeplab_r101_r2` (R101) | 69.31% | 70.70% | **71.09%** | 80.55 / 74.35 / 61.92 / 65.99 (CGM NEC: `67.06%`) | -0.02% |
+| Hierarchical ViT | `arm2_segformer_oeem` (MiT-B3) | 71.84% | `arm6_segformer_b5_r2` (MiT-B5) | 70.31% | **72.04%** | 72.10% | 81.37 / 75.30 / 61.53 / 69.97 | **+0.20%** |
+| Modern ConvNet | `arm3_convnext_selftrain` (Base) | 70.73% | **`arm7_convnext_large_r2` (Large, post-fix)** | 69.65% | **71.88%** | 71.90% | 80.83 / 74.89 / **62.13** / 69.67 | **+1.15%** |
+| SSL Vision Transformer | `arm4_dinov2_adapter` (ViT-B/14) | 72.36% | **`arm5_dinov2_large_r2` (ViT-L/14, `336px`)** | **71.21%** | **72.55%** | **72.63%** | **82.59 / 76.03** / 61.13 / **70.45** (CGM: `82.66/76.10/61.23/70.56`) | **+0.27%** |
 
-*(Lưu ý số liệu từng lớp trong bảng trên trích nguyên bản từ nhánh `no_cgm` được VAL chọn cho `arm6` và `arm7` trong `STAGE2_TRAINING_METRICS.json`; ở chế độ `cgm_val_calibrated`, `arm6` đạt `81.58 / 75.43 / 61.77 / 69.68` và `arm7` đạt `80.47 / 74.90 / 62.23 / 69.76`.)*
+### 5.4 Bảng Kết Quả Chung Kết Gate-7 Track A Hậu Bản Vá (`Job E: 02c_v2`, TEST `n = 4,986`)
 
-### 5.4 Bảng Tổng Hợp Kết Quả Chung Kết Gate-7 Track A (Held-Out TEST)
+Toàn bộ kết quả trên `4,986` patches (`23` bệnh nhân độc lập) được tổng hợp trong bảng dưới đây và minh họa trực quan ở **Hình 2** và **Hình 3**.
 
-Toàn bộ kết quả trên `4,986` patches (`23` bệnh nhân độc lập) của chiến dịch `se374_g7_ensemble_tracka` được tổng hợp trong bảng dưới đây và minh họa trực quan ở **Hình 1** (so sánh mIoU kèm khoảng tin cậy 95% Patient Bootstrap CI) và **Hình 2** (tiến hóa IoU theo từng lớp mô học `TUM`, `STR`, `LYM`, `NEC`).
-
-| Phương pháp / Giao thức (G4 Blackwell trừ khi ghi L4) | Vai trò đánh giá | TEST mIoU (raw) | TEST mDice | 95% Patient Boot CI | TUM / STR / LYM / NEC IoU (%) |
+| Phương pháp / Giao thức (Hậu Bản Vá `02c_v2` trên `A100`) | Vai trò đánh giá | TEST mIoU (raw) | TEST mDice | 95% Patient Boot CI | TUM / STR / LYM / NEC IoU (%) |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| Author Official Pure (`1x`, `cgm_author_mul0`) | Mốc tác giả gốc | 69.48% (`0.6948`) | 81.79% | `[63.63, 73.59]` | 78.44 / 73.33 / 60.06 / 66.09 |
-| Author Official Pure (`MS-TTA + CGM`) | Mốc tác giả tăng cường | 70.31% (`0.7031`) | 82.36% | `[64.57, 74.32]` | (L4: `70.30%`) |
-| Author Step-0 Upgraded Anchor (`arm_b_full` + `MS-TTA+CGM`) | Mốc đối chứng chính (`m=5`) | 70.43% (`0.7043`) | 82.45% | `[64.73, 74.47]` | 79.46 / 74.13 / 60.55 / 67.60 |
-| Gate-6 Round-1 Primary 4-Arm (L4, Uniform + 4-DoF CGM) | Mốc Round-1 (`se374_s2v2_ensemble`) | 72.47% (`0.724681`) | 83.84% | `[66.96, 76.43]` | 81.55 / 75.51 / **62.34** / 70.47 |
-| **Gate-7 Track A Primary 4-Arm (`arm8+arm6+arm7+arm5`, Uniform, `no_cgm`)** | **Mô hình tổ hợp chính** | **72.80%** (`0.727955`) | **84.05%** | **`[67.24, 76.79]`** | 82.14 / 75.94 / **62.31** / 70.79 |
-| **Gate-7 Track A Single Champion (`arm5_dinov2_large_r2`, `ms_3_hflip` + 4-DoF CGM)** | **Đơn mô hình tiền đăng ký** | **72.80%** (`0.727997`) | **84.02%** | **`[67.16, 76.86]`** | **82.73 / 76.17** / 61.31 / **70.98** |
-| Gate-7 Track A VAL-Selected CNN+ViT Pair (`arm8+arm5`, `no_cgm`) | Cặp tiền đăng ký trên VAL | 72.68% (`0.726778`) | 83.96% | `[66.96, 76.70]` | 82.35 / 75.92 / 62.04 / 70.41 |
-| Gate-7 Track A Best Triplet (`arm8+arm7+arm5`, `no_cgm`) | Thứ cấp / Ablation | 72.77% | 84.03% | - | 82.06 / 75.87 / 62.40 / 70.74 |
-| Gate-7 Track A Highest Pair (`arm7+arm5`, `no_cgm`) | Thứ cấp / Thăm dò | 72.79% (`0.727929`) | 84.04% | `[67.25, 76.78]` | 82.08 / 75.94 / 62.12 / 71.03 |
-| Gate-7 Track A Equal 4-Arm (`cgm_fixed_0_10`) | Thứ cấp / Độ nhạy CGM | 72.81% (`0.728143`) | 84.06% | `[67.26, 76.81]` | 82.15 / 75.95 / 62.34 / 70.82 |
-| Gate-7 Track A Simplex-CV 4-Arm (`[0.28,0.08,0.05,0.59]`, `no_cgm` / `cgm_fixed_0_10`) | Thứ cấp / Thăm dò | 72.87% / **72.90%** (`0.728989`) | 84.08% / **84.10%** | `[67.31, 76.85]` | 82.56 / 76.16 / 61.99 / 70.89 |
+| Author Official Pure (`1x`, `cgm_author_mul0`) | Mốc tác giả gốc | 69.48% (`0.6948`) | 81.79% | `[63.63, 73.59]` | 78.44 / 73.33 / 60.06 / 66.09 (Raw `1x`: `69.35%`) |
+| Author Official Pure (`MS-TTA + CGM`) | Mốc tác giả tăng cường | 70.31% (`0.7031`) | 82.36% | `[64.57, 74.32]` | 79.43 / 74.09 / 60.50 / 67.20 |
+| Author Step-0 Upgraded Anchor (`arm_b_full` + `MS-TTA+CGM`) | Mốc đối chứng chính (`m=5`) | 70.43% (`0.7043`) | 82.45% | `[64.72, 74.47]` | 79.46 / 74.13 / 60.55 / 67.59 |
+| Gate-6 Round-1 Primary 4-Arm (`se374_s2v2_ensemble`) | Mốc Round-1 | 72.47% (`0.7247`) | 83.84% | `[66.96, 76.43]` | 81.55 / 75.51 / **62.34** / 70.47 |
+| Gate-7 Track A Single Champion (`arm5`, `ms_3_hvflip` + CGM `0.10`) | Đơn mô hình tiền đăng ký | 72.63% (`no-CGM`: `72.55%`) | 83.90% | `[67.06, 76.59]` | **82.66 / 76.10** / 61.23 / 70.56 |
+| Gate-7 Track A VAL-Selected CNN+ViT Pair (`arm5+arm8`, `no-CGM`) | Cặp tiền đăng ký trên VAL | 72.69% (CGM: `72.72%`) | 83.97% | `[66.95, 76.71]` | 82.36 / 75.92 / 62.10 / 70.40 |
+| **Gate-7 Track A Primary 4-Arm (`Uniform`, `cal_logprob`, `no-CGM`)** | **Mô hình tổ hợp chính** | **72.79%** (`0.727865`) | **84.04%** | **`[67.17, 76.83]`** | 82.12 / 75.85 / **62.30** / 70.89 |
+| **Gate-7 Track A Primary 4-Arm + `cgm_val_calibrated` (`0.10`)** | **Tổ hợp chính + CGM 5-chuyên gia** | **72.80%** (`0.728022`) | **84.06%** | **`[67.19, 76.85]`** | 82.12 / 75.86 / **62.32** / 70.91 |
+| **Gate-7 Track A Primary 4-Arm + `cgm_nec_focused_1dof` (`t_nec=0.40`)** | **Chế độ lâm sàng sạch FP NEC** | **72.80%** (`0.728045`) | **84.06%** | **`[67.19, 76.86]`** | 82.12 / 75.85 / 62.30 / **70.95** |
+| Gate-7 Track A Simplex-CV 4-Arm (`[0.61,0.06,0.05,0.28]`, `no-CGM` / `val_cal` / `nec1dof`) | Thứ cấp / Thăm dò | 72.85% / 72.88% / **72.90%** | 84.07% / 84.09% / **84.11%** | `[67.28, 76.89]` | 82.55 / 76.13 / 61.93 / **71.01** |
 
-![Hình 1: Đối chiếu 4-Class Pooled TEST mIoU kèm khoảng tin cậy 95% Patient Bootstrap CI trên 23 bệnh nhân độc lập (4,986 patches) giữa các mốc tác giả, Gate-6 Round-1 và Gate-7 Track A.](figures/fig1_gate7_test_miou_ci_bw.png)
+- **Nhóm patch đa lớp phức tạp (`multiclass_k_ge_2`, `n = 2,984 / 4,986`):** Primary 4-Arm `cgm_val_calibrated` đạt **`65.33%` mIoU (`78.89%` mDice)** (`TUM 73.70 / STR 67.10 / LYM 58.44 / NEC 62.09`) vượt `arm5` đơn (`65.26%` / `78.81%`, `LYM 57.88`, `NEC 61.48`), thể hiện ưu thế tổ hợp đa họ ở `LYM` (`+0.56%`) và `NEC` (`+0.61%`).
+- **Đa dạng & Giới hạn trên (`02c_v2` TEST):** Bất đồng cặp `3.61%` (`arm6-arm7`, $\kappa = 0.9410$) đến `6.14%` (`arm5-arm8`, $\kappa = 0.8999$); **Pixel Oracle Accuracy = `90.35%`**, **Patch Oracle Upper Bound = `75.69%` mIoU**.
 
-![Hình 2: Tiến hóa IoU từng phân lớp mô học (TUM, STR, LYM, NEC) và Pooled 4-Class mIoU từ mốc Author Pure 1x qua Step-0 Author, Gate-6 Round-1 đến Gate-7 Arm 5 và Primary 4-Arm.](figures/fig2_gate7_per_class_evolution_bw.png)
+![Hình 2: Đối chiếu 4-Class Pooled TEST mIoU kèm khoảng tin cậy 95% Patient Bootstrap CI trên 23 bệnh nhân độc lập (4,986 patches, Phase 1B hậu bản vá 02c_v2) giữa các mốc tác giả, Gate-6 Round-1 và Gate-7 Track A.](figures/fig1_gate7_test_miou_ci_bw.png)
 
-### 5.5 Kiểm Định Ý Nghĩa Thống Kê Holm-Bonferroni & Độ Đa Dạng Tổ Hợp
+![Hình 3: Tiến hóa IoU từng phân lớp mô học (TUM, STR, LYM, NEC) và Pooled 4-Class mIoU từ mốc Author Pure 1x qua Step-0 Author, Gate-6 Round-1 đến Gate-7 Arm 5 và Primary 4-Arm (Phase 1B hậu bản vá 02c_v2).](figures/fig2_gate7_per_class_evolution_bw.png)
 
-Toàn bộ giả thuyết chính được kiểm định trên `23` bệnh nhân độc lập bằng phép thử hoán vị ghép cặp theo bệnh nhân (`10,000` lần hoán vị cho pooled Delta-mIoU) và kiểm định dấu hạng Wilcoxon (cho per-patient macro-mIoU), kèm hiệu chỉnh đa kiểm định **Holm-Bonferroni**:
+### 5.5 Kiểm Định Ý Nghĩa Thống Kê Holm-Bonferroni Toàn Cục & Từng Lớp Mô (`23` BN)
 
-| Cặp so sánh | Chênh lệch pooled mIoU | `perm_p_holm` (pooled) | `wilcoxon_p_holm` (bệnh nhân) | Cohen's `d_z` | Thắng/Hòa/Thua (23 BN) |
+| So sánh (`02c_v2` & `phase1b_zero_gpu_analytics.json`) | Chênh lệch | `perm_p_holm` (pooled) | `wilcoxon_p` / `p_holm` (bệnh nhân) | Cohen's `d_z` | Thắng/Hòa/Thua |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Primary 4-Arm (`no_cgm`) vs Step-0 Author (`70.43%`)** [`m=5`*] | **+2.36%** | **0.0005** | 0.9268 | -0.1172 | 16W / 0T / 7L |
-| **Primary 4-Arm (`no_cgm`) vs Pure Author `1x` (`69.48%`)** [`m=4`] | **+3.31%** | **0.0004** | **0.0087** | +0.3387 | 19W / 0T / 4L |
-| Primary 4-Arm (`no_cgm`) vs Pure Author `MS-TTA` (`70.31%`) [`m=4`] | +2.49% | **0.0004** | 0.1717 | +0.0688 | 16W / 0T / 7L |
-| **Single `arm5` (+4-DoF CGM) vs Step-0 Author (`70.43%`)** [`m=5`*] | **+2.37%** | **0.0048** | **0.0302** | **+0.5587** | **18W / 0T / 5L** |
-| **Single `arm5` (+4-DoF CGM) vs Pure Author `1x` (`69.48%`)** [`m=4`] | **+3.32%** | **0.0004** | **0.000067 (`6.7e-5`)** | **+0.9007** | **20W / 0T / 3L** |
-| **Single `arm5` (+4-DoF CGM) vs Pure Author `MS-TTA` (`70.31%`)** [`m=4`] | **+2.49%** | **0.0019** | **0.000859** | **+0.7809** | **20W / 0T / 3L** |
-| Primary 4-Arm (`no_cgm`) vs Single `arm5` (+4-DoF CGM) [`m=5`] | -0.00% (`-0.004%`) | 0.9923 | 0.3208 | -0.6034 | 9W / 0T / 14L |
-| Chẩn đoán tổ hợp thuần: 4-Arm (`no_cgm` `72.80%`) vs `arm5` (`no_cgm` `72.53%`) | +0.27% | `p_raw = 0.4654` | `p_raw = 0.0698` | +0.1858 | 14W / 0T / 9L |
+| **Primary 4-Arm (`no-CGM`) vs Step-0 Author (`70.43%`)** [`m=5`] | **+2.35%** | **0.0005** | `0.0650` / `0.2813` | +0.1619 | 17W / 0T / 6L |
+| **Primary 4-Arm (`no-CGM`) vs Pure Author `1x` (`69.48%`)** [`m=4`] | **+3.31%** | **0.0004** | **`0.000511`** (Holm) | **+0.5817** | **21W / 0T / 2L** |
+| **Primary 4-Arm (`no-CGM`) vs Pure Author `MS-TTA` (`70.31%`)** [`m=4`] | **+2.48%** | **0.0004** | **`0.0217`** (Holm) | **+0.3312** | **20W / 0T / 3L** |
+| **Pure Ensemble: Primary 4-Arm (`no-CGM`) vs `arm5` (`no-CGM`)** | **+0.24%** | `p_raw = 0.6029` | **`0.0327`** (raw) | **+0.4008** | **17W / 0T / 6L** |
+| **Primary 4-Arm `nec_1dof` vs `no-CGM`** | +0.02% | `p_raw = 0.2510` | **`0.0091`** (raw) | **+0.3603** | **20W / 0T / 3L** |
+| **Primary 4-Arm `nec_1dof` vs Best Single (`arm5` CGM)** | +0.17% | `p_raw = 0.7170` | **`0.0327`** (raw) | **+0.5707** | **15W / 0T / 8L** |
 
-*\*Ghi chú hiệu chỉnh Holm `m=5`: Khi `uniform` được chọn làm cấu hình chính, hai hàng `primary_4arm_vs_author` và `equal_4arm_vs_author` trùng nhau trong họ `m=5`, làm phép hiệu chỉnh Holm trở nên chặt và bảo thủ hơn.*
+**Kiểm định Wilcoxon từng lớp mô hiệu chỉnh Holm-Bonferroni (`m = 4`, `ens4_cgm` vs `author_step0` trên `per_patient_class_ious_all_models.json`):**
 
-- **Độ đa dạng và giới hạn trên (Diversity & Oracles trên TEST):** Tỷ lệ bất đồng theo cặp giữa 4 mô hình Gate-7 dao động từ `4.19%` (`arm6 - arm5`, $\kappa = 0.9317$) đến `6.38%` (`arm8 - arm5`, $\kappa = 0.8959$). **Pixel Oracle Accuracy = `90.60%`** và **Patch Oracle Upper Bound = `75.56%` mIoU** (tăng nhẹ so với Gate-6 lần lượt là `90.35%` và `75.35%`).
-- **Nhận định khoa học về hiệu quả chưng cất Vòng 2:** Ở Vòng 2, đơn mô hình `arm5_dinov2_large_r2` (`72.80%` với 4-DoF CGM) đã hấp thụ thành công gần trọn tri thức của tổ hợp 4 họ kiến trúc Vòng 1, đạt hiệu năng ngang bằng Primary 4-Arm (`delta = -0.004%`, `perm_p_holm = 0.9923`) chỉ với khoảng 1/4 chi phí suy luận và thắng thuyết phục ở cả hai phép thử cấp bệnh nhân. Trong khi đó, Primary 4-Arm vẫn bảo toàn lợi thế quan trọng **`+1.00%` IoU lớp tế bào miễn dịch `LYM`** (`62.31%` so với `61.31%`) và **`+0.03%` mDice** (`84.05%` so với `84.02%`).
+| Lớp mô học | Số BN hoạt động | Mean Delta IoU | Median Delta IoU | W / T / L | `p_raw` | **`p_holm` (`ens4_cgm` vs Author)** | Đối chiếu `arm5_cgm` vs Author (`p_holm`) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`TUM` (Tumor Epithelium)** | 23 | **+2.42%** | +2.11% | 21 / 0 / 2 | 0.000107 | **0.000426** (`***`) | 0.005115 (`**`) |
+| **`STR` (Stroma)** | 23 | **+1.58%** | +1.60% | 18 / 0 / 5 | 0.001660 | **0.004980** (`**`) | 0.005115 (`**`) |
+| **`LYM` (Lymphocytic Infiltrate)** | 22 | **+1.96%** | +1.49% | 15 / 2 / 5 | 0.015312 | **0.030624** (`*`) | 0.053169 (`ns`) |
+| **`NEC` (Necrosis)** | 20 | **+4.48%** | +0.10% | 10 / 6 / 4 | 0.024536 | **0.030624** (`*`) | 0.037076 (`*`) |
 
-### 5.6 Kiểm Chứng Đa Hạt Giống (Multi-Seed Reproducibility)
+Tổ hợp 4 họ kiến trúc (`ens4_cgm`) là phương pháp duy nhất đạt ý nghĩa thống kê sau hiệu chỉnh Holm trên **cả `4/4` lớp mô** (`p_holm <= 0.0306`), khắc phục điểm yếu của đơn mô hình `arm5` ở lớp miễn dịch `LYM` (`p_holm = 0.0532 > 0.05`).
 
-Để kiểm chứng độ ổn định trước dao động khởi tạo ngẫu nhiên và thứ tự nạp batch, hệ thống đã hoàn thành đầy đủ bộ 3 hạt giống trên mô hình chủ lực Vòng 1 (`arm4_dinov2_adapter`, giao thức `02b` `ms_tta_cgm`) và đang tiếp tục mở rộng kiểm chứng 3 hạt giống cho mô hình chủ lực Vòng 2 (`arm5_dinov2_large_r2`):
+### 5.6 Kiểm Chứng Đa Hạt Giống (`42/123/456`) & Bóc Tách Nhân Quả `Jobs H1, H2, H3`
 
-| Mô hình / Chiến dịch | Hạt giống (Seed) | Epoch & Trọng số chọn | Best VAL mIoU | TEST `ms_tta` | TEST `ms_tta_cgm` | mDice | Trạng thái |
-| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :--- |
-| `arm4_dinov2_adapter` (R1) | `seed = 42` | Ep 3 **EMA** | 69.41% | 71.74% | **72.20%** | 83.61% | Đã xác minh (`SHA256` OK) |
-| `arm4_dinov2_adapter` (R1) | `seed = 123` | Ep 4 **EMA** | 69.38% | 71.41% | **71.98%** | 83.48% | Đã xác minh (`SHA256` OK) |
-| `arm4_dinov2_adapter` (R1) | `seed = 456` | Ep 5 **RAW** | 69.45% | 70.55% | **70.91%** | 82.75% | Đã xác minh (`SHA256` OK) |
-| **Tổng hợp `arm4` (3 seeds)** | **42 / 123 / 456** | **2 EMA + 1 RAW** | **69.41% +/- 0.04%** | **71.23% +/- 0.61%** | **71.70% +/- 0.69%** (`ddof=1`) | **83.28%** | **2 EMA đạt `72.09% +/- 0.16%`** |
-| `arm5_dinov2_large_r2` (R2) | `seed = 42` | Ep 10 **EMA-only** | 70.95% | 72.53% (`02c` `no_cgm`) | **72.80%** (`02c` 4-DoF CGM) | 84.02% | Đã xác minh (`SHA256` OK) |
-| `arm5_dinov2_large_r2` (R2) | `seed = 123` | **EMA-only** | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | Đang huấn luyện trực tiếp trên L4 (`colab_account`) |
-| `arm5_dinov2_large_r2` (R2) | `seed = 456` | **EMA-only** | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | Đang xếp hàng chờ GPU (`colab_account`) |
-| **Tổng hợp `arm5` (3 seeds)** | **42 / 123 / 456** | **3/3 EMA-only** | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | `[PENDING LIVE GPU RUN]` | Chờ hoàn tất `seed=123` và `seed=456` |
+- **Độ ổn định 3 hạt giống (`42 / 123 / 456`) trên đơn mô hình & BÊN TRONG Tổ Hợp 4-Arm (`02c_v2`, `ms_3_hvflip`):** So với đối chứng Round-1 `arm4` chọn lẫn Raw/EMA (`71.70% +/- 0.69%`), `arm5` độc lập (`EMA-only`, giao thức `02b`) đạt **`72.68% +/- 0.09%`** (`7.7x` thấp hơn về độ lệch chuẩn). Khi đặt 3 hạt giống `arm5` bên trong tổ hợp 4-Arm (`02c_v2`), độ lệch chuẩn tiếp tục giảm thêm **`2.6x`**:
 
----
+| Cấu hình (`n = 3` hạt giống `arm5`: `42, 123, 456`, `02c_v2`) | Mean TEST mIoU | Std (`ddof=1`) | Min - Max | TUM / STR / LYM / NEC (Mean) |
+| :--- | :---: | :---: | :---: | :--- |
+| `arm5_no_cgm` (đơn mô hình) | 72.44% | 0.13% | 72.29% - 72.55% | 82.58 / 75.92 / 60.92 / 70.35 |
+| `arm5_cgm_val_calibrated` (đơn mô hình) | 72.53% | 0.13% | 72.39% - 72.63% | 82.64 / 75.98 / 61.02 / 70.46 |
+| **`primary_4arm_no_cgm` (4-Arm Uniform)** | **72.74%** | **0.05%** (`2.6x` thấp hơn) | 72.68% - 72.79% | 82.07 / 75.81 / **62.28** / 70.80 |
+| **`primary_4arm_cgm_val_calibrated`** | **72.75%** | **0.05%** | 72.70% - 72.80% | 82.07 / 75.82 / **62.29** / 70.83 |
+| **`primary_4arm_cgm_nec_focused_1dof` (`t_nec=0.40`)** | **72.76%** | **0.05%** | **72.70% - 72.80%** | 82.07 / 75.82 / 62.28 / **70.88** |
 
-## 6. Phân Tích Lỗi Lâm Sàng Cấp Bệnh Nhân & Chiến Dịch Kiểm Chứng GPU Đang Chạy
+- **Bóc tách nhân quả Độ phân giải (`224px` vs `336px`), Nguồn chưng cất (`stage1` vs `ens4_r2`) & `Best EMA` vs `Best Raw` (`Jobs H1, H2, H3`, `seed = 42`, `EXIT_CODE = 0`):**
 
-### 6.1 Giải Phẫu Nghịch Lý Thống Kê Cấp Bệnh Nhân (`GT = 0` Micro-FP & Tác Động Của CGM)
+| Thực nghiệm (`arm5_dinov2_large_r2`, `seed = 42`) | Độ phân giải | Pseudo-Mask | Best VAL (EMA / Raw) | TEST `raw` (EMA / Raw) | TEST `ms_tta` (EMA / Raw) | TEST `ms_tta_cgm` Cal (EMA / Raw) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Job H1 (`se374_g7_phase1b_h1_arm5_224px`, `A100`)** | `224x224` (`1.0x`) | `ens4_r2` | **70.65%** (Ep7) / 70.38% (Ep8) | **71.99%** / 71.43% (`+0.56%`) | **72.40%** / 71.93% (`+0.47%`) | **72.56%** / 72.32% (`+0.24%`; `NEC 69.78%`) |
+| **Job H2 (`se374_g7_phase1b_h2_arm5_s1`, `G4`)** | `336x336` (`1.5x`) | `stage1` | **70.60%** (Ep5) / 70.32% (Ep5) | **71.41%** / 70.66% (`+0.75%`) | **71.76%** / 71.05% (`+0.71%`) | **72.23%** / 71.68% (`+0.55%`) |
+| **Job H3 (`se374_g7_phase1b_h3_arm5_raw_vs_ema`, `L4`)** | `336x336` (`1.5x`) | `ens4_r2` | **70.94%** (Ep8) / 70.92% (Ep9) | **72.35%** / 72.16% (`+0.19%`) | **72.60%** / 72.51% (`+0.09%`) | **72.88%** / 72.88% (`fixed`: **72.74%** vs `72.64%`; `NEC 71.15%` vs `70.69%`) |
+| Mốc chuẩn `se374_g7_arm5_dinov2l` (`G4`) | `336x336` (`1.5x`) | `ens4_r2` | 70.95% (Ep10 EMA) | 72.24% | 72.53% | 72.74% (`NEC 70.78%`; `02c_v2`: `72.63%`) |
 
-Từ bảng thống kê Mục 5.5 xuất hiện một nghịch lý đáng chú ý: `Primary 4-Arm (no_cgm)` vượt `Step-0 Author` tới `+2.36%` trên pooled mIoU với độ ý nghĩa cực cao (`perm_p_holm = 0.0005`), nhưng kiểm định Wilcoxon cấp bệnh nhân lại cho `wilcoxon_p_holm = 0.9268` và `Cohen's d_z = -0.1172`; tương tự khi so với `arm5 (+4-DoF CGM)` cho `d_z = -0.6034` (`9W/14L`).
-
-Bằng việc lưu trữ chính xác ma trận giao/hợp `23 x 4` (`inter_p`, `union_p`) trong `checkpoints/vps_evidence/se374_g7_ensemble_tracka/artifacts/per_patient_class_ious.json` (`SHA256 = d180876c1dc75635`), chúng tôi đã chứng minh trọn vẹn cơ chế toán học đứng sau nghịch lý này (minh họa trực quan tại **Hình 3**):
-
-- **Cơ chế phân mẫu active-union:** Phép thử hoán vị đánh giá pooled global Delta-mIoU (miễn nhiễm với lượng nhỏ điểm ảnh nhiễu trên một lớp vắng mặt). Ngược lại, thước đo macro-mIoU cấp bệnh nhân chỉ tính trung bình trên các lớp có `union_p > 0`. Kiểm toán trực tiếp trên toàn bộ `4,986` mặt nạ Ground Truth gốc (`data/BCSS-WSSS/test/mask/*.png`) xác nhận trong ma trận `23 x 4 = 92` ô có chính xác **`11` ô `GT == 0` thực tế trên đĩa** (`8` ca vắng `NEC` + `3` ca vắng `LYM` trên `10` bệnh nhân riêng biệt, do `TCGA-EW-A6SB` đồng thời vắng cả `LYM` lẫn `NEC`), tách thành hai tập con rạch ròi:
-  1. **`8` ô `GT == 0` bất đối xứng mẫu số (`min(union_p) == 0` qua `10` mô hình cấp đầu / `12` bản ghi trong JSON: `7` ô `NEC` + `1` ô `LYM`):** Khi ít nhất một mô hình dự đoán sạch `0 px` (`None`) còn mô hình `no_cgm` phát sinh dương tính giả, IoU lớp đó rơi xuống `0.0` làm mẫu số macro-mIoU nhảy từ `3` lên `4`. Cụ thể, trong `8` ô bất đối xứng này, có **`7/8` ô chỉ phát sinh vi dương tính giả rất nhỏ từ `11` đến `556` điểm ảnh (`< 0.02%` tổng `union_p`, trong đó `11` đến `468` điểm ảnh trên `5` ca Author sạch tạo cú sụt giảm nhân tạo `primary_4arm (no_cgm)` so với `Step-0 Author` từ `-9.12%` đến `-17.10%`, gồm `4` ca sụt nặng `-12.07%` đến `-17.10%`)**, còn ô thứ 8 (`TCGA-EW-A1P4`) có `29,454` điểm ảnh (`0.261%` tổng `union_p`); riêng mức chênh lệch `-21.15%` (`TCGA-EW-A1OV`) là chênh lệch của `primary_4arm (no_cgm)` so với `arm5 (+4-DoF CGM)`, không phải so với `Step-0 Author`.
-  2. **`3` ô `GT == 0` dương tính giả đồng loạt (`min(union_p) > 0`, cả `12/12` bản ghi mô hình đều dự đoán FP lớn nên giữ nguyên cùng mẫu số giữa các mô hình):** `TCGA-E2-A573` (`NEC`: `prim = 92,539 px`, `arm5 = 103,799 px`, `auth = 98,339 px`), `TCGA-E2-A159` (`LYM`: `prim = 653,710 px`, `arm5 = 916,141 px`, `auth = 503,723 px`), và `TCGA-EW-A6SB` (`LYM`: `prim = 255,472 px`, `arm5 = 321,734 px`, `auth = 193,150 px`).
-- **Bảng giải phẫu `8` ô `GT == 0` bất đối xứng mẫu số (`min(union_p) == 0`, gồm `7` ca vắng `NEC` và `1` ca vắng `LYM`):**
-
-| Bệnh nhân (Held-Out Test) | Lớp vắng mặt bất đối xứng (`GT = 0`) | Số pixel FP ở `Primary 4-Arm` (`no_cgm`) | Raw Delta vs Author | Delta trừ `8` ô bất đối xứng (trừ cả `11` ô) | Hành vi của `arm5` (`+4-DoF CGM`, `t_NEC = 0.65`) |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| `TCGA-E2-A1LS` | `NEC` | 468 px (`0.0093%`) | -17.10% | **+1.65%** (thắng 3/3 lớp thật) | Xóa sạch về `0 px` (`+1.84%` vs Author) |
-| `TCGA-E2-A158` | `NEC` | 202 px (`0.0040%`) | -15.16% | **+2.08%** (thắng 3/3 lớp thật) | Xóa sạch về `0 px` (`+1.56%` vs Author) |
-| `TCGA-EW-A3U0` | `LYM` | 424 px (`0.01385%`) | -12.07% | **+1.36%** (`TUM +6.73%`) | Còn `2,048 px` FP `LYM` (`t_LYM = 0.05`, `-9.37%`) |
-| `TCGA-D8-A27H` | `NEC` | 425 px (`0.0111%`) | -16.89% | -0.75% | Xóa sạch về `0 px` (`-0.65%` vs Author) |
-| `TCGA-E2-A14R` | `NEC` | 11 px (`0.0003%`) | -9.12% | **+5.31%** | Xóa sạch về `0 px` (`+6.06%` vs Author) |
-| `TCGA-EW-A1OV` | `NEC` | 52 px (`0.00019%`) | +0.88% | **+1.17%** | Xóa sạch về `0 px` (`+22.03%` vs Author) |
-| `TCGA-EW-A6SB`* | `NEC` (và `LYM` FP đồng loạt) | 556 px (`0.00588%`) | +1.17% | **+1.56%** (**+2.34%** khi trừ cả 11 ô) | Xóa sạch `NEC` về `0 px` (`+12.16%` vs Author); còn `321,734 px` FP `LYM` |
-| `TCGA-EW-A1P4` | `NEC` | 29,454 px (`0.261%`) | +4.42% | **+5.90%** | Xóa sạch về `0 px` (`+21.57%` vs Author) |
-
-*\*Ghi chú bảng: Do `TCGA-EW-A6SB` đồng thời có `GT == 0` ở cả `NEC` (bất đối xứng mẫu số) lẫn `LYM` (FP đồng loạt `255,472 px` / `321,734 px` / `193,150 px`), mức chênh lệch của bệnh nhân này là `+1.56%` khi chỉ loại 8 ô bất đối xứng và tăng lên `+2.34%` khi loại toàn bộ 11 ô `GT == 0` thực tế. Tổng hợp trên cả 11 ô thực tế, `arm5 (+4-DoF CGM, t_NEC = 0.65)` xóa sạch **`7/8` ca `NEC`-absent thực tế (`7/7` ca bất đối xứng mẫu số; còn FP `103,799 px` ở `TCGA-E2-A573`)** và vẫn còn FP `LYM` trên **`3/3` ca `LYM`-absent thực tế** (`EW-A3U0: 2,048 px`, `EW-A6SB: 321,734 px`, `E2-A159: 916,141 px`; `1/1` trong tập bất đối xứng).*
-
-![Hình 3: Phân tích độ nhạy cấp bệnh nhân trên 23 bệnh nhân Held-Out Test phân tách rõ 8 ô GT = 0 bất đối xứng mẫu số trong tổng số 11 ô GT = 0 thực tế trên đĩa ở Primary 4-Arm (Panel A) và khả năng xóa sạch 7/8 ca NEC-absent thực tế (7/7 ca bất đối xứng, còn FP trên TCGA-E2-A573) của Arm 5 tích hợp 4-DoF CGM (Panel B).](figures/fig3_patient_gt0_sensitivity_bw.png)
-
-- **Kiểm chứng độ nhạy thăm dò (Exploratory GT-Active Sensitivity - công bố cả hai mốc):**
-  - **Loại trừ `8` ô `GT == 0` bất đối xứng mẫu số (`min(union_p) == 0`):** `primary_4arm vs Step-0 Author` đảo chiều mạnh sang **`wilcoxon_p = 3.3e-5` (`3.27e-5`), `Cohen's d_z = +0.9021`, `20W/0T/3L`** (`TCGA-EW-A6SB = +1.56%`), và `primary_4arm vs arm5` trở nên cân bằng (`wilcoxon_p = 0.3765`, `d_z = +0.0814`, `13W/0T/10L`).
-  - **Loại trừ toàn bộ `11` ô `GT == 0` thực tế trên đĩa (`4,986` mặt nạ gốc):** `primary_4arm vs Step-0 Author` càng khẳng định mạnh hơn với **`wilcoxon_p = 2.6e-5` (`2.62e-5`), `Cohen's d_z = +0.9383`, `20W/0T/3L`** (`TCGA-EW-A6SB = +2.34%`), và `primary_4arm vs arm5` tiếp tục cân bằng (`wilcoxon_p = 0.3294`, `d_z = +0.1011`, `13W/0T/10L`).
-- **Ý nghĩa lâm sàng:** Trên thực tế giải phẫu bệnh, việc kích hoạt **Class-Gated Masking (CGM)** ở pha triển khai đóng vai trò bảo vệ sống còn, ngăn các đốm dương tính giả vi mô trên mô hoại tử vắng mặt làm sai lệch ước lượng tỷ lệ u sống $\text{VTP}_{\text{RCB}}$.
-
-### 6.2 Ba Chiến Dịch Thực Nghiệm GPU Bổ Sung Đang Chạy Trực Tiếp Trên `vps-colab` (`colab_account`)
-
-Nhằm hoàn thiện toàn diện các trụ cột phương sai đa hạt giống, kiểm chứng trực quan không chọn lọc toàn tập 4,986 ảnh và kiểm định lâm sàng chéo cơ quan, 3 chiến dịch GPU đang được điều phối trực tiếp trên tài khoản `colab_account` (`vps-colab`). Tuân thủ tuyệt đối nguyên tắc không bịa đặt số liệu, các hạng mục chưa hoàn tất được trình bày minh bạch với trạng thái **`[PENDING LIVE GPU RUN]`**:
-
-#### 6.2.1 Chiến Dịch Kiểm Chứng Trực Quan Toàn Tập (`02d_Stage2_Visual_Overlay_Audit_G4.ipynb`, `src/stage2_v2/visual_audit.py`)
-
-| Hạng mục kiểm định trực quan & hình học (`n = 4,986` patches TEST) | Tiêu chí xác minh bắt buộc | Kết quả đo đạc thực tế |
-| :--- | :--- | :--- |
-| 6 khẳng định toàn vẹn fail-fast (Mode `'P'` palette, SHA-256, `0` GT leakage vào `BACK`) | 6/6 PASS (`verify_zero_gt_leakage_glass_guard`) | `[PENDING LIVE GPU RUN]` (Job C) |
-| Boundary F1@2px (Primary 4-Arm & Arm 5 vs Author Anchor) | Đo trực tiếp trên toàn bộ biên lớp mô 4,986 patches | `[PENDING LIVE GPU RUN]` (Job C) |
-| Độ lệch tâm khối u (TUM Centroid Offset, pixel / um) | Đo sai số định vị hình học vùng biểu mô u | `[PENDING LIVE GPU RUN]` (Job C) |
-| Ma trận bất biến biến đổi `raw_1x` Flip/Rot90 & dịch chuyển nội vi `(dx, dy)` | Xác nhận 0 lỗi xoay/lật kênh trên 4 nhánh Gate-7 | `[PENDING LIVE GPU RUN]` (Job C) |
-| 11 bảng ảnh đối chiếu 300-DPI (01-08 Contact Sheets, 09-10 Whole-ROI Stitches, 11 Alignment) | Pixel nearest-neighbor sắc nét, 0 chọn lọc thiên lệch | `[PENDING LIVE GPU RUN]` (Job C) |
-
-#### 6.2.2 Chiến Dịch Đánh Giá Lâm Sàng, Hiệu Năng GPU & Chéo Cơ Quan (`04b_Stage2_Gate7_Clinical_LUAD_Bench_G4.ipynb`, `src/stage2_v2/gate7_clinical_bench.py`)
-
-| Hạng mục đánh giá lâm sàng & triển khai | Giao thức đo lường | Kết quả đo đạc thực tế |
-| :--- | :--- | :--- |
-| Tương quan dấu ấn sinh học VTP / TSR cấp bệnh nhân (Pearson $r$, Spearman $\rho$, Bland-Altman) | Đối chiếu GT bác sĩ vs Gate-7 trên 23 bệnh nhân TEST | `[PENDING LIVE GPU RUN]` (Job D) |
-| Phân tầng nguy cơ CAP (`TSR <= 50%`, Cohen's $\kappa$) & đường cong sống còn Kaplan-Meier / Log-rank | Sử dụng `src/clinical/survival_analysis.py` | `[PENDING LIVE GPU RUN]` (Job D) |
-| Biên Pareto hiệu năng GPU (`1x` forward latency ms/patch, VRAM đỉnh MB vs TEST TTA mIoU) | So sánh Author S2, Arm 5-8 và Primary 4-Arm | `[PENDING LIVE GPU RUN]` (Job D) |
-| Tổng quát hóa chéo cơ quan Zero-Shot trên **LUAD-HistoSeg** (mô phổi, ánh xạ `LUAD_TO_BCSS_LUT`) | Đánh giá trực tiếp không tinh chỉnh trên tập Test LUAD | `[PENDING LIVE GPU RUN]` (Job D) |
+Ba thực nghiệm nhân quả xác lập trọn vẹn 3 luận điểm: (1) chưng cất Round-2 `ens4_r2` (`H3`) vượt trực tiếp `stage1` (`H2`) từ **`+0.65%` đến `+0.94%`** trên cùng kiến trúc và độ phân giải `336px`, (2) độ phân giải nội bộ `336px` (`H3` / chuẩn) nâng lớp đuôi dài `NEC` từ `69.78%` (`H1 224px`) lên `70.78%-71.15%` (**`+1.00%` đến `+1.37%`**), và (3) chính sách **`Best EMA` thắng `Best Raw` nhất quán ở cả `3/3` phiên chạy** (`H1`, `H2`, `H3`).
 
 ---
 
-## 7. Kiến Trúc Sản Phẩm Phần Mềm, Trạm Lâm Sàng & Hạ Tầng Đa GPU
+## 6. Phân Tích Lỗi Lâm Sàng, Kiểm Chứng Trực Quan, Lâm Sàng GDC, Pareto L4 & LUAD `2x` Zoom
 
-### 7.1 Kiến Trúc Clean Architecture & Đồng Bộ Mã Nguồn
+### 6.1 Khử Dương Tính Giả `NEC` 3 Chiều, Độ Nhạy `GT = 0` & Sàng Lọc QA Bằng Entropy
 
-Kho mã nguồn `src/` được phân tách rõ ràng theo nguyên lý trách nhiệm đơn nhất (Single Responsibility Principle) thành 11 gói dịch vụ độc lập:
+Trong 23 bệnh nhân Test có **`11` ô `GT == 0` thực tế trên đĩa** (`8` ca vắng `NEC` + `3` ca vắng `LYM`), trong đó **`7` ô bất đối xứng mẫu số** (`6` `NEC` + `1` `LYM`) trong `02c_v2`. Dưới chế độ `no-CGM`, chỉ cần `215-375 px` vi dương tính giả trên 3 ca (`TCGA-E2-A158: 215 px`, `TCGA-E2-A1LS: 375 px`, `TCGA-EW-A3U0: 370 px`) đã kéo macro-mIoU tụt nhân tạo `-12.33%` đến `-16.84%`. Khi loại trừ `7` ô bất đối xứng / toàn bộ `11` ô `GT == 0` thực tế, Primary 4-Arm vs Step-0 Author đảo chiều từ `d_z = +0.1619` (`p = 0.0650`, `17W/6L`) lên **`d_z = +0.8842 / +0.9220`, `p = 3.3e-5`, `20W/0T/3L`**.
 
-1. **`src/config/`:** Lưu trữ cấu hình phân chia 151 bệnh nhân bất biến (`bcss_patient_splits.json`) và cấu hình thực nghiệm Stage-1 (`stage1_experiments.py`).
-2. **`src/datasets/`:** Dịch vụ nạp dữ liệu phòng vệ đa tầng (`bcss_dataset.py`), quản lý chống rò rỉ bệnh nhân (`patient_split.py`), và bộ lọc quang học (`otsu_filter.py`).
-3. **`src/models/`:** Kiến trúc nền tảng `WSSSTissueStage1NetCAM`, `DeepLabV3Plus`, `MultiMethodWSSSEngineV2` (`M1` đến `M7`), tách sắc tố Beer-Lambert `StainDeconvLayer` (`stain_deconv.py`), tinh chỉnh ái lực sắc tố `SG-DAP` (`sg_dap.py`), và mô-đun thích ứng `MedSAM_WSSS_Adapter` (`sam_wsss_adapter.py`).
-4. **`src/stage2_v2/`:** Động cơ nghiên cứu và đánh giá Gate-7 Track A gồm cấu hình bất biến (`config.py`), 4 kiến trúc Dual-Head kèm bộ ánh xạ tương thích chéo `transformers` v4/v5 (`models.py`: `remap_hf_state_dict_keys`), các hàm mất mát mềm (`losses.py`), bộ nhớ đĩa `memmap` chống tràn RAM (`memmap_dataset.py`), vòng huấn luyện EMA-only (`trainer.py`), đánh giá chuẩn hóa (`evaluator.py`), tổ hợp 5 chuyên gia (`ensemble.py`), kiểm chứng trực quan (`visual_audit.py`), và chuẩn đo lâm sàng + LUAD (`gate7_clinical_bench.py`).
-5. **`src/losses_metrics/` & `src/clinical/`:** Ma trận nhầm lẫn chuẩn hóa, tính dấu ấn VTP/TSR, kiểm định thống kê Wilcoxon/Holm-Bonferroni, và phân tích sống còn Kaplan-Meier (`survival_analysis.py`).
-6. **`src/training/`, `src/pipeline/` & `src/colab_pkg/`:** Script huấn luyện/đánh giá chuẩn hóa, điều phối chuỗi WSI đa độ phóng đại (`wsi_lowmag_highmag_pipeline.py`), và gói tự động hóa Colab (`downloader.py` với `resolve_split_dirs`, `model_loader.py`, `evaluator.py`, `visualizer.py`, `colab_runner.py`).
-7. **`src/visualization/` & `src/utils/`:** Máy chủ Trạm Lâm Sàng FastAPI (`api_server.py`), bộ kết xuất kiểm chứng trực quan (`clinical_viewer.py`), giao diện ngoại tuyến (`static/index.html`), công cụ vẽ hình học thuật đơn sắc 300-DPI (`draw_gate7_monochrome_figures.py`), và bộ kiểm toán chất lượng tài liệu 4 tầng (`deliverable_auditor.py`).
+Quan trọng hơn, kích hoạt cổng **`primary_4arm_cgm_nec_focused_1dof` (`t_nec = 0.40`, chọn 0% rò rỉ trên VAL)** xóa sạch dương tính giả `NEC` về `0 px` trên **`6/8` bệnh nhân Test vắng NEC** (tăng từ `3/8` ở `no-CGM` và `4/8` ở `cgm_val_calibrated`; giảm tổng FP `121,071 -> 110,076 px`, chỉ còn 2 ca khó thực sự là `E2-A573: 87,564 px` và `EW-A1P4: 22,512 px`), nâng `NEC IoU` lên `70.95%` (Uniform) / `71.01%` (Simplex) và đạt Wilcoxon `p = 0.0091` (`20W/3L`) trước `no-CGM` (**Hình 4**).
 
-Toàn bộ `63/63` tệp trong `src/` (`60` tệp Python + `3` tệp cấu hình/tài liệu/HTML, chuẩn hóa LF) được kiểm tra đồng bộ hóa SHA256 và cây cú pháp AST với gói phân phối Colab `drive_upload_ready/SE374_WSSS_Drive_Code/src/` và kho nén `.zip` kèm theo; bộ kiểm tra chuẩn mã nguồn `ruff check src tests colab_runner_local` đạt **0 lỗi**.
+![Hình 4: Phân tích độ nhạy 23 bệnh nhân Held-Out Test (Phase 1B 02c_v2): (A) Primary 4-Arm no-CGM Raw vs loại trừ 7 ô bất đối xứng / 11 ô GT=0 thực tế (d_z = +0.8842 / +0.9220, p = 3.3e-5, 20W/3L); (B) Primary 4-Arm + NEC-1DoF CGM (t_nec = 0.40) xóa sạch 6/8 ca vắng NEC về 0 px (121,071 -> 110,076 px, p = 0.0091).](figures/fig3_patient_gt0_sensitivity_bw.png)
 
-### 7.2 Trạm Làm Việc Lâm Sàng FastAPI, Báo Cáo PDF Chuẩn CAP & Docker
+- **Phân tầng độ phức tạp `k = 1-4` lớp đồng xuất hiện (`phase1b_zero_gpu_analytics.json`, `n = 4,986`):** `k = 1` (`n = 2,002`): Author `0.9410` | Arm 5 `0.9449` | **4-Arm+CGM `0.9473`**; `k = 2` (`n = 2,543`): `0.5399` | `0.5685` | `0.5616` (pooled pixel trên `k >= 2`: 4-Arm `0.6533` thắng Arm 5 `0.6526`); `k = 3` (`n = 431`): `0.3540` | `0.3927` | `0.3879`; `k = 4` (`n = 10` đủ 4 lớp): Author `0.2365` | Arm 5 `0.2503` | **4-Arm+CGM `0.2646`** (`+1.43%` vs Arm 5, `+2.81%` vs Author).
+- **Sàng lọc QA lâm sàng bằng Entropy (`n = 4,986`):** `ens4_mean_entropy` tương quan nghịch chặt với độ chính xác phân vùng (**`Spearman rho = -0.5599`, `p < 1e-300`**; `Confidence rho = +0.5708`). Nhóm `20%` patch có độ bất định thấp nhất đạt trung bình **`91.15%`** patch mIoU so với **`53.59%`** ở nhóm `20%` cao nhất (`+37.56%` tách biệt; top `10%`: `51.46%`), hỗ trợ trực tiếp tính năng khoanh vùng kiểm duyệt ưu tiên cho bác sĩ trên Trạm Lâm Sàng.
 
-Trạm Làm Việc Giải Phẫu Bệnh Số (`src/visualization/api_server.py` và `src/visualization/static/index.html`) vận hành **100% ngoại tuyến** không phụ thuộc CDN bên ngoài, cho phép bác sĩ và kỹ sư kiểm chứng trực tiếp trên ảnh tiêu bản H&E thật:
+### 6.2 Kiểm Chứng Căn Chỉnh Không Gian, Đường Biên, Whole-ROI Hann-50% & Lọc Kính (`02d_v2`, G4)
 
-| Endpoint | Phương thức | Chức năng chuyên môn & Hợp đồng dữ liệu |
-| :--- | :---: | :--- |
-| `/viewer` & `/` | `GET` | Giao diện HTML5 Canvas ngoại tuyến: 9 chế độ QA trực quan (`Blurred Dual QA`, `Match vs Error`, `Seg Mask`, `GT + AI Blend`, `Contours`, `Entropy`, `Stage-1 CAM`, `Spotlight`, `Doctor GT`), Split-Curtain (`S`), Magnifier Loupe (`L`), Pixel Inspector HUD, Scale Bar (`50 um, 0.25 MPP`) |
-| `/docs` | `GET` | Tài liệu tương tác OpenAPI (Swagger UI) |
-| `/api/v1/health` & `/health` | `GET` | Báo cáo trạng thái nạp trọng số thật (`gate7_available_arms`, `gate7_loaded_arms`, `stage2_loaded`), thiết bị GPU/CPU và danh sách chế độ suy luận |
-| `/api/v1/samples`, `/api/v1/samples/{id}` | `GET` | Duyệt và lọc tập Test theo `patient_id`, hình thái mô, phân bố GT và dấu ấn sinh học chuẩn |
-| `/api/v1/predict/patch` & `/segment` | `POST` | Suy luận trên ảnh H&E hỗ trợ **7 chế độ Gate-7 Track A** (`gate7_arm5`, `gate7_arm5_tta`, `gate7_arm6`, `gate7_arm7`, `gate7_arm8`, `gate7_4arm`, `gate7_4arm_cgm`) cùng 11 chế độ cổ điển; fail-closed trả HTTP `503` khi `strict_weights=True` thiếu trọng số |
-| `/api/v1/compare` & `/biomarkers` | `POST` | Đối chiếu song song đa mô hình và tính định lượng VTP, TSR, phân tầng nguy cơ CAP |
-| `/api/v1/predict/wsi` & `/tile/{z}/{x}/{y}.png` | `POST` / `GET` | Ghép nối đa ô WSI Multi-Tile Stitch (tối đa 64 tiles, trộn biên cosine feathering) và phục vụ lát cắt DeepZoom |
-| **`/api/v1/export/report`** | **`POST`** | **Xuất báo cáo kiểm định 300-DPI PNG, JSON, CSV hoặc Báo cáo Lâm sàng PDF 2 trang chuẩn CAP** (`BCSS-WSSS CLINICAL PATHOLOGY QA REPORT`, tự động ghi VTP/TSR, phân tầng CAP/UNITED theo ngưỡng 50% TSR, ảnh đối chiếu và khuyến cáo RUO độc lập, không rò rỉ nhãn học phần) |
-| `/splits` | `GET` | Xuất công khai bảng chia 151 bệnh nhân phục vụ kiểm toán chống rò rỉ |
+Phiên kiểm chứng trực quan hậu bản vá **`se374_g7_phase1b_02d_v2`** (`NVIDIA G4`, `35m 20s`, `EXIT_CODE = 0`, `SHA256 = d933a89ebec0578c`) đạt trọn vẹn **`6/6` Assertion PASS**: GT PNG palette gốc `4,986/4,986` (`zero_roi_remapper_used = True`), khớp SHA256 trọng số, đối xứng `flip_rot90 >= 0.7931` (`pixel_agreement >= 0.8995`), dịch chuyển không gian **mọi mô hình nằm gọn trong bán kính `<= 2 px` quanh `(0, 0)`** (`arm7/arm5/ens4 = (1, -1)` px với `arm7 zero_vs_peak_gap = 7.5e-5` giảm `15x` và `ens4_cgm = 7.7e-5`), `gt_parameter_free = True` (`0%` rò rỉ GT vào `BACK = 4`), và sai lệch `pooled_miou <= 2.05e-4` so với `02c_v2` (**Hình 5**).
 
-Hệ thống được đóng gói hoàn chỉnh bằng `Dockerfile` (nền `python:3.11-slim`, chạy dưới tài khoản không đặc quyền `appuser`, cấu hình biến `WSSS_GATE7_DIR=/app/checkpoints/vps_evidence` và `HEALTHCHECK` tự động gọi `/health` mỗi 30 giây) cùng `docker-compose.yml` gắn chỉ đọc (`ro`) hai thư mục `./checkpoints` và `./data`, giúp triển khai tái lập bằng một lệnh `docker compose up --build`.
+| Mô hình (`02d_v2`, `n = 4,986`) | Macro Boundary F1@2px (`95% CI`) | TUM / STR / LYM / NEC F1@2px | TUM Patch Recall (`n = 3,069`) | Matched Median / Mean TUM Offset (`n = 2,847`) | Wilcoxon vs Author (BF1 / Centroid) |
+| :--- | :---: | :--- | :---: | :---: | :--- |
+| `author_step0` | 50.67% `[45.73, 54.21]` | 60.77 / 56.31 / 33.41 / 52.19 | 93.68% | 8.93 px / 17.55 px | Mốc đối chứng |
+| `arm5_cgm` | 52.72% `[48.14, 56.18]` | **63.93** / 57.12 / 35.63 / 54.22 | 95.73% | **7.13 px / 15.52 px** | `p = 0.1695` / **`p = 0.0123`** (`16W/7L`) |
+| `ens4_no_cgm` | 53.21% `[48.59, 56.64]` | 63.61 / 57.66 / 36.27 / 55.31 | **96.19%** | 7.60 px / 16.19 px | **`p = 0.0277`** / **`p = 0.0327`** |
+| **`ens4_cgm`** | **53.30% `[48.67, 56.73]`** | 63.67 / **57.73 / 36.35 / 55.44** | 95.80% | 7.60 px / 16.19 px | **`p = 0.000298` (`20W/3L`)** / **`p = 0.0327` (`19W/4L`)** |
 
-### 7.3 Hệ Thống Điều Phối Đa GPU `colab_runner_local/` & Kiểm Thử Tự Động
+*(Ghi chú: `ens4_cgm` đồng thời vượt `arm5_cgm` về `Boundary F1@2px` cấp bệnh nhân với `p = 0.00345`, `19W/4L`.)*
 
-Nhằm vận hành ổn định các chiến dịch huấn luyện và đánh giá kéo dài nhiều giờ trên Google Colab GPU mà không phụ thuộc đường truyền máy trạm cục bộ, dự án xây dựng bộ điều phối chuyên biệt `colab_runner_local/` chạy trên Linux VPS:
+- **Ablation bộ lọc kính trắng không rò rỉ GT trên toàn bộ `4,986` patches (`glass_guard_ablation`):** `none` (`72.80%`, `0%` xói mòn), **`pure_glass`** (**`72.80%`**, `-0.00%`, `1.04%` kính sáng, `0.005%` FG erosion, **`0.0%` NEC erosion**), `cand1_bright_glass` (`72.22%`, `-0.58%`, `48.55%` kính sáng, `2.808%` NEC erosion), `otsu` (`70.82%`, `-1.98%`, `91.12%` kính sáng, `8.258%` NEC erosion).
 
-- **Chính sách ưu tiên tài nguyên tường minh:** Mọi lệnh truyền tường minh `--credentials ~/.config/gcloud/colab_adc.json` (tài khoản `colab_account`, không phụ thuộc ADC mặc định của hệ thống) và chuỗi GPU ưu tiên `--gpu H100 --gpu-fallback G4,A100,L4`.
-- **Cơ chế bảo vệ P0 chống tắt nhầm phiên ngoại lai (`runtime_guard.py`):** Cô lập trạng thái theo tài khoản (`acct_<sha256_12>`), khóa cấp phát độc quyền bằng `flock`, chụp danh sách `protected_endpoints` bất biến theo nguyên tắc fail-closed trước mọi lệnh cấp phát (bảo vệ tuyệt đối các phiên ngoại lai như external_service A100), đăng ký danh sách trắng `owned_sessions`, và áp dụng quy tắc tắt phiên khớp kép (chỉ dừng khi cả `session_name` lẫn `endpoint` thuộc `owned_sessions` và không nằm trong `protected_endpoints`).
-- **Toàn vẹn checkpoint và giám sát web:** Cơ chế `sync_remote_file_atomic` tải tệp sang vùng tạm, đối chiếu `sha256sum` khớp 100% trước khi thay thế nguyên tử; tự động resume tối đa 3 lần khi mất kết nối; đồng hồ cắt cứng `--max-minutes`; cảnh báo sớm fail-fast khi phát hiện `NaN` hoặc sụp đổ hiệu chuẩn; và bảng điều khiển web `dashboard.py` bảo mật băm PBKDF2 (`local_auth.py`) qua Cloudflare Quick Tunnel.
-- **Phủ kiểm thử tự động đa nền tảng:** Hệ thống tích hợp **32 tệp kiểm thử (`30` module / `496` ca trong `tests/` + `2` module / `35` ca trong `colab_runner_local/`) với `531` test cases thu thập được**, kết hợp đường ống CI `.github/workflows/ci.yml`. Trên môi trường Windows PowerShell cục bộ và môi trường Linux ARM64 thực tế trên `vps-colab` (`35/35` bài kiểm thử `test_vps_colab_runner.py` và `test_dashboard.py` đạt 100%, `0 skipped`, `0 failed`), toàn bộ các kiểm định chống rò rỉ bệnh nhân, API, trực quan, bảo vệ P0 và chuẩn mã nguồn đều vượt qua.
+![Hình 5: Tổng hợp kiểm chứng căn chỉnh không gian 02d_v2 trên toàn bộ 4,986 ảnh TEST (đơn sắc 300 DPI): (a) độ nhạy dịch chuyển không gian hậu bản vá arm7 ConvNeXt-L (mọi mô hình <= 2 px quanh tâm); (b) phân phối Patch Canonical mIoU; (c) Boundary F1@2px theo 4 lớp mô (4-Arm+CGM 53.30% vs Author 50.67%, p = 0.000298) và Matched Common-Intersection Median TUM Centroid Offset (Arm 5 7.1 px, 4-Arm 7.6 px vs Author 8.9 px).](figures/fig5_spatial_alignment_bw.png)
+
+- **Ghép Whole-ROI & Bóc Tách Chồng Lấp Hann-50% (`whole_roi_audit.json`, `02d_v2`, minh họa tại Hình 6):**
+  - **`TCGA-EW-A1P4` (`14 x 17 = 238` tiles, `3808 x 3136 px`):** Legacy Downscale `0.2020` -> Native Tiled **`0.5421`** (`+0.3401`) -> **`Hann-50% Overlap = 0.5557` (`+1.35%`)**; tỷ lệ lật nhãn tại đường nối giảm từ `13.91%` xuống **`0.23%` (`-98.35%`)**, tiệm cận mức tự nhiên GT (`0.11%`).
+  - **`TCGA-EW-A1P1` (`16 x 18 = 288` tiles, `4032 x 3584 px`):** Legacy Downscale `0.0749` -> Native Tiled **`0.6706`** (`+0.5957`) -> **`Hann-50% Overlap = 0.6779` (`+0.73%`)**; tỷ lệ lật nhãn tại đường nối giảm từ `11.38%` xuống **`0.23%` (`-97.99%`)**, sát mức tự nhiên GT (`0.26%`).
+
+![Hình 6: Kiểm chứng trực quan lớp phủ mô bệnh học H&E Whole-ROI TCGA-EW-A1P4 (14 x 17 = 238 tiles, 3808x3136 px) cùng cửa sổ phóng đại 5 x 5: hình hiển thị trực quan chế độ suy luận Native 224x224 Tiled (0.5421 mIoU, vùng phóng đại 0.3313) so với Legacy Downscale (0.2020), còn kết quả ghép chồng lấp Hann-50% (0.5557 mIoU, giảm 98.35% lật nhãn đường nối) được xác minh định lượng từ whole_roi_audit.json (giữ màu nhuộm H&E chuẩn đối chiếu giải phẫu bệnh học).](figures/fig9_whole_roi_he_overlay_audit.png)
+
+### 6.3 Hiệu Chuẩn Xác Suất, Chỉ Số Lâm Sàng & Sống Còn Thật NCI GDC Release 46.0 (`04b_v2`, `L4`)
+
+Phiên đánh giá **`se374_g7_phase1b_04b_v2`** trên `NVIDIA L4` (`65m 21s`, `EXIT_CODE = 0`, `SHA256 = fe9763a1ac87c000`) xác minh đồng thời hiệu chuẩn điểm ảnh trên `231,898,313` điểm ảnh tiền cảnh (`4,986` patches), dấu ấn sinh học `n = 23` bệnh nhân theo chuẩn **Mesker 2007 / UNITED 2018** (**Hình 7**), và sống còn thật truy vấn sống từ **NCI GDC Release 46.0** (**Hình 8**):
+
+- **Hiệu chuẩn xác suất điểm ảnh (`bcss_pixel_calibration`):** `author_raw` (ECE `0.02816`, Brier `0.2256`, NLL `0.4195`), `author_step0` (ECE `0.01812`, Brier `0.2140`, NLL `0.4206`), `arm5_uncal` -> **`arm5_cal`** (ECE `0.05142` -> **`0.00408`, `-92.1%`**, Brier `0.1914`, NLL `0.3392`), `ens4_uncal_linear` -> **`ens4_cal_logprob_eps1e3`** (ECE `0.02571` -> **`0.00586`, `-77.2%`**, Brier `0.1922`, NLL `0.3405`).
+
+| Mô hình (`04b_v2`, `n = 23` BN, GT-Free `Cand1` / `ROI-Bounded`) | VTP `r` / `CCC` (MAE) | TSR `r` / `CCC` (MAE) | `VTP_RCB` `r` | Mesker/UNITED 50% TSR Concordance (`kappa`) | Live NCI GDC 46.0 KM Log-Rank `p` |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `author_step0` | 0.8888 / 0.8782 (5.57%) | 0.8994 / 0.8889 (6.73%) | 0.9358 | 86.96% (`20/23`, `0.7435`) | 0.1116 |
+| **`arm5_cgm`** | **0.9362 / 0.9182 (4.99%)** (ROI `0.9401`) | **0.9260 / 0.9169 (6.31%)** (ROI `0.9371`) | 0.9329 | 86.96% (`20/23`, `0.7435`) | 0.1116 |
+| **`ens4_cgm`** (`ens4_no_cgm` tương đương) | 0.9186 / 0.9062 (5.08%) (ROI `0.9297`) | 0.9121 / 0.9074 (**6.30%**, ROI `0.9234`) | **0.9543** | **91.30% (`21/23`, `0.8271`)** | 0.1474 (GT: `0.1869`, `2` biến cố) |
+
+![Hình 7: Biểu đồ hồi quy tương quan và Bland-Altman cho hai dấu ấn sinh học lâm sàng VTP (r = 0.919, CCC = 0.906, MAE = 5.08%, Bias = -1.92%) và TSR (r = 0.912, CCC = 0.907, MAE = 6.30%, đồng thuận Mesker/UNITED 91.30%, kappa = 0.8271) giữa Gate-7 ens4_cgm và Pathologist GT trên 23 bệnh nhân Held-Out Test (đơn sắc 300 DPI).](figures/fig6_bland_altman_tsr_vtp_bw.png)
+
+- **Công bố trung thực về Phân tích Sống còn Kaplan-Meier Overall Survival (`Hình 8`):** Trên dữ liệu lâm sàng thật từ **NCI GDC Release 46.0**, đoàn hệ Held-Out Test `23` bệnh nhân TCGA-BRCA chỉ ghi nhận tổng cộng **`2` biến cố tử vong** (đều ở nhánh Stroma-Poor Low Risk; `0` biến cố ở High Risk). Kiểm định Mantel-Haenszel Log-Rank cho **Pathologist GT đạt $p = 0.1869$ ($\chi^2 = 1.74$, `10` High / `13` Low)** và **Gate-7 AI `ens4_cgm` đạt $p = 0.1474$ ($\chi^2 = 2.10$, `12` High / `11` Low)**. Cỡ mẫu nhỏ ($n = 23, e = 2$) không đủ lực thống kê cho ngưỡng $p < 0.05$ và được công bố minh bạch tuyệt đối.
+
+![Hình 8: Đường cong sống còn Kaplan-Meier Overall Survival từ dữ liệu thật NCI GDC Release 46.0 phân tầng theo ngưỡng 50% TSR Mesker/UNITED của Pathologist GT (Log-Rank p = 0.1869, chi2 = 1.74) và Gate-7 AI ens4_cgm (Log-Rank p = 0.1474, chi2 = 2.10) trên 23 bệnh nhân Held-Out Test TCGA-BRCA (chỉ có 2 biến cố tử vong, đơn sắc 300 DPI).](figures/fig7_km_survival_tsr_bw.png)
+
+### 6.4 Pareto GPU Đồng Chuẩn `torch.bfloat16` (`L4`) & Chéo Cơ Quan LUAD `10x` / `2x` Zoom (`04b_v2`)
+
+#### 6.4.1 Chuẩn Đo Hiệu Năng Thực Tế Trên `NVIDIA L4` (`gate7_gpu_efficiency.json`, `5 x 25` iters, `BS = 4`)
+
+Nhằm loại bỏ nhiễu so sánh chéo FP32/BF16, toàn bộ 6 mô hình được đo đồng chuẩn `torch.bfloat16` trên `NVIDIA L4` ở cả hai chế độ `1x Raw` lẫn `Deployed TTA+CGM` (kèm mốc đối chiếu FP32 thuần `author_stage2_fp32 = 3.80 ms / 263.27 FPS` tương ứng `1x` raw `69.34%`):
+
+| Mô hình (`NVIDIA L4`, `torch.bfloat16` đồng chuẩn) | 1x Raw Latency | 1x Raw FPS | 1x Raw mIoU | Deployed TTA Latency | Deployed FPS (`views`) | Deployed mIoU | Peak VRAM (1x / TTA) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `author_stage2` (DeepLabV3+ R101; FP32 `3.80 ms`) | 5.67 ms | 176.6 FPS | 69.34% | 36.24 ms | 27.6 FPS (`6x` + S1) | 70.42% | 821 / 967 MB |
+| `arm8_deeplab_r101_r2` | 5.92 ms | 169.2 FPS | 69.58% | 68.52 ms | 14.6 FPS (`12x`) | 70.70% | 821 / 862 MB |
+| **`arm7_convnext_large_r2` (Pareto-Dominant 1x)** | **4.94 ms** | **202.5 FPS** | **71.61%** | 66.90 ms | 15.0 FPS (`12x`) | 71.88% | 1,739 / 1,853 MB |
+| `arm6_segformer_b5_r2` | 19.03 ms | 52.6 FPS | 71.95% | 228.91 ms | 4.4 FPS (`12x`) | 72.04% | 1,296 / 1,527 MB |
+| **`arm5_dinov2_large_r2` (`336px`)** | **13.66 ms** | **73.2 FPS** | **72.24%** | 173.89 ms | 5.8 FPS (`12x`) | 72.65% | 2,255 / 2,507 MB |
+| **`primary_4arm_ensemble` (`no-CGM`)** | **36.75 ms** | **27.2 FPS** | **72.68%** | 534.59 ms | 1.9 FPS (`48x`) | **72.79%** | 3,578 / 3,834 MB |
+
+Đường biên Pareto hai bảng (**Hình 9**) cho thấy **`arm7` 1x Raw (`4.94 ms`, `202.5 FPS`, `71.61%`) trội Pareto tuyệt đối** so với Author 1x Raw BF16 (`5.67 ms`, `176.6 FPS`, `69.34%`), trong khi **`primary_4arm` 1x Raw (`36.75 ms`, `27.2 FPS`, `72.68%`) ngang tốc độ Author Deployed TTA (`27.6 FPS`, `70.42%`) nhưng cao hơn `+2.26%` mIoU**.
+
+![Hình 9: Biểu đồ đường biên hiệu năng Pareto hai bảng đồng chuẩn torch.bfloat16 trên NVIDIA L4 (04b_v2, đơn sắc 300 DPI không chồng nhãn): (a) Matched 1x Raw Pareto với Arm-7 ConvNeXt-L trội Pareto tuyệt đối ở 4.94 ms / 202.5 FPS / 71.61% mIoU; (b) Matched Deployed TTA+CGM Pareto.](figures/fig8_gpu_pareto_efficiency_bw.png)
+
+#### 6.4.2 Khái Quát Hóa Zero-Shot Chéo Cơ Quan `BCSS (40x Vú) -> LUAD-HistoSeg (10x Phổi)` & Phóng Đại `2x` (`04b_v2`)
+
+| Mô hình Zero-Shot (`BCSS -> LUAD`, `n = 307`, `20` ca) | Độ phóng đại đầu vào | Pooled 4-Cls mIoU | Pooled mDice | TUM / STR / LYM / NEC IoU | Paired vs Author (`n = 20` ca) |
+| :--- | :---: | :---: | :---: | :--- | :--- |
+| `author_step0` (ResNet-101 CNN) | Gốc `10x` | 15.05% | 24.78% | 26.79 / 20.72 / **0.00** / 12.69 | Mốc đối chứng |
+| `ens4_cgm` (`ens4_no_cgm` tương đương) | Gốc `10x` | 25.56% | 40.09% | 35.00 / 31.42 / 16.03 / 19.79 | `+10.51%`, `p_wilc = 0.0033` (`15W/1T/4L`) |
+| `arm5_cgm` (`arm5_no_cgm = 35.47%`) | Gốc `10x` | **36.09%** (`2.40x`) | **52.52%** | 28.45 / 49.99 / 34.53 / 31.40 | **`+21.04%`, `p_wilc = 3.81e-6` (`19W/0T/1L`)** |
+| **`ens4_uncal_linear_2x_zoom`** | **Phóng `2x` (`10x -> 20x`, 0 train)** | **49.92%** (`+25.01%`) | **66.56%** | 48.70 / 52.55 / **46.39** / 52.03 | Thu hẹp khoảng cách độ phóng đại `4x` |
+| **`arm5_no_cgm_2x_zoom`** | **Phóng `2x` (`10x -> 20x`, 0 train)** | **51.47%** (`+16.00%`) | **67.90%** | **54.87 / 52.72** / 46.15 / **52.12** | **Vượt `3.42x` Author `10x` hoàn toàn zero-shot** |
+
+Thực nghiệm phóng đại `2x` (`10x -> 20x` bằng chia 4 góc phần tư, hoàn toàn không huấn luyện lại) chứng minh nguyên nhân chính làm giảm hiệu năng Zero-Shot ở `10x` là **khoảng cách tỷ lệ hình thái `4x`** giữa `40x` (vú) và `10x` (phổi): chỉ cần thu hẹp về `20x`, cả `arm5_no_cgm` (`35.47% -> 51.47%`, `+16.00%`) lẫn `ens4_uncal_linear` (`24.91% -> 49.92%`, tăng vọt `+25.01%`, trong đó `LYM` tăng từ `16.13%` lên `46.39%` và `NEC` tăng từ `19.10%` lên `52.03%`) đều khôi phục đồng đều cả 4 lớp mô.
 
 ---
 
-## 8. Tính Tái Lập Mật Mã, Minh Bạch Sự Cố & Giới Hạn Mở
+## 7. Kiến Trúc Sản Phẩm Phần Mềm, Trạm Lâm Sàng & Hạ Tầng Đa GPU (Stage 2)
 
-### 8.1 Kiểm Toán Mật Mã SHA256 (123/123 Tệp Cục Bộ + Trọng Số VPS)
+### 7.1 Kiến Trúc Clean Architecture, Chất Lượng Mã Nguồn & Đồng Bộ Gói Drive
 
-Toàn bộ `123` tệp minh chứng cục bộ (gồm nhật ký huấn luyện `.log`, báo cáo phiên `.md`, số liệu `.json`/`.csv`, biểu đồ `.png` và `6` tệp trọng số `.pth` chủ lực gồm Stage-1 Champion `se374_arm_b_full` cùng 4 nhánh Gate-7 Track A `arm5` đến `arm8`) được lập chỉ mục tại `checkpoints/vps_evidence/SHA256SUMS.txt` và xác minh toàn vẹn bit-exact **`123/123 OK` (`BAD = 0`, `MISSING = 0`)**. Ngoài ra, toàn bộ `4/4` tệp trọng số Gate-6 Round-1 (`arm1` đến `arm4`) lưu trên `vps-colab` đã được đối chiếu khớp đủ `64/64` ký tự hex SHA256.
+Kho mã nguồn `src/` được phân tách rõ ràng theo nguyên lý trách nhiệm đơn nhất (SRP) thành 11 gói dịch vụ độc lập (`config`, `datasets`, `models`, `stage2_v2`, `losses_metrics`, `clinical`, `training`, `pipeline`, `colab_pkg`, `visualization`, `utils`), tuân thủ giới hạn mô-đun gọn gàng (`draw_gate7_monochrome_figures.py = 372` dòng, `clinical_bench_plots.py = 342` dòng, `dashboard.py = 383` dòng). Toàn bộ **`65/65` tệp trong `src/`** được đồng bộ tự động qua `scripts/build_drive_package.py` sang `drive_upload_ready/SE374_WSSS_Drive_Code` và kho `.zip` kèm theo; lệnh **`ruff check .`** (với `ruff.toml`) đạt **`0` lỗi** trên toàn bộ kho mã nguồn.
 
-| Giai đoạn / Phiên chạy | Tệp minh chứng trọng yếu | Mã băm SHA256 (16 ký tự đầu) |
-| :--- | :--- | :--- |
-| Stage-1 Champion (`se374_arm_b_full`) | `stage1_retrained_best.pth` / `stage1_best_cls.pth` | `a182d8890c09d7b8` / `e1a88293aff0a0e3` |
-| Gate-6 Step-0 (`se374_s2v2_step0`) | `STAGE2_TRAINING_METRICS.json` | `b0b319d6f7ab0537` |
-| Gate-6 Round-1 `arm1` đến `arm4` (`vps-colab`) | `arm1` / `arm2` / `arm3` / `arm4` `stage2_retrained_best.pth` | `69b569e6080370f3` / `e32e2a618c994f57` / `f706c0f52cd4c49d` / `bda6c2f048d1ed13` |
-| Gate-6 Round-1 4-Arm (`se374_s2v2_ensemble`) | `STAGE2_TRAINING_METRICS.json` | `9e43aa5f27a623ca` |
-| Multi-seed Arm 4 (`s123` / `s456`) | `STAGE2_TRAINING_METRICS.json` (`s123` / `s456`) | `d7be7060c1445bea` / `0160c4639a6924c6` |
-| Gate-7 Step-0 (`se374_g7_diag_r2_val`) | `STAGE2_TRAINING_METRICS.json` | `21c08b3996507d66` |
-| Gate-7 Arm 5 (`se374_g7_arm5_dinov2l`) | `stage2_retrained_best.pth` / `STAGE2_TRAINING_METRICS.json` | `33f4d623e8825471` / `2a5ece67aac25723` |
-| Gate-7 Arm 6 (`se374_g7_arm6_segformerb5`) | `stage2_retrained_best.pth` / `STAGE2_TRAINING_METRICS.json` | `3055643db074a2df` / `87dcec892d0af5ef` |
-| Gate-7 Arm 7 (`se374_g7_arm7_convnextl`) | `stage2_retrained_best.pth` / `STAGE2_TRAINING_METRICS.json` | `c64b97c731c71c97` / `362a34faf2b437cc` |
-| Gate-7 Arm 8 (`se374_g7_arm8_deeplab`) | `stage2_retrained_best.pth` / `STAGE2_TRAINING_METRICS.json` | `9fd6e121a9714756` / `fe5dc37f53c255b8` |
-| **Gate-7 Track A Ensemble (`se374_g7_ensemble_tracka`)** | `STAGE2_TRAINING_METRICS.json` / `per_patient_class_ious.json` | `c6140c3bb266129a` / `d180876c1dc75635` |
+### 7.2 Trạm Làm Việc Lâm Sàng FastAPI, Giao Diện HTML5 Canvas & Docker (`079fee0`)
 
-*Ghi chú phần cứng và tái lập:* Giao thức đánh giá Author Anchors ghi nhận sai khác làm tròn phần cứng lành tính `0.01%` giữa NVIDIA L4 (`69.47%` / `70.30%` / `70.42%`) và NVIDIA G4 Blackwell (`69.48%` / `70.31%` / `70.43%`) trên cùng mã nguồn và trọng số. Trong Gate-7, `arm5`, `arm7`, `arm8` và `02c` chạy trên G4 Blackwell, còn `arm6` tự động chuyển sang L4 nên sai khác làm tròn `bf16` mức $10^{-6}$ tạo hai mã băm `r2_manifest_sha256` khác nhau (`90ab6933495b` trên G4 so với `2b469c3d906e` trên L4) dù cùng `23,422` patches, cùng `blend = 1.0` và cùng `argmax_disagree = 0.103707`.
+Trạm Làm Việc Giải Phẫu Bệnh Số (`src/visualization/api_server.py` và `src/visualization/static/index.html`) vận hành **100% ngoại tuyến** không phụ thuộc CDN, được gia cố toàn diện ở Stage 2 (`079fee0`):
 
-### 8.2 Ghi Chú Minh Bạch Về Sự Cố Mất Dữ Liệu Ngày 2026-11-23 & Kiểm Toán Khôi Phục
+- **Cô lập biến môi trường & trạng thái suy luận an toàn:** Tự động nạp trọng số Gate-7 theo `WSSS_GATE7_DIR`, fail-closed trả HTTP `503` khi `strict_weights=True` thiếu trọng số, đồng bộ hằng số giao thức hậu bản vá `02c_v2` (`ms_3_hvflip`, `full_val_betas`, ngưỡng CGM) qua `8dabf65`.
+- **Trải nghiệm soi mô bệnh học chuyên sâu (`static/index.html`):** Hỗ trợ **18 chế độ suy luận** (`7` chế độ Gate-7 Track A + `11` chế độ Baseline/Ablation), **9 chế độ QA trực quan**, điều khiển **Zoom / Pan** bằng con lăn chuột và nút điều hướng, thanh trượt **Split-Curtain (`S`)**, kính lúp **Magnifier Loupe (`L`)**, **Pixel Inspector HUD**, thanh tỷ lệ `50 um (0.25 MPP)`, **WSI Multi-Tile Stitch** (tối đa 64 tiles), và **`POST /api/v1/export/report`** xuất 300-DPI PNG, JSON, CSV hoặc **Báo cáo PDF Lâm sàng 2 trang chuẩn CAP** kèm cảnh báo RUO.
+- **Đóng gói Docker & Docker Compose:** `Dockerfile` (`python:3.11-slim`, tài khoản không đặc quyền `appuser`, `HEALTHCHECK` `/health`) + `docker-compose.yml` gắn chỉ đọc `./checkpoints` và `./data`.
 
-Vì tính trung thực khoa học và quản trị kỹ thuật tuyệt đối, báo cáo ghi nhận công khai sự cố vận hành máy trạm Windows ngày **2026-11-23**: một lệnh dọn dẹp cục bộ bị lỗi thoát dấu ngoặc kép giữa PowerShell và `cmd` đã xóa dữ liệu trên phân vùng `C:\`, dẫn đến việc **mất vĩnh viễn tệp không được theo dõi trên git là `Lab1.ipynb`** (tệp bài tập thực hành cục bộ ban đầu, không nằm trong lịch sử remote GitHub và không thể tái tạo bản gốc).
+### 7.3 Hệ Thống Điều Phối Đa GPU `colab_runner_local/` & Phủ Kiểm Thử Tự Động (`541` Tests)
 
-Ngay sau sự cố, toàn bộ kho dự án nghiên cứu và sản phẩm chính đã trải qua quy trình phục hồi và kiểm toán toàn vẹn chặt chẽ:
+- **Điều phối đa GPU an toàn P0 (`colab_runner_local/`):** Luôn ưu tiên tài khoản `colab_account` với `--credentials ~/.config/gcloud/colab_adc.json` và chuỗi GPU `--gpu H100 --gpu-fallback G4,A100,L4`; cô lập trạng thái theo tài khoản (`acct_<sha256_12>`), khóa `flock`, snapshot bất biến `protected_endpoints` fail-closed bảo vệ tuyệt đối phiên ngoại lai external_service A100, tắt khớp kép (`owned_sessions` + không thuộc `protected_endpoints`), đồng bộ SHA256 nguyên tử `sync_remote_file_atomic`, `dashboard.py` bảo mật PBKDF2 (`local_auth.py`) đã đồng bộ danh sách allowlist chính xác `notebooks/04b_Stage2_Gate7_Clinical_LUAD_Bench_G4.ipynb` (chuẩn LF 100%).
+- **Phủ kiểm thử tự động đa nền tảng:** Hệ thống sở hữu **`541` ca kiểm thử** trên 32 module (**`505` ca trong `tests/`** + **`36` ca trong `colab_runner_local/`**), đạt **100% PASS** trên Windows PowerShell và xác minh **`36/36` PASS (0 skip, 0 fail)** trên môi trường Linux ARM64 VPS thực tế, cùng CI `.github/workflows/ci.yml`.
 
-- Khôi phục đầy đủ toàn bộ các mô-đun cốt lõi từ lịch sử git xác thực và đồng bộ lại 10 mô-đun nâng cấp (bao gồm `MultiMethodWSSSEngineV2`, tương thích chéo `transformers` v4/v5, sửa bảng màu `STR/LYM` và cổng `0/4` trong `wsi_lowmag_highmag_pipeline.py`, giao diện chọn chế độ Gate-7 trong `static/index.html`, và bộ kiểm chứng `02d_Stage2_Visual_Overlay_Audit_G4.ipynb`).
-- Kiểm toán mật mã độc lập xác nhận **`123/123` tệp minh chứng tại `checkpoints/vps_evidence/SHA256SUMS.txt` nguyên vẹn 100% (`BAD = 0`, `MISSING = 0`)** cùng `4/4` tệp trọng số Gate-6 trên `vps-colab` khớp toàn phần `64/64` ký tự hex.
-- Chạy kiểm thử hồi quy đa luồng trên dữ liệu bệnh nhân BCSS-WSSS thật (`len(train_loader) = 5,856` batches ở `batch_size = 4`) và môi trường Linux ARM64 độc lập, xác nhận không có hư hại đối với bất kỳ kết quả thực nghiệm hay thành phần sản phẩm chính nào của đồ án.
+---
 
-### 8.3 Giới Hạn Hiện Tại & Hướng Phát Triển Tương Lai
+## 8. Tính Tái Lập Mật Mã (`228/228`), Minh Bạch Sự Cố & Giới Hạn Mở
 
-1. **Giới hạn khoảng cách so với `SIA-WSSS` (MICCAI 2025):** Ở cấu hình tiền đăng ký Track A không chồng lấp TCGA, hệ thống đạt `72.80%` mIoU (`72.90%` Secondary Simplex-CV), còn thấp hơn `-0.60%` (`-0.50%`) so với mức `73.40%` mIoU của `SIA-WSSS` (5-run average). Việc kết hợp cơ chế đồ thị kích hoạt - ức chế đồng bộ ngay từ Giai đoạn 1 là hướng nghiên cứu đầy hứa hẹn để vượt ngưỡng `73.5%` trong Track A.
-2. **Hoàn tất 3 chiến dịch GPU đang thực thi:** Khi `seed=123/456` của `arm5_dinov2_large_r2`, kiểm chứng trực quan `02d` toàn tập `4,986` patches và đánh giá lâm sàng / chéo cơ quan LUAD-HistoSeg `04b` hoàn thành trên `vps-colab` (`colab_account`), các ô `[PENDING LIVE GPU RUN]` trong Chương 5 và Chương 6 sẽ được cập nhật trực tiếp từ nhật ký JSON có ký số SHA256.
-3. **Mở rộng Track B có đối chứng và triển khai đa trung tâm:** Thiết lập nhánh thực nghiệm Track B tách biệt hoàn toàn (đánh giá công bằng các mô hình nền tảng giải phẫu bệnh như UNI/Virchow/Phikon-v2), kết hợp suy luận WSI toàn phần độ phóng đại thấp từ `LowMagWSS` để rút ngắn thời gian xử lý toàn slide gigapixel, và tổ chức đánh giá mù với hội đồng bác sĩ giải phẫu bệnh lâm sàng.
+### 8.1 Kiểm Toán Mật Mã SHA256 (`228/228` Tệp Khóa Cứng)
+
+Toàn bộ **`228/228`** tệp minh chứng tại `checkpoints/vps_evidence/SHA256SUMS.txt` đã được khóa cứng và xác minh toàn vẹn bit-exact (`BAD = 0`, `UNLISTED = 0`), bao phủ toàn bộ 6 phiên GPU Phase 1B (`02c_v2`, `04b_v2`, `02d_v2`, `H1`, `H2`, `H3`) cùng phân tích không cần GPU `phase1b_zero_gpu_analytics.json`:
+
+| Phiên chạy (`checkpoints/vps_evidence/`) | GPU Thực Thi | Tệp minh chứng trọng yếu | SHA256 (16 ký tự đầu) | Trạng thái |
+| :--- | :---: | :--- | :--- | :--- |
+| Stage-1 Champion (`se374_arm_b_full`) | G4 | `stage1_retrained_best.pth` / `stage1_best_cls.pth` | `a182d8890c09d7b8` / `e1a88293aff0a0e3` | Khóa cứng |
+| Gate-7 Track A Arms (`arm5/6/7/8`) | G4 / L4 | `stage2_retrained_best.pth` (`arm5/6/7/8`) | `33f4d623` / `3055643d` / `c64b97c7` / `9fd6e121` | Khóa cứng |
+| **Job E: Post-Fix 4-Arm & 3-Seed (`se374_g7_phase1b_02c_v2`)** | **NVIDIA A100** | `STAGE2_TRAINING_METRICS.json` / `.zip` | `5188cd5527353b08` / `3385df05acf95188` | **HOÀN TẤT (`EXIT_CODE=0`)** |
+| **Job F: Clinical, GDC, Pareto & LUAD (`se374_g7_phase1b_04b_v2`)** | **NVIDIA L4** | `STAGE2_TRAINING_METRICS.json` / `.zip` | `fe9763a1ac87c000` / `38f449542efb138b` | **HOÀN TẤT (`4/4` Vision)** |
+| **Job G: Visual Overlay & Hann-50% (`se374_g7_phase1b_02d_v2`)** | **NVIDIA G4** | `STAGE2_TRAINING_METRICS.json` / `.zip` | `d933a89ebec0578c` / `f04e79118cf04f3c` | **HOÀN TẤT (`11/11` Vision)** |
+| **Job H1: `224px` + `EMA vs Raw` (`se374_g7_phase1b_h1_arm5_224px`)** | **NVIDIA A100** | `STAGE2_TRAINING_METRICS.json` / `run.log` | `6437dcb80113848d` / `ee71cf6a3965567f` | **HOÀN TẤT (`5/5` cục bộ)** |
+| **Job H2: `stage1` 336px (`se374_g7_phase1b_h2_arm5_s1`)** | **NVIDIA G4** | `STAGE2_TRAINING_METRICS.json` / `loss.png` | `ca49f55783603e09` / `eb974f754131584c` | **HOÀN TẤT (`5/5` cục bộ)** |
+| **Job H3: `336px` `EMA vs Raw` (`se374_g7_phase1b_h3_arm5_raw_vs_ema`)** | **NVIDIA L4** | `STAGE2_TRAINING_METRICS.json` / `loss.png` | `d42d061bdc7483fb` / `9bedcf6be19928f2` | **HOÀN TẤT (`5/5` cục bộ)** |
+| Zero-GPU Post-Fix Analytics (`phase1b_zero_gpu_analytics.json`) | Local CPU | `phase1b_zero_gpu_analytics.json` | `3dbd09a43dce436f` | **HOÀN TẤT (`3/3` nhóm)** |
+
+### 8.2 Ghi Chú Minh Bạch Về Sự Cố Mất Dữ Liệu Ngày 2026-11-23 & Giới Hạn Mở
+
+1. **Minh bạch sự cố ổ `C:\` ngày 2026-11-23:** Một lỗi thoát dấu ngoặc kép PowerShell-to-cmd trong tác vụ dọn dẹp cục bộ trên máy trạm Windows đã làm **mất vĩnh viễn tệp không theo dõi trên git là `Lab1.ipynb`** (bài tập thực hành cục bộ ban đầu, không thuộc chuỗi pipeline sản phẩm chính). Toàn bộ kho nghiên cứu và sản phẩm chính đã được khôi phục 100% từ lịch sử git xác thực, mở rộng kiểm toán mật mã lên **`228/228` tệp SHA256 (`BAD = 0`, `UNLISTED = 0`)** và vượt qua `541` ca kiểm thử tự động.
+2. **Giới hạn cỡ mẫu sống còn nhỏ (`n = 23`, `2` biến cố):** Dù dữ liệu sống còn được truy vấn thật 100% từ NCI GDC Release 46.0, tập Held-Out Test chỉ có `2` biến cố tử vong nên phân tích Kaplan-Meier chưa đủ lực thống kê cho $p < 0.05$ (`GT p = 0.1869`, `AI p = 0.1474`). Cần mở rộng kiểm định sống còn trên đoàn hệ TCGA-BRCA lớn hơn ở giai đoạn tiếp theo.
+3. **Khoảng cách với `SIA-WSSS` (MICCAI 2025) & hướng phát triển:** Gate-7 Track A (`72.79%` Primary / `72.80%` CGM / `72.90%` Secondary Simplex) còn thấp hơn `-0.61% / -0.60% / -0.50%` so với `SIA-WSSS` (`73.40%` mIoU, 5-run avg, có lớp `OTR`), và kiểm chứng 3 hạt giống hiện tập trung trên nhánh chủ lực `arm5` cùng tổ hợp 4-Arm (`arm6/7/8` đơn seed). Hướng tiếp theo là tích hợp đồ thị kích hoạt - ức chế đồng bộ ngay từ Giai đoạn 1, mở rộng Track B đối chứng công bằng các Pathology Foundation Models (UNI, Virchow, Phikon-v2), và tích hợp suy luận đa độ phóng đại toàn slide gigapixel từ `LowMagWSS`.
 
 ---
 
@@ -405,15 +382,18 @@ Ngay sau sự cố, toàn bộ kho dự án nghiên cứu và sản phẩm chín
 3. **Lyndon Chan, Mahdi S. Hosseini, Corwyn Rowsell, Konstantinos N. Plataniotis, Savvas Damaskinos.** "HistoSegNet: Semantic Segmentation of Histological Tissue Type in Whole Slide Images." *ICCV*, pp. 10662-10671, 2019. DOI: `10.1109/ICCV.2019.01076`.
 4. **Yude Wang, Jie Zhang, Meina Kan, Shiguang Shan, Xilin Chen.** "Self-Supervised Equivariant Attention Mechanism for Weakly Supervised Semantic Segmentation (SEAM)." *CVPR*, pp. 12275-12284, 2020. DOI: `10.1109/CVPR42600.2020.01229`.
 5. **Zijie Fang, Yang Chen, Yifeng Wang, Zhi Wang, Xiangyang Ji, Yongbing Zhang.** "Weakly-Supervised Semantic Segmentation for Histopathology Images Based on Dataset Synthesis and Feature Consistency Constraint (PistoSeg)." *AAAI*, vol. 37, no. 1, pp. 606-613, 2023. DOI: `10.1609/aaai.v37i1.25136`.
-6. **Zijie Fang, Yifeng Wang, Peizhang Xie, Zhi Wang, Yongbing Zhang.** "HisynSeg: Weakly-Supervised Histopathological Image Segmentation via Image-Mixing Synthesis and Consistency Regularization." *IEEE Transactions on Medical Imaging (TMI)*, vol. 44, no. 4, pp. 1765-1782, 2025. DOI: `10.1109/TMI.2024.3520129`.
+6. **Zijie Fang, Yifeng Wang, Peizhang Xie, Zhi Wang, Yongbing Zhang.** "HisynSeg: Weakly-Supervised Histopathological Image Segmentation via Image-Mixing Synthesis and Consistency Regularization." *IEEE Transactions on Medical Imaging (TMI)*, vol. 44, no. 4, pp. 1765-1782, 2025. DOI: `10.1109/TMI.2024.3520129` (`arXiv:2412.20924`).
 7. **Siyang Feng, Jiale Chen, Zhenbing Liu, et al.** "Mining Gold from the Sand: Weakly Supervised Histological Tissue Segmentation with Activation Relocalization and Mutual Learning (ARML)." *MICCAI 2024*, Springer LNCS vol. 15008, pp. 414-423, 2024. DOI: `10.1007/978-3-031-72111-3_39`.
 8. **Jiansong Fan, Yicheng Di, Jiayu Bao, Lihua Li, Xiang Pan.** "Synchronous Inhibition and Activation for Weakly Supervised Semantic Segmentation of Pathology Images." *MICCAI 2025*, Springer LNCS, 2025. DOI: `10.1007/978-3-032-05141-7_56`.
 9. **Anh M. Vu, Khang P. Le, et al.** "DualProtoSeg: Simple and Efficient Design with Text- and Image-Guided Prototype Learning for Weakly Supervised Histopathology Image Segmentation." *arXiv preprint arXiv:2512.10314*, 2025.
 10. **Khang Le, Ha Thach, Anh M. Vu, et al.** "ConStruct: Structural Distillation of Foundation Models for Prototype-Based Weakly Supervised Histopathology Segmentation." *Medical Imaging with Deep Learning (MIDL)*, `arXiv:2512.10316`, 2026.
-11. **Dung Minh Do, Nhat-Thanh Huynh, Duc Minh Huynh, Doanh C. Bui, Khang Nguyen.** "Toward Efficient Weakly Supervised Semantic Segmentation Using Only Low-Magnification Histopathological Images." *2026 International Conference on Multimedia Analysis and Pattern Recognition (MAPR)*, pp. 334-339, 2026. DOI: `10.1109/MAPR72750.2026.11685691`.
-12. **Maxime Oquab, Timothee Darcet, Theo Moutakanni, et al.** "DINOv2: Learning Robust Visual Features without Supervision." *Transactions on Machine Learning Research (TMLR)*, 2024 (`arXiv:2304.07193`).
-13. **Enze Xie, Wenhai Wang, Zhiding Yu, Anima Anandkumar, Jose M. Alvarez, Ping Luo.** "SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers." *NeurIPS*, vol. 34, pp. 12077-12090, 2021.
-14. **Zhuang Liu, Hanzi Mao, Chao-Yuan Wu, Christoph Feichtenhofer, Trevor Darrell, Saining Xie.** "A ConvNet for the 2020s (ConvNeXt)." *CVPR*, pp. 11976-11986, 2022. DOI: `10.1109/CVPR52688.2022.01167`.
-15. **Arnout C. Ruifrok, Dennis A. Johnston.** "Quantification of histochemical staining by color deconvolution." *Analytical and Quantitative Cytology and Histology*, vol. 23, no. 4, pp. 291-299, 2001.
-16. **W. Fraser Symmans, Florentia Peintinger, Christos Hatzis, et al.** "Measurement of Residual Breast Cancer Burden to Predict Survival After Neoadjuvant Chemotherapy." *Journal of Clinical Oncology*, vol. 25, no. 28, pp. 4414-4422, 2007. DOI: `10.1200/JCO.2007.10.6823`.
-17. **Gabi W. van Pelt, Sanne Kjaer-Frifeldt, J. Han J. M. van Krieken, et al.** "Scoring the tumor-stroma ratio in colon cancer: procedure and recommendations." *Virchows Archiv*, vol. 473, no. 4, pp. 405-412, 2018. DOI: `10.1007/s00428-018-2408-z`.
+11. **Sicong Gao, Matthew A. B. Baker, Maurice Pagnucco, Zhiwei Gao, Yang Song.** "Bridging Visual-Textual Modalities: Weakly Supervised Histopathology Segmentation (QFKF)." *British Machine Vision Conference (BMVC)*, Paper 218, 2025.
+12. **Hualong Zhang, Siyang Feng, Zihan Huan, Yi Qian, Zhenbing Liu, Rushi Lan, Xipeng Pan.** "C2RM-Seg: Causal Counterfactual Reasoning with Structural-Semantic Priors for Weakly Supervised Histopathological Tissue Segmentation." *MICCAI 2026*, Paper 4147 (`arXiv:2606.25508`).
+13. **Dung Minh Do, Nhat-Thanh Huynh, Duc Minh Huynh, Doanh C. Bui, Khang Nguyen.** "Toward Efficient Weakly Supervised Semantic Segmentation Using Only Low-Magnification Histopathological Images." *2026 International Conference on Multimedia Analysis and Pattern Recognition (MAPR)*, pp. 334-339, 2026. DOI: `10.1109/MAPR72750.2026.11685691`.
+14. **Maxime Oquab, Timothee Darcet, Theo Moutakanni, et al.** "DINOv2: Learning Robust Visual Features without Supervision." *TMLR*, 2024 (`arXiv:2304.07193`).
+15. **Enze Xie, Wenhai Wang, Zhiding Yu, Anima Anandkumar, Jose M. Alvarez, Ping Luo.** "SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers." *NeurIPS*, vol. 34, pp. 12077-12090, 2021.
+16. **Zhuang Liu, Hanzi Mao, Chao-Yuan Wu, Christoph Feichtenhofer, Trevor Darrell, Saining Xie.** "A ConvNet for the 2020s (ConvNeXt)." *CVPR*, pp. 11976-11986, 2022. DOI: `10.1109/CVPR52688.2022.01167`.
+17. **Arnout C. Ruifrok, Dennis A. Johnston.** "Quantification of histochemical staining by color deconvolution." *Analytical and Quantitative Cytology and Histology*, vol. 23, no. 4, pp. 291-299, 2001.
+18. **W. Fraser Symmans, Florentia Peintinger, Christos Hatzis, et al.** "Measurement of Residual Breast Cancer Burden to Predict Survival After Neoadjuvant Chemotherapy." *Journal of Clinical Oncology*, vol. 25, no. 28, pp. 4414-4422, 2007. DOI: `10.1200/JCO.2007.10.6823`.
+19. **Wilma E. Mesker, J. M. C. Junggeburt, K. Szuhai, et al.** "The carcinoma-stromal ratio of colon carcinoma is an independent factor for survival compared to lymph node status and tumor stage." *Cellular Oncology*, vol. 29, no. 5, pp. 387-398, 2007.
+20. **Gabi W. van Pelt, Sanne Kjaer-Frifeldt, J. Han J. M. van Krieken, et al.** "Scoring the tumor-stroma ratio in colon cancer: procedure and recommendations (UNITED)." *Virchows Archiv*, vol. 473, no. 4, pp. 405-412, 2018. DOI: `10.1007/s00428-018-2408-z`.

@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-11-24T02:55:15.120337</dc:date>
+    <dc:date>2026-11-25T08:00:53.755514</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -40,7 +40,7 @@ Q 27.095718 67.555139 27.095718 73.028962
 L 27.095718 195.642592 
 Q 27.095718 201.116415 32.413129 201.116415 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #fafafa; stroke: #000000; stroke-width: 1.4; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #fafafa; stroke: #000000; stroke-width: 1.4; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
     <path d="M 343.481718 201.116415 
@@ -53,7 +53,7 @@ Q 338.164306 67.555139 338.164306 73.028962
 L 338.164306 195.642592 
 Q 338.164306 201.116415 343.481718 201.116415 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #f2f2f2; stroke: #000000; stroke-width: 1.4; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #f2f2f2; stroke: #000000; stroke-width: 1.4; stroke-linejoin: miter"/>
    </g>
    <g id="patch_4">
     <path d="M 654.550306 201.116415 
@@ -66,54 +66,54 @@ Q 649.232894 67.555139 649.232894 73.028962
 L 649.232894 195.642592 
 Q 649.232894 201.116415 654.550306 201.116415 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #fafafa; stroke: #000000; stroke-width: 1.7; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #fafafa; stroke: #000000; stroke-width: 1.7; stroke-linejoin: miter"/>
    </g>
    <g id="patch_5">
     <path d="M 32.413129 394.889742 
 L 269.569694 394.889742 
 Q 274.887106 394.889742 274.887106 389.415919 
-L 274.887106 262.42323 
-Q 274.887106 256.949408 269.569694 256.949408 
-L 32.413129 256.949408 
-Q 27.095718 256.949408 27.095718 262.42323 
+L 274.887106 261.328466 
+Q 274.887106 255.854643 269.569694 255.854643 
+L 32.413129 255.854643 
+Q 27.095718 255.854643 27.095718 261.328466 
 L 27.095718 389.415919 
 Q 27.095718 394.889742 32.413129 394.889742 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #f2f2f2; stroke: #000000; stroke-width: 1.4; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #f2f2f2; stroke: #000000; stroke-width: 1.4; stroke-linejoin: miter"/>
    </g>
    <g id="patch_6">
     <path d="M 343.481718 394.889742 
 L 580.638282 394.889742 
 Q 585.955694 394.889742 585.955694 389.415919 
-L 585.955694 262.42323 
-Q 585.955694 256.949408 580.638282 256.949408 
-L 343.481718 256.949408 
-Q 338.164306 256.949408 338.164306 262.42323 
+L 585.955694 261.328466 
+Q 585.955694 255.854643 580.638282 255.854643 
+L 343.481718 255.854643 
+Q 338.164306 255.854643 338.164306 261.328466 
 L 338.164306 389.415919 
 Q 338.164306 394.889742 343.481718 394.889742 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #e8e8e8; stroke: #000000; stroke-width: 2; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #e8e8e8; stroke: #000000; stroke-width: 2; stroke-linejoin: miter"/>
    </g>
    <g id="patch_7">
     <path d="M 654.550306 394.889742 
 L 891.706871 394.889742 
 Q 897.024282 394.889742 897.024282 389.415919 
-L 897.024282 262.42323 
-Q 897.024282 256.949408 891.706871 256.949408 
-L 654.550306 256.949408 
-Q 649.232894 256.949408 649.232894 262.42323 
+L 897.024282 261.328466 
+Q 897.024282 255.854643 891.706871 255.854643 
+L 654.550306 255.854643 
+Q 649.232894 255.854643 649.232894 261.328466 
 L 649.232894 389.415919 
 Q 649.232894 394.889742 654.550306 394.889742 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #fafafa; stroke: #000000; stroke-width: 1.4; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #fafafa; stroke: #000000; stroke-width: 1.4; stroke-linejoin: miter"/>
    </g>
    <g id="line2d_1">
     <path d="M 28.690941 414.048122 
 L 895.429059 414.048122 
-" clip-path="url(#p98989f5d93)" style="fill: none; stroke: #bfbfbf; stroke-width: 0.8; stroke-linecap: square"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: none; stroke: #bfbfbf; stroke-width: 0.8; stroke-linecap: square"/>
    </g>
    <g id="text_1">
-    <text style="font-weight: 700; font-size: 12.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="462.06" y="31.912576" transform="rotate(-0 462.06 31.912576)">SE374.R11 Gate-7 Track A: End-to-End WSSS Distillation &amp; Clinical Deployment Architecture</text>
+    <text style="font-weight: 700; font-size: 12px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="462.06" y="31.808654" transform="rotate(-0 462.06 31.808654)">SE374.R11 Gate-7 Track A (Phase-1B Post-Fix): End-to-End WSSS Distillation &amp; Clinical Architecture</text>
    </g>
    <g id="text_2">
     <text style="font-size: 8.9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #333333" x="462.06" y="49.633725" transform="rotate(-0 462.06 49.633725)">BCSS-WSSS (TCGA-BRCA, 151 Patients: 106 Train / 22 Val / 23 Held-Out Test | 0% Patient Overlap | 0% TCGA-BRCA Pretraining Overlap)</text>
@@ -129,7 +129,7 @@ Q 27.095718 67.555139 27.095718 71.934197
 L 27.095718 90.545195 
 Q 27.095718 94.924253 31.349647 94.924253 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #262626; stroke: #000000; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #262626; stroke: #000000; stroke-linejoin: miter"/>
    </g>
    <g id="patch_9">
     <path d="M 342.418235 94.924253 
@@ -142,7 +142,7 @@ Q 338.164306 67.555139 338.164306 71.934197
 L 338.164306 90.545195 
 Q 338.164306 94.924253 342.418235 94.924253 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #404040; stroke: #000000; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #404040; stroke: #000000; stroke-linejoin: miter"/>
    </g>
    <g id="patch_10">
     <path d="M 653.486824 94.924253 
@@ -155,145 +155,145 @@ Q 649.232894 67.555139 649.232894 71.934197
 L 649.232894 90.545195 
 Q 649.232894 94.924253 653.486824 94.924253 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #1a1a1a; stroke: #000000; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #1a1a1a; stroke: #000000; stroke-linejoin: miter"/>
    </g>
    <g id="patch_11">
-    <path d="M 31.349647 284.318522 
-L 270.633176 284.318522 
-Q 274.887106 284.318522 274.887106 279.939463 
-L 274.887106 261.328466 
-Q 274.887106 256.949408 270.633176 256.949408 
-L 31.349647 256.949408 
-Q 27.095718 256.949408 27.095718 261.328466 
-L 27.095718 279.939463 
-Q 27.095718 284.318522 31.349647 284.318522 
+    <path d="M 31.349647 283.223757 
+L 270.633176 283.223757 
+Q 274.887106 283.223757 274.887106 278.844699 
+L 274.887106 260.233701 
+Q 274.887106 255.854643 270.633176 255.854643 
+L 31.349647 255.854643 
+Q 27.095718 255.854643 27.095718 260.233701 
+L 27.095718 278.844699 
+Q 27.095718 283.223757 31.349647 283.223757 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #262626; stroke: #000000; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #262626; stroke: #000000; stroke-linejoin: miter"/>
    </g>
    <g id="patch_12">
-    <path d="M 342.418235 284.318522 
-L 581.701765 284.318522 
-Q 585.955694 284.318522 585.955694 279.939463 
-L 585.955694 261.328466 
-Q 585.955694 256.949408 581.701765 256.949408 
-L 342.418235 256.949408 
-Q 338.164306 256.949408 338.164306 261.328466 
-L 338.164306 279.939463 
-Q 338.164306 284.318522 342.418235 284.318522 
+    <path d="M 342.418235 283.223757 
+L 581.701765 283.223757 
+Q 585.955694 283.223757 585.955694 278.844699 
+L 585.955694 260.233701 
+Q 585.955694 255.854643 581.701765 255.854643 
+L 342.418235 255.854643 
+Q 338.164306 255.854643 338.164306 260.233701 
+L 338.164306 278.844699 
+Q 338.164306 283.223757 342.418235 283.223757 
 z
-" clip-path="url(#p98989f5d93)" style="stroke: #000000; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="stroke: #000000; stroke-linejoin: miter"/>
    </g>
    <g id="patch_13">
-    <path d="M 653.486824 284.318522 
-L 892.770353 284.318522 
-Q 897.024282 284.318522 897.024282 279.939463 
-L 897.024282 261.328466 
-Q 897.024282 256.949408 892.770353 256.949408 
-L 653.486824 256.949408 
-Q 649.232894 256.949408 649.232894 261.328466 
-L 649.232894 279.939463 
-Q 649.232894 284.318522 653.486824 284.318522 
+    <path d="M 653.486824 283.223757 
+L 892.770353 283.223757 
+Q 897.024282 283.223757 897.024282 278.844699 
+L 897.024282 260.233701 
+Q 897.024282 255.854643 892.770353 255.854643 
+L 653.486824 255.854643 
+Q 649.232894 255.854643 649.232894 260.233701 
+L 649.232894 278.844699 
+Q 649.232894 283.223757 653.486824 283.223757 
 z
-" clip-path="url(#p98989f5d93)" style="fill: #404040; stroke: #000000; stroke-linejoin: miter"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: #404040; stroke: #000000; stroke-linejoin: miter"/>
    </g>
    <g id="text_3">
-    <text style="font-size: 8.1px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #262626" x="462.06" y="430.94958" transform="rotate(-0 462.06 430.94958)">Cryptographic Audit: 123/123 SHA256 Artifacts (BAD = 0) | Held-Out TEST: 23 Patients (4,986 Patches) | 95% Boot CI [67.24%, 76.79%]</text>
+    <text style="font-size: 8.1px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #262626" x="462.06" y="430.94958" transform="rotate(-0 462.06 430.94958)">Cryptographic Audit: 228/228 SHA256 Artifacts (BAD = 0) | Held-Out TEST: 23 Patients (4,986 Patches) | 95% Boot CI [67.17%, 76.83%]</text>
    </g>
    <g id="text_4">
     <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="150.991412" y="83.369774" transform="rotate(-0 150.991412 83.369774)">1. STAGE-1 CAM &amp; SG-DAP (WEAK LABELS)</text>
    </g>
    <g id="text_5">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="109.4366" transform="rotate(-0 37.1988 109.4366)">- Input: 23,422 Train patches (weak y_cls only)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="109.42361" transform="rotate(-0 37.1988 109.42361)">- Input: 23,422 Train patches (weak y_cls only)</text>
    </g>
    <g id="text_6">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="132.700347" transform="rotate(-0 37.1988 132.700347)">- ResNet-38d + PDA (Ep 5 EMA, LUAD init)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="132.687357" transform="rotate(-0 37.1988 132.687357)">- ResNet-38d + PDA (Ep 5 EMA, LUAD init)</text>
    </g>
    <g id="text_7">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="155.964094" transform="rotate(-0 37.1988 155.964094)">- Target: q_s1_sgdap (T = 0.25, y-gated masks)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="155.951104" transform="rotate(-0 37.1988 155.951104)">- Target: q_s1_sgdap (T = 0.25, y-gated masks)</text>
    </g>
    <g id="text_8">
-    <text style="font-weight: 700; font-size: 7.65px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="179.309526" transform="rotate(-0 37.1988 179.309526)">- VAL (3,418 patches): 74.13% | ECE 0.0751</text>
+    <text style="font-weight: 700; font-size: 7.55px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="179.283327" transform="rotate(-0 37.1988 179.283327)">- VAL (3,418 patches): 74.13% | ECE 0.0751</text>
    </g>
    <g id="text_9">
     <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="462.06" y="83.369774" transform="rotate(-0 462.06 83.369774)">2. ROUND-1 4-ARM TEACHERS (GATE-6)</text>
    </g>
    <g id="text_10">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="109.4366" transform="rotate(-0 348.267388 109.4366)">- Arm 1 DeepLab R101: 71.11% TEST</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="109.42361" transform="rotate(-0 348.267388 109.42361)">- Arm 1 DeepLab R101: 71.11% TEST</text>
    </g>
    <g id="text_11">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="132.700347" transform="rotate(-0 348.267388 132.700347)">- Arm 2 SegFormer MiT-B3: 71.84% TEST</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="132.687357" transform="rotate(-0 348.267388 132.687357)">- Arm 2 SegFormer MiT-B3: 71.84% TEST</text>
    </g>
    <g id="text_12">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="155.980281" transform="rotate(-0 348.267388 155.980281)">- Arm 3 ConvNeXt-B 70.73% | Arm 4 DINOv2-B 72.36%</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="155.967182" transform="rotate(-0 348.267388 155.967182)">- Arm 3 ConvNeXt-B 70.73% | Arm 4 DINOv2-B 72.36%</text>
    </g>
    <g id="text_13">
-    <text style="font-weight: 700; font-size: 7.65px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="179.292792" transform="rotate(-0 348.267388 179.292792)">- Gate-6 Primary 4-Arm (+CGM): 72.47% TEST</text>
+    <text style="font-weight: 700; font-size: 7.55px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="179.266811" transform="rotate(-0 348.267388 179.266811)">- Gate-6 Primary 4-Arm (+CGM): 72.47% TEST</text>
    </g>
    <g id="text_14">
     <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="773.128588" y="83.369774" transform="rotate(-0 773.128588 83.369774)">3. ROUND-2 DISTILLATION (VAL CEILING)</text>
    </g>
    <g id="text_15">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="109.4366" transform="rotate(-0 659.335976 109.4366)">- Target: p_ens4_uncal_ygated (r2_blend = 1.0)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="109.42361" transform="rotate(-0 659.335976 109.42361)">- Target: p_ens4_uncal_ygated (r2_blend = 1.0)</text>
    </g>
    <g id="text_16">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="132.700347" transform="rotate(-0 659.335976 132.700347)">- Fallback p_sum &lt; 0.01 -&gt; q_s1 (0.0054% VAL)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="132.687357" transform="rotate(-0 659.335976 132.687357)">- Fallback p_sum &lt; 0.01 -&gt; q_s1 (0.0054% VAL)</text>
    </g>
    <g id="text_17">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="155.980281" transform="rotate(-0 659.335976 155.980281)">- Multi-Class VAL: 65.89% | ECE 0.0489 (-35%)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="155.967182" transform="rotate(-0 659.335976 155.967182)">- Multi-Class VAL: 65.89% | ECE 0.0489 (-35%)</text>
    </g>
    <g id="text_18">
-    <text style="font-weight: 700; font-size: 7.65px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="179.292792" transform="rotate(-0 659.335976 179.292792)">- VAL Ceiling: 76.03% mIoU (+1.90% vs S1)</text>
+    <text style="font-weight: 700; font-size: 7.55px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="179.266811" transform="rotate(-0 659.335976 179.266811)">- VAL Ceiling: 76.03% mIoU (+1.90% vs S1)</text>
    </g>
    <g id="text_19">
-    <text style="font-weight: 700; font-size: 7.6px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="150.991412" y="272.608183" transform="rotate(-0 150.991412 272.608183)">4. GATE-7 TRACK A 4-ARM (R2 EMA-ONLY, 224/336px)</text>
+    <text style="font-weight: 700; font-size: 7.6px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="150.991412" y="271.513419" transform="rotate(-0 150.991412 271.513419)">4. GATE-7 TRACK A 4-ARM (R2 EMA-ONLY, 224/336px)</text>
    </g>
    <g id="text_20">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="298.830869" transform="rotate(-0 37.1988 298.830869)">- Dual-Head (Seg + Cls), ema_only=True</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="297.723114" transform="rotate(-0 37.1988 297.723114)">- Dual-Head (Seg + Cls), ema_only=True, 12x TTA</text>
    </g>
    <g id="text_21">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="323.205568" transform="rotate(-0 37.1988 323.205568)">- Arm 8 DeepLab 70.96% | Arm 7 ConvNeXt-L 71.80%</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="322.371394" transform="rotate(-0 37.1988 322.371394)">- Arm 8 DeepLab 71.09% | Arm 7 ConvNeXt-L 71.88%</text>
    </g>
    <g id="text_22">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="347.547602" transform="rotate(-0 37.1988 347.547602)">- Arm 6 SegFormer-B5: 72.04% TEST (no-CGM)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="346.987232" transform="rotate(-0 37.1988 346.987232)">- Arm 6 SegFormer-B5: 72.04% TEST (no-CGM)</text>
    </g>
    <g id="text_23">
-    <text style="font-weight: 700; font-size: 7.65px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="371.971055" transform="rotate(-0 37.1988 371.971055)">- Arm 5 DINOv2-L 336px: 72.80% TEST (+CGM)</text>
+    <text style="font-weight: 700; font-size: 7.55px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="37.1988" y="371.671387" transform="rotate(-0 37.1988 371.671387)">- Arm 5 DINOv2-L 336px: 72.63% TEST (+CGM)</text>
    </g>
    <g id="text_24">
-    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="462.06" y="272.764043" transform="rotate(-0 462.06 272.764043)">5. CALIBRATED LOG-PROB 4-ARM ENSEMBLE &amp; CGM</text>
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="462.06" y="271.669278" transform="rotate(-0 462.06 271.669278)">5. CALIBRATED LOG-PROB 4-ARM ENSEMBLE &amp; CGM</text>
    </g>
    <g id="text_25">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="298.830869" transform="rotate(-0 348.267388 298.830869)">- VAL-frozen beta scaling (cal_logprob_eps1e3)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="297.723114" transform="rotate(-0 348.267388 297.723114)">- VAL-frozen betas (cal_logprob_eps1e3, 12x TTA)</text>
    </g>
    <g id="text_26">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="323.18938" transform="rotate(-0 348.267388 323.18938)">- Optional 5-Expert CGM (S1 + 4 S2 cls heads)</text>
+    <text style="font-weight: 700; font-size: 7.55px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="322.407277" transform="rotate(-0 348.267388 322.407277)">- Primary 4-Arm: 72.79% no-CGM / 72.80% CGM</text>
    </g>
    <g id="text_27">
-    <text style="font-weight: 700; font-size: 7.65px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="347.629577" transform="rotate(-0 348.267388 347.629577)">- Primary 4-Arm (no-CGM): 72.80% | p_Holm=0.0005</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="347.003597" transform="rotate(-0 348.267388 347.003597)">- NEC-1DoF (t=0.40): 6/8 NEC-absent 0px | p_Holm=0.0005</text>
    </g>
    <g id="text_28">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="371.906403" transform="rotate(-0 348.267388 371.906403)">- Secondary Simplex (+CGM): 72.90% TEST (exploratory)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="348.267388" y="371.619721" transform="rotate(-0 348.267388 371.619721)">- Secondary Simplex (+NEC-1DoF): 72.90% TEST</text>
    </g>
    <g id="text_29">
-    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="773.128588" y="272.764043" transform="rotate(-0 773.128588 272.764043)">6. CLINICAL FASTAPI + OFFLINE WORKSTATION</text>
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #ffffff" x="773.128588" y="271.669278" transform="rotate(-0 773.128588 271.669278)">6. CLINICAL FASTAPI + OFFLINE WORKSTATION</text>
    </g>
    <g id="text_30">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="298.830869" transform="rotate(-0 659.335976 298.830869)">- FastAPI (api_server.py, strict weights check)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="297.723114" transform="rotate(-0 659.335976 297.723114)">- FastAPI (api_server.py, strict_weights, Docker)</text>
    </g>
    <g id="text_31">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="323.18938" transform="rotate(-0 659.335976 323.18938)">- Optical Otsu + Pure-Glass (&gt;= 512 px BACK)</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="322.355316" transform="rotate(-0 659.335976 322.355316)">- Optical Otsu + Pure-Glass (&gt;= 512 px BACK)</text>
    </g>
    <g id="text_32">
-    <text style="font-size: 7.4px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="347.547891" transform="rotate(-0 659.335976 347.547891)">- Offline HTML5 Canvas: 9 QA Modes, Loupe</text>
+    <text style="font-size: 7.35px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="346.987519" transform="rotate(-0 659.335976 346.987519)">- Offline HTML5 Canvas: 9 QA Modes, Loupe, Zoom</text>
    </g>
    <g id="text_33">
-    <text style="font-weight: 700; font-size: 7.65px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="371.971354" transform="rotate(-0 659.335976 371.971354)">- WSI Multi-Tile Stitch, VTP/TSR %, CAP PDF</text>
+    <text style="font-weight: 700; font-size: 7.55px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="659.335976" y="371.671682" transform="rotate(-0 659.335976 371.671682)">- WSI Multi-Tile Stitch, VTP/TSR %, CAP PDF</text>
    </g>
    <g id="line2d_2">
     <path d="M 773.128588 201.116415 
 L 773.128588 227.938147 
 L 150.991412 227.938147 
-" clip-path="url(#p98989f5d93)" style="fill: none; stroke: #000000; stroke-width: 1.6; stroke-linecap: square"/>
+" clip-path="url(#p0eb8a97d50)" style="fill: none; stroke: #000000; stroke-width: 1.6; stroke-linecap: square"/>
    </g>
    <g id="patch_14">
     <path d="M 281.675601 134.335777 
@@ -371,14 +371,14 @@ z
    </g>
    <g id="text_36">
     <g id="patch_21">
-     <path d="M 285.498284 316.398906 
-L 327.553128 316.398906 
-L 327.553128 297.123484 
-L 285.498284 297.123484 
+     <path d="M 285.011237 316.398906 
+L 328.040175 316.398906 
+L 328.040175 297.123484 
+L 285.011237 297.123484 
 z
 " style="fill: #ffffff"/>
     </g>
-    <text style="font-weight: 700; font-size: 7.3px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif" transform="translate(294.591347 304.276486)">TTA +</text>
+    <text style="font-weight: 700; font-size: 7.3px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif" transform="translate(285.887237 304.276486)">12x TTA +</text>
     <text style="font-weight: 700; font-size: 7.3px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif" transform="translate(286.374284 313.038482)">Cls Heads</text>
    </g>
    <g id="text_37">
@@ -407,7 +407,7 @@ z
   </g>
  </g>
  <defs>
-  <clipPath id="p98989f5d93">
+  <clipPath id="p0eb8a97d50">
    <rect x="10.08" y="10.08" width="903.96" height="432.432"/>
   </clipPath>
  </defs>

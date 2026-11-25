@@ -568,40 +568,44 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
         assert captured["n_labels"] == len(case_models)
         assert not captured["any_overlap"] and not captured["any_clipped"] and not captured["any_leg_overlap"], f"{case_nm}: {captured}"
 
-    ev_sentinel = PROJECT_ROOT / "checkpoints" / "vps_evidence" / "se374_g7_ensemble_tracka" / "artifacts" / "STAGE2_TRAINING_METRICS.json"
+    ev_sentinel = PROJECT_ROOT / "checkpoints" / "vps_evidence" / "se374_g7_phase1b_02c_v2" / "STAGE2_TRAINING_METRICS.json"
     if not ev_sentinel.is_file():
         pytest.skip("Gitignored checkpoints/vps_evidence/ not present on clean CI checkout.")
 
     sha_file = PROJECT_ROOT / "checkpoints" / "vps_evidence" / "SHA256SUMS.txt"
     expected_sha_count = sum(1 for ln in sha_file.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.lstrip().startswith("#"))
     ev = fig_mod.load_evidence(PROJECT_ROOT)
-    assert expected_sha_count >= 123 and ev["sha256_count"] == expected_sha_count
+    assert expected_sha_count >= 228 and ev["sha256_count"] == expected_sha_count
     assert len((PROJECT_ROOT / "src" / "visualization" / "draw_gate7_monochrome_figures.py").read_text(encoding="utf-8").splitlines()) <= 400
     sens = fig_mod._compute_patient_sensitivity(ev["patient_json"], ev.get("true_gt_counts"))
     assert sens["n_json_records"] == 12
-    assert sens["asym_nec_clr"] == 7 and sens["asym_nec_tot"] == 7
-    assert sens["asym_lym_fp"] == 1 and sens["asym_lym_tot"] == 1 and sens["asym_lym_fp_ids"] == ["EW-A3U0"]
-    assert len(sens["gt0_info"]) == 8
-    d8_idx = sens["pids"].index("TCGA-D8-A27H")
+    assert sens["n_asym"] == 7 and sens["asym_nec_tot"] == 6 and sens["asym_lym_tot"] == 1
+    assert len(sens["gt0_info"]) == 7
+    e2_idx = sens["pids"].index("TCGA-E2-A1LS")
     ew_idx = sens["pids"].index("TCGA-EW-A3U0")
-    assert sens["gt0_info"][d8_idx] == ("NEC", 425, 0)
-    assert sens["arm5_gt0_fp"] == {ew_idx}
-    assert d8_idx not in sens["arm5_gt0_fp"]
+    assert sens["gt0_info"][e2_idx] == ("NEC", 375, 0)
+    assert sens["gt0_info"][ew_idx] == ("LYM", 370, 0)
 
     fig_mod.configure_monochrome_style()
+    fig1_png, fig1_svg = fig_mod.draw_fig1_test_miou_ci(ev, tmp_path)
     fig3_png, fig3_svg = fig_mod.draw_fig3_patient_gt0_sensitivity(ev, tmp_path)
     fig4_png, fig4_svg = fig_mod.draw_fig4_pipeline_architecture(ev, tmp_path)
+    _assert_monochrome_bw_png(fig1_png, expected_dpi=300)
     _assert_monochrome_bw_png(fig3_png, expected_dpi=300)
     _assert_monochrome_bw_png(fig4_png, expected_dpi=300)
+    svg1_txt = fig1_svg.read_text(encoding="utf-8")
     svg3_txt = fig3_svg.read_text(encoding="utf-8")
     svg4_txt = fig4_svg.read_text(encoding="utf-8")
     for bad in BAD_DASHES:
-        assert bad not in svg3_txt and bad not in svg4_txt
+        assert bad not in svg1_txt and bad not in svg3_txt and bad not in svg4_txt
+    for req1 in ("71.88%", "72.79%", "72.80%", "72.90%"):
+        assert req1 in svg1_txt, f"Missing {req1!r} in regenerated fig1 SVG"
     for req3 in (
-        "Raw vs Asym-Free (-8 Asym GT=0)",
-        "Excl. 8 Asym GT=0 (min union=0)",
-        "Excl. 8 asym GT=0 cells (min union=0)",
-        "Asym GT=0 NEC cell cleared by 4-DoF CGM",
+        "Raw vs Asym-Free (-7 Asym GT=0)",
+        "Excl. 7 Asym GT=0 (min union=0)",
+        "Excl. 7 asym GT=0 cells (min union=0)",
+        "Clears 6/8 NEC-Absent to 0 px",
+        "Clears 6/8 NEC-absent patients to 0 FP px",
     ):
         assert req3 in svg3_txt, f"Missing {req3!r} in regenerated fig3 SVG"
     for forb3 in ("Clears 7/7 GT=0 NEC", "1/1 GT=0 LYM left"):
@@ -609,33 +613,31 @@ def test_pareto_axis_labels_and_gate7_monochrome_figures_regressions(tmp_path: P
     if ev.get("true_gt_counts") is not None:
         assert sens["true_gt0_count"] == 11
         assert sens["true_nec_absent"] == 8 and sens["true_lym_absent"] == 3
-        assert sens["arm5_true_nec_cleared"] == 7 and sens["arm5_true_lym_fp"] == 3
-        assert sens["true_nec_fp_ids"] == ["E2-A573"]
-        assert sens["true_gt_stats"][0] == pytest.approx(0.9383, abs=1e-3)
+        assert sens["true_gt_stats"][0] == pytest.approx(0.9220, abs=1e-3)
         for req3_true in (
-            "Clears 7/8 NEC-Absent (7/7 Asym) to 0 px",
             "Excl. All 11 True GT=0 (on-disk)",
-            "Clears 7/8 true NEC-absent (7/7 asym; E2-A573 FP)",
-            "3/3 LYM-absent left (asym: EW-A3U0)",
+            "7 Asym / 11 True GT=0 Cells &amp; 6/8 NEC-1DoF Clearing",
         ):
             assert req3_true in svg3_txt, f"Missing {req3_true!r} in regenerated fig3 SVG"
     for required in (
         "0% TCGA-BRCA Pretraining Overlap",
         "4. GATE-7 TRACK A 4-ARM (R2 EMA-ONLY, 224/336px)",
-        "Primary 4-Arm (no-CGM): 72.80% | p_Holm=0.0005",
-        "Secondary Simplex (+CGM): 72.90% TEST (exploratory)",
+        "Arm 8 DeepLab 71.09% | Arm 7 ConvNeXt-L 71.88%",
+        "Primary 4-Arm: 72.79% no-CGM / 72.80% CGM",
+        "NEC-1DoF (t=0.40): 6/8 NEC-absent 0px | p_Holm=0.0005",
+        "Secondary Simplex (+NEC-1DoF): 72.90% TEST",
         "WSI Multi-Tile Stitch, VTP/TSR %, CAP PDF",
         f"{expected_sha_count}/{expected_sha_count} SHA256 Artifacts (BAD = 0)",
     ):
         assert required in svg4_txt, f"Missing {required!r} in regenerated fig4 SVG"
-    for forbidden in ("p=0.0004", "sTILs", "0% TCGA Pretraining |"):
+    for forbidden in ("p=0.0004", "sTILs", "0% TCGA Pretraining |", "ConvNeXt-L 71.80%"):
         assert forbidden not in svg4_txt, f"Stale token {forbidden!r} found in fig4 SVG"
 
     # Safe fallback when SHA256SUMS.txt or raw test masks are absent, partial, or corrupted RGB
     ev_fallback = {**ev, "sha256_count": None, "true_gt_counts": None}
     fig3_fb_png, fig3_fb_svg = fig_mod.draw_fig3_patient_gt0_sensitivity(ev_fallback, tmp_path / "fallback")
     _assert_monochrome_bw_png(fig3_fb_png, expected_dpi=300)
-    assert "Clears 7/7 Asym GT=0 NEC to 0 px" in fig3_fb_svg.read_text(encoding="utf-8")
+    assert "7 Asym GT=0 &amp; 6/8 NEC-1DoF Clearing" in fig3_fb_svg.read_text(encoding="utf-8")
     _, fig4_fb_svg = fig_mod.draw_fig4_pipeline_architecture(ev_fallback, tmp_path / "fallback")
     assert "SHA256 Artifacts Verified (BAD = 0)" in fig4_fb_svg.read_text(encoding="utf-8")
     partial_root = tmp_path / "partial_masks"
