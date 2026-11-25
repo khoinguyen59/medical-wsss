@@ -34,12 +34,12 @@ Trích xuất trực tiếp từ `COLAB_EVALUATION_REPORT.json` của phiên ch�
 Phân tích định lượng từ ma trận nhầm lẫn trên chỉ ra **4 nút thắt cổ chai toán học** làm giới hạn mức tăng của `M3` (`+0.18%` so với `M2`) và `M4` (`+0.01%` so với `M2`):
 
 1. **Nút thắt 1 - Giới hạn trường tiếp nhận đơn tỷ lệ (Single-Scale Receptive Field Bottleneck):**
-   - Trong `M1`..`M5`, mạng Stage-2 `DeepLabV3+ ResNet-101` chỉ suy luận ở duy nhất độ phân giải `1.0x` (`224x224`).
+   - Trong `M1-M5`, mạng Stage-2 `DeepLabV3+ ResNet-101` chỉ suy luận ở duy nhất độ phân giải `1.0x` (`224x224`).
    - Với `output_stride = 16`, bản đồ đặc trưng đầu ra của nhánh encoder chỉ có kích thước `14x14`. Các cụm tế bào lympho nhỏ (`LYM`, đường kính chỉ `6-10` pixels) nằm xen kẽ trong mô đệm bị hòa lẫn vào nền `STR`, gây ra **5,986,016 pixels lỗi `LYM -> STR`** (chiếm 25.98% tổng lượng `LYM` toàn tập test).
    - Ngược lại, các ổ hoại tử lớn (`NEC`) nằm giữa đám tế bào u đặc (`TUM`) cần bối cảnh rộng hơn (`scale = 0.75x`) để phân biệt nhân tan rã với mô u sống, dẫn đến **1,392,044 pixels lỗi `NEC -> TUM`** (chiếm 14.72% tổng lượng `NEC`).
 
 2. **Nút thắt 2 - Cổng cắt nhị phân cứng (`y_cls > 0.10`) và nhiễu nền hàm mũ `exp(0) = 1.0` trong `extract_stage1_cam_and_gate`:**
-   - Trong `M2`..`M5`, cổng phân loại Stage-1 sử dụng hàm bước nhảy cứng `cgm_gate = (y_cls > 0.10)`. Khi một mảng ảnh chỉ chứa một cụm nhỏ `LYM` hoặc `NEC` ở rìa (chiếm 3-7% diện tích patch), phép gộp trung bình toàn cục (GAP) của `ResNet38d Net_CAM` thường cho xác suất `0.045 < y_cls <= 0.10`. Cổng cứng cắt phăng lớp đó về `0.0`, xóa sổ toàn bộ dự đoán đúng của Stage-2 trên patch đó.
+   - Trong `M2-M5`, cổng phân loại Stage-1 sử dụng hàm bước nhảy cứng `cgm_gate = (y_cls > 0.10)`. Khi một mảng ảnh chỉ chứa một cụm nhỏ `LYM` hoặc `NEC` ở rìa (chiếm 3-7% diện tích patch), phép gộp trung bình toàn cục (GAP) của `ResNet38d Net_CAM` thường cho xác suất `0.045 < y_cls <= 0.10`. Cổng cứng cắt phăng lớp đó về `0.0`, xóa sổ toàn bộ dự đoán đúng của Stage-2 trên patch đó.
    - Ngược lại, khi `0.10 < y_cls < 0.20` (tín hiệu rất yếu), cổng cứng vẫn gán trọng số tuyệt đối `1.0` ngang bằng với lớp chính (`y_cls = 0.99`).
    - Nghiêm trọng hơn, ở bước chuẩn hóa bản đồ `cam_probs` trong V1:
      `exp_cam = np.where(cgm_gate > 0, np.exp(cam_norm * 2.0), 0.0)`.
@@ -57,7 +57,7 @@ Phân tích định lượng từ ma trận nhầm lẫn trên chỉ ra **4 nút
 
 ## 2. Đặc Tả Toán Học Các Phương Pháp Đột Phá Thế Hệ V2 (`M6` & `M7`)
 
-Để giải quyết triệt để 4 nút thắt trên mà vẫn giữ nguyên 100% tính tương thích ngược của `M1`..`M5`, chúng tôi thiết kế và hiện thực hóa hai phương pháp suy luận thế hệ mới trong `src/models/wsss_inference_methods.py`:
+Để giải quyết triệt để 4 nút thắt trên mà vẫn giữ nguyên 100% tính tương thích ngược của `M1-M5`, chúng tôi thiết kế và hiện thực hóa hai phương pháp suy luận thế hệ mới trong `src/models/wsss_inference_methods.py`:
 - **`M6_MultiScale_Pyramid_D4_Ensemble`**: Tổ hợp Đa Tỷ Lệ Kim Tự Tháp (`0.75x, 1.0x, 1.25x`) trọng số hóa theo Độ Tự Tin Entropy Shannon kết hợp Cổng Mềm Thích Nghi Đa Ngưỡng Stage-1 D4.
 - **`M7_Proposed_Ultra_SOTA_Curriculum`**: Chuỗi Quy Trình Tối Thượng Kết Hợp Kim Tự Tháp Đa Tỷ Lệ D4 + Dung Hợp CAM Bảo Toàn Điểm Không Theo Entropy + Hiệu Chỉnh Mật Độ Quang Học Beer-Lambert (H&E Color Deconvolution) + Tinh Chỉnh Biên Đa Bước Nhảy & Triệt Tiêu Đảo Nhiễu Theo Độ Tự Tin.
 
@@ -120,7 +120,7 @@ Từ phát hiện này, với tensor ảnh đầu vào $X \in [0, 1]^{1 \times 3
    - Do đó, hệ thống ghép 4 góc nhìn Dihedral $[X, \text{flip}_H(X), \text{flip}_V(X), \text{rot}_{90}(X)] \in \mathbb{R}^{4 \times 3 \times H \times W}$ để ước lượng xác suất hiện diện lớp bất biến $\bar{y}_{\text{cls}} \in [0, 1]^4$, nhưng trích xuất bản đồ không gian $M_{\text{cam}} \in \mathbb{R}_{\ge 0}^{4 \times H \times W}$ trực tiếp từ góc nhìn gốc không lệch pha.
 2. **Cổng mềm thích nghi kết hợp Khôi phục Cụm Biên Cực Đại (Peak-Aware Soft-Gating):**
    Thiết lập ngưỡng cắt dưới $\tau_{\text{low}} = (0.065, 0.065, 0.055, 0.060)$, ngưỡng xác nhận chuẩn $\tau_{\text{high}} = (0.10, 0.10, 0.10, 0.10)$ và cường độ đỉnh kích hoạt $M_{\text{peak}}(c) = \max_{u,v} M_{\text{cam}}(c, u, v)$:
-   - Nếu $\bar{y}_{\text{cls}, c} \ge 0.10$ và $M_{\text{peak}}(c) \ge 2.5$: mở cổng hoàn toàn $G_{\text{soft}}(c) = 1.0$ (tương thích 100% với những ca lớp hiện diện rõ ràng của `M2`..`M5`).
+   - Nếu $\bar{y}_{\text{cls}, c} \ge 0.10$ và $M_{\text{peak}}(c) \ge 2.5$: mở cổng hoàn toàn $G_{\text{soft}}(c) = 1.0$ (tương thích 100% với những ca lớp hiện diện rõ ràng của `M2-M5`).
    - Nếu $\bar{y}_{\text{cls}, c} \ge 0.10$ nhưng $M_{\text{peak}}(c) < 2.5$ (kích hoạt nền yếu toàn cục): triệt tiêu cổng $G_{\text{soft}}(c) = 0.0$ để chặn dương tính giả từ CAM chết.
    - Nếu $\tau_{\text{low}, c} < \bar{y}_{\text{cls}, c} < 0.10$ nhưng tồn tại cụm tiêu điểm sắc nét ($M_{\text{peak}}(c) \ge 0.85 \max_{k} M_{\text{peak}}(k)$): mở cổng cứu hộ $G_{\text{soft}}(c) \in [0.65, 1.00]$ và chỉ giải phóng lớp đó tại đúng vùng định vị CAM ($\hat{M}_c(u, v) > 0.35$).
 3. **Bản đồ xác suất CAM bảo toàn điểm không (Zero-Preserving Sharp CAM):**
@@ -163,7 +163,7 @@ Dựa trên định luật hấp thụ quang học **Beer-Lambert** và ma trậ
 2. **Khuếch tán tương đồng cục bộ dẫn hướng bởi biên quang học H&E (OD-Guided Local Affinity Refinement):**
    Khi có ảnh gốc `raw_rgb`, ma trận độ tương đồng cục bộ $3 \times 3$ dựa trên gradient mật độ quang học $\nabla OD$ truyền xác suất dọc theo ranh giới mô học thực tế, xóa bỏ quầng mờ (bilinear halo) quanh các ổ u và cụm lympho.
 3. **Triệt tiêu đảo nhiễu phân lớp đặc thù (Class-Aware Confidence-Guided Island Suppression):**
-   Quét các thành phần liên thông 8 hướng có diện tích $0 < |\mathcal{C}_k| < 96$ pixels. Để bảo vệ tuyệt đối các cụm tế bào hiếm (`LYM`, `NEC` vốn có xác suất chiến thắng tự nhiên trong khoảng $0.45..0.65$), chỉ những vi đảo cực nhỏ $|\mathcal{C}_k| < 36$ pixels HOẶC các đảo thuộc lớp đa số (`TUM`, `STR`) có diện tích $36 \le |\mathcal{C}_k| < 96$ kèm độ tự tin trung bình thấp $\bar{P}(\mathcal{C}_k) < 0.50$ mới bị tái gán sang phân lớp có xác suất cao thứ nhì.
+   Quét các thành phần liên thông 8 hướng có diện tích $0 < |\mathcal{C}_k| < 96$ pixels. Để bảo vệ tuyệt đối các cụm tế bào hiếm (`LYM`, `NEC` vốn có xác suất chiến thắng tự nhiên trong khoảng $0.45-0.65$), chỉ những vi đảo cực nhỏ $|\mathcal{C}_k| < 36$ pixels HOẶC các đảo thuộc lớp đa số (`TUM`, `STR`) có diện tích $36 \le |\mathcal{C}_k| < 96$ kèm độ tự tin trung bình thấp $\bar{P}(\mathcal{C}_k) < 0.50$ mới bị tái gán sang phân lớp có xác suất cao thứ nhì.
 
 ---
 
@@ -187,7 +187,7 @@ Dựa trên định luật hấp thụ quang học **Beer-Lambert** và ma trậ
    - `M6_MultiScale_Pyramid_D4_Ensemble` đạt **49.42% mIoU** và **69.85% PA**, vượt qua `M5_Proposed_SOTA_Ensemble` (**+0.67% mIoU**, **+2.80% NEC IoU**, **+0.20% TUM IoU**) nhờ cơ chế dung hợp kim tự tháp đa tỷ lệ điều hướng bởi bất định tỷ lệ gốc (`1.25x` mở rộng trường tiếp nhận `ASPP` từ $14 \times 14$ lên $18 \times 18$, giải quyết triệt để hiện tượng suy biến đệm không).
    - `M7_Proposed_Ultra_SOTA_Curriculum` đạt đỉnh cao mới với **51.88% mIoU** và **70.31% PA**, vượt xa `M5` tới **+3.13% mIoU** và **+0.50% PA** (**+11.34% mIoU** so với `M1` Baseline)!
 2. **Khôi phục ngoạn mục các ổ hoại tử biên (`NEC IoU` tăng từ `30.73%` ở `M5` lên `43.01%` ở `M7`, tức `+12.28%`):**
-   - Điển hình trên ca bệnh khó `TCGA-E2-A14X-DX1_xmin57515_ymin72665` (chứa ổ hoại tử `NEC` lớn nhưng xác suất phân loại toàn cục Stage-1 chỉ đạt $\bar{y}_{\text{cls}, 3} = 0.0801 \le 0.10$ nên bị cổng cứng của `M2..M5` cắt về `0`), cơ chế **Peak-Aware Soft-Gating** kết hợp **Zero-Preserving Sharp CAM** ($M_{\text{peak}}(3) = 12.11$) và **Giải chập Quang học Beer-Lambert H&E** trong `M7` đã khôi phục chính xác vùng hoại tử, nâng độ chính xác điểm ảnh trên ca bệnh này từ **52.66%** (`M5`) lên **59.40%** (`M7`, tăng **+6.74%**).
+   - Điển hình trên ca bệnh khó `TCGA-E2-A14X-DX1_xmin57515_ymin72665` (chứa ổ hoại tử `NEC` lớn nhưng xác suất phân loại toàn cục Stage-1 chỉ đạt $\bar{y}_{\text{cls}, 3} = 0.0801 \le 0.10$ nên bị cổng cứng của `M2-M5` cắt về `0`), cơ chế **Peak-Aware Soft-Gating** kết hợp **Zero-Preserving Sharp CAM** ($M_{\text{peak}}(3) = 12.11$) và **Giải chập Quang học Beer-Lambert H&E** trong `M7` đã khôi phục chính xác vùng hoại tử, nâng độ chính xác điểm ảnh trên ca bệnh này từ **52.66%** (`M5`) lên **59.40%** (`M7`, tăng **+6.74%**).
 
 ---
 
@@ -195,9 +195,9 @@ Dựa trên định luật hấp thụ quang học **Beer-Lambert** và ma trậ
 
 | Thuộc Tính / Phương Thức | `MultiMethodWSSSEngine` (Mặc định V1) | `MultiMethodWSSSEngine(include_v2=True)` / `MultiMethodWSSSEngineV2` |
 | :--- | :--- | :--- |
-| **Danh sách phương pháp (`METHOD_KEYS`)** | `M1` .. `M5` (5 phương pháp) | `M1` .. `M7` (7 phương pháp) |
+| **Danh sách phương pháp (`METHOD_KEYS`)** | `M1-M5` (5 phương pháp) | `M1-M7` (7 phương pháp) |
 | **Tương thích `tests/test_colab_notebook.py`** | **100% PASS** (bit-exact với Notebook V1) | **100% PASS** |
 | **Tương thích `src/colab_pkg/colab_runner.py`** | **100% PASS** (đầy đủ `load_wsss_models`, `IMAGENET_MEAN/STD`, `ResBlockStage1`) | **100% PASS** |
-| **Tái sử dụng tính toán GPU** | Chạy 1 lượt D4 ở scale `1.0x` cho cả `M1`..`M5` | Tái sử dụng lượt D4 ở scale `1.0x` của `M1`..`M5` cho `M6` & `M7` |
+| **Tái sử dụng tính toán GPU** | Chạy 1 lượt D4 ở scale `1.0x` cho cả `M1-M5` | Tái sử dụng lượt D4 ở scale `1.0x` của `M1-M5` cho `M6` & `M7` |
 | **Tích hợp Stage-1 & Stage-2 Loaders** | `WSSSTissueStage1NetCAM`, `build_and_load_stage1_netcam` | Bổ sung đầy đủ `DeepLabV3Plus`, `build_and_load_deeplabv3plus`, `OtsuClinicalGating`, `load_wsss_models` |
 

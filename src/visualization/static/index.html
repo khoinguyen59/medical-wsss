@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BCSS-WSSS Clinical Digital Pathology Workstation</title>
+  <link rel="icon" href="data:,">
   <style>
     :root {
       --bg-canvas: #0b111d;
@@ -1040,6 +1041,27 @@
 
     .toast.error { border-left-color: var(--error-red); }
     .toast.success { border-left-color: var(--match-green); }
+    .toast.warn { border-left-color: var(--margin-amber); }
+
+    .empty-cohort-banner {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 15;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+      background: rgba(11, 17, 29, 0.88);
+      color: var(--text-secondary);
+      font-size: 0.86rem;
+      line-height: 1.5;
+      pointer-events: none;
+    }
+
+    .empty-cohort-banner.visible {
+      display: flex;
+    }
 
     @media (max-width: 1180px) {
       body {
@@ -1158,7 +1180,7 @@
           <select id="wsiMethodSelect">
             <optgroup label="Gate-7 Track A (Stage-2 v2 Dual-Head)">
               <option value="gate7_arm5">Gate-7: Arm-5 DINOv2-L Adapter (Fast)</option>
-              <option value="gate7_arm5_tta">Gate-7: Arm-5 DINOv2-L (D4 TTA)</option>
+              <option value="gate7_arm5_tta">Gate-7: Arm-5 DINOv2-L Adapter (MS-3 H/V-Flip TTA)</option>
               <option value="gate7_4arm">Gate-7: 4-Arm Calibrated Ensemble</option>
               <option value="gate7_4arm_cgm">Gate-7: 4-Arm Ensemble + CGM (SOTA)</option>
               <option value="gate7_arm6">Gate-7: Arm-6 SegFormer-B5</option>
@@ -1186,7 +1208,7 @@
               <option value="gate7_4arm_cgm">Gate-7: 4-Arm Calibrated Ensemble + CGM (SOTA)</option>
               <option value="gate7_4arm">Gate-7: 4-Arm Calibrated Ensemble</option>
               <option value="gate7_arm5">Gate-7: Arm-5 DINOv2-L Adapter (Single Pass)</option>
-              <option value="gate7_arm5_tta">Gate-7: Arm-5 DINOv2-L Adapter (D4 TTA)</option>
+              <option value="gate7_arm5_tta">Gate-7: Arm-5 DINOv2-L Adapter (MS-3 H/V-Flip TTA)</option>
               <option value="gate7_arm6">Gate-7: Arm-6 SegFormer-B5 Dual-Head</option>
               <option value="gate7_arm7">Gate-7: Arm-7 ConvNeXt-L FPN Dual-Head</option>
               <option value="gate7_arm8">Gate-7: Arm-8 DeepLabV3+ R101 Dual-Head</option>
@@ -1352,6 +1374,10 @@
             <span class="split-label left" id="splitLeftLabel">Doctor GT</span>
             <span class="split-label right" id="splitRightLabel">Blurred Dual QA</span>
           </div>
+        </div>
+
+        <div class="empty-cohort-banner" id="emptyCohortBanner" role="status" aria-live="polite">
+          No tissue patch loaded. Select a held-out TCGA-BRCA cohort sample or upload an H&amp;E image patch to run clinical analysis.
         </div>
 
         <div class="stage-loading-overlay" id="stageLoadingOverlay">
@@ -2195,14 +2221,21 @@
         drawCanvasWithViewState(stageCanvas, compositeCanvas);
       }
       if (splitCurtainMode) {
-        const leftMode = document.getElementById("splitLeftSelect").value;
-        const rightMode = document.getElementById("splitRightSelect").value;
-        const lcBuf = document.createElement("canvas");
-        const rcBuf = document.createElement("canvas");
-        renderModeToCanvas(leftMode, lcBuf);
-        renderModeToCanvas(rightMode, rcBuf);
-        drawCanvasWithViewState(document.getElementById("splitLeftCanvas"), lcBuf);
-        drawCanvasWithViewState(document.getElementById("splitRightCanvas"), rcBuf);
+        const leftCanvas = document.getElementById("splitLeftCanvas");
+        const rightCanvas = document.getElementById("splitRightCanvas");
+        if (!rawImgCanvas && compositeCanvas.width === 0) {
+          drawCanvasWithViewState(leftCanvas, null);
+          drawCanvasWithViewState(rightCanvas, null);
+        } else {
+          const leftMode = document.getElementById("splitLeftSelect").value;
+          const rightMode = document.getElementById("splitRightSelect").value;
+          const lcBuf = document.createElement("canvas");
+          const rcBuf = document.createElement("canvas");
+          renderModeToCanvas(leftMode, lcBuf);
+          renderModeToCanvas(rightMode, rcBuf);
+          drawCanvasWithViewState(leftCanvas, lcBuf);
+          drawCanvasWithViewState(rightCanvas, rcBuf);
+        }
         document.getElementById("splitLeftLabel").innerText =
           document.getElementById("splitLeftSelect").selectedOptions[0].textContent;
         document.getElementById("splitRightLabel").innerText =
@@ -2322,18 +2355,37 @@
       });
     }
 
-    function createOfflineFallbackPatchDataURL() {
-      const canvas = document.createElement("canvas");
-      canvas.width = 224;
-      canvas.height = 224;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#deb0cd";
-      ctx.fillRect(0, 0, 224, 224);
-      ctx.fillStyle = "#8a1c5d";
-      ctx.beginPath();
-      ctx.ellipse(112, 112, 70, 48, Math.PI / 5, 0, Math.PI * 2);
-      ctx.fill();
-      return canvas.toDataURL("image/png");
+    function setEmptyCohortBanner(visible, message = "") {
+      const banner = document.getElementById("emptyCohortBanner");
+      if (!banner) return;
+      if (message) banner.textContent = message;
+      banner.classList.toggle("visible", Boolean(visible));
+    }
+
+    function clearStageForEmptyCohort(message) {
+      rawImgCanvas = null;
+      rawPixels = null;
+      predIndexBuf = null;
+      gtIndexBuf = null;
+      confBuf = null;
+      boundaryZoneBuf = null;
+      gtColorCanvas = null;
+      predColorCanvas = null;
+      lastResult = null;
+      lastRawImageUrl = null;
+      lastSampleMeta = null;
+      lastLoadedImageKey = null;
+      serverImageCache.clear();
+      compositeCanvas.width = 0;
+      compositeCanvas.height = 0;
+      renderStageAndSplit();
+      const slideLbl = document.getElementById("slideNameLabel");
+      if (slideLbl) slideLbl.innerText = "No Tissue Patch Loaded";
+      const footer = document.getElementById("methodBadgeFooter");
+      if (footer) footer.innerText = "Method: - (Awaiting Real Tissue Patch)";
+      const hud = document.getElementById("pixelInspectorHUD");
+      if (hud) hud.innerText = message;
+      setEmptyCohortBanner(true, message);
     }
 
     function renderCohortSelect(samples) {
@@ -2482,16 +2534,14 @@
           }
           payload.sample_id = sampleId;
         } else {
-          nextIsCustom = false;
-          const fallbackB64 = createOfflineFallbackPatchDataURL();
-          payload.image_base64 = fallbackB64;
-          nextCustomPatchB64 = fallbackB64;
-          nextRawImageUrl = fallbackB64;
-          nextSampleMeta = null;
-          sourceTag = "synthetic";
-          nextSlideTitle = "Synthetic Fallback";
+          const emptyMsg = "No real cohort samples available. Upload an H&E tissue patch or check the dataset directory.";
+          clearStageForEmptyCohort(emptyMsg);
+          syncSourceBadge(false);
+          showToast(emptyMsg, "info");
+          return;
         }
 
+        setEmptyCohortBanner(false);
         const response = await fetch("/api/v1/predict/patch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2589,9 +2639,12 @@
       const sub = document.getElementById("compareSubtitle");
       modal.classList.add("open");
 
-      const checked = Array.from(document.querySelectorAll("#compareMethodChecks input:checked"))
-        .map(el => el.value)
-        .slice(0, 6);
+      const allChecked = Array.from(document.querySelectorAll("#compareMethodChecks input:checked"))
+        .map(el => el.value);
+      if (allChecked.length > 6) {
+        showToast("Maximum 6 methods can be compared side-by-side; comparing the first 6 selected.", "warn");
+      }
+      const checked = allChecked.slice(0, 6);
       const methods = checked.length > 0 ? checked : ["m1", "m6", "sg_dap", "combined"];
       grid.innerHTML = "<div style='color:var(--text-secondary);'>Running multi-method comparison (" + methods.join(", ") + ")...</div>";
 
@@ -2619,7 +2672,15 @@
         } else if (sampleId) {
           payload.sample_id = sampleId;
         } else {
-          payload.image_base64 = createOfflineFallbackPatchDataURL();
+          const emptyMsg = "No real tissue patch loaded. Select a cohort sample or upload an H&E patch first.";
+          grid.innerHTML = "";
+          const infoDiv = document.createElement("div");
+          infoDiv.style.color = "var(--text-secondary)";
+          infoDiv.textContent = emptyMsg;
+          grid.appendChild(infoDiv);
+          sub.innerText = "Awaiting real tissue patch";
+          showToast(emptyMsg, "info");
+          return;
         }
 
         const res = await fetch("/api/v1/compare", {
@@ -2667,7 +2728,8 @@
         } else if (sampleId) {
           payload.sample_id = sampleId;
         } else {
-          payload.image_base64 = createOfflineFallbackPatchDataURL();
+          showToast("No tissue patch loaded. Select a cohort sample or upload an H&E patch before exporting.", "error");
+          return;
         }
 
         showToast("Generating " + fmt.toUpperCase() + " diagnostic report...", "info");
@@ -2857,6 +2919,7 @@
         compositeCanvas.width = viewState.imgW;
         compositeCanvas.height = viewState.imgH;
         compositeCanvas.getContext("2d").drawImage(compImg, 0, 0, viewState.imgW, viewState.imgH);
+        setEmptyCohortBanner(false);
 
         lastLoadedImageKey = "wsi:" + wsi.slide_id + ":" + viewState.imgW + "x" + viewState.imgH;
         fitToViewport();
@@ -2950,7 +3013,9 @@
     function zoomAtPoint(factor, clientX = null, clientY = null) {
       const stage = document.getElementById("openseadragon-viewer");
       if (!stage) return;
-      const rect = stage.getBoundingClientRect();
+      const splitFrameEl = document.getElementById("splitFrame");
+      const anchorEl = (splitCurtainMode && splitFrameEl) ? splitFrameEl : stage;
+      const rect = anchorEl.getBoundingClientRect();
       const cx = clientX !== null ? (clientX - rect.left) : rect.width / 2.0;
       const cy = clientY !== null ? (clientY - rect.top) : rect.height / 2.0;
       const oldScale = viewState.scale;
@@ -2965,10 +3030,14 @@
     }
 
     function updatePixelInspectorAndLoupe(clientX, clientY, targetRect) {
-      const ix = Math.floor((clientX - targetRect.left - viewState.panX) / viewState.scale);
-      const iy = Math.floor((clientY - targetRect.top - viewState.panY) / viewState.scale);
       const hud = document.getElementById("pixelInspectorHUD");
       const loupe = document.getElementById("magnifierLoupe");
+      if (!rawImgCanvas || compositeCanvas.width === 0 || compositeCanvas.height === 0) {
+        if (loupe) loupe.style.display = "none";
+        return;
+      }
+      const ix = Math.floor((clientX - targetRect.left - viewState.panX) / viewState.scale);
+      const iy = Math.floor((clientY - targetRect.top - viewState.panY) / viewState.scale);
 
       if (ix < 0 || iy < 0 || ix >= viewState.imgW || iy >= viewState.imgH) {
         if (hud) hud.innerText = "Hover tissue to inspect (x, y, GT, Pred, Conf%)";
@@ -3135,6 +3204,18 @@
 
       document.getElementById("btnCompareMethods").addEventListener("click", runSideBySideComparison);
       document.getElementById("btnRunCompareNow").addEventListener("click", runSideBySideComparison);
+      const cmpChecksBox = document.getElementById("compareMethodChecks");
+      if (cmpChecksBox) {
+        cmpChecksBox.addEventListener("change", (e) => {
+          const target = e.target;
+          if (!target || target.type !== "checkbox" || !target.checked) return;
+          const checkedBoxes = cmpChecksBox.querySelectorAll("input[type='checkbox']:checked");
+          if (checkedBoxes.length > 6) {
+            target.checked = false;
+            showToast("Maximum 6 methods can be selected for side-by-side comparison.", "warn");
+          }
+        });
+      }
       document.getElementById("compareViewSelect").addEventListener("change", () => {
         if (activeCompareData) renderCompareCards(activeCompareData);
       });

@@ -320,10 +320,10 @@ flowchart TD
         Prior_Calib --> P_calib["P_calibrated (4, 224, 224)"]
 
         P_calib --> Bilateral["Edge-Preserving Bilateral Smoothing (d=5, sC=0.15, sS=3.0) (M4)"]
-        Bilateral --> Argmax["Argmax (Class 0..3)"]
+        Bilateral --> Argmax["Argmax (Class 0-3)"]
         Argmax --> Island["Morphological Island Suppression (area < 36 px) (M4)"]
         Island --> Pure_Glass["Ultra-Safe Pure-Glass Guard (gray >= 242 & sat <= 8, area >= 512) (M5)"]
-        Pure_Glass --> Final_Mask["Mặt Nạ Dự Đoán Cuối Cùng (Y_pred: 0..4)"]
+        Pure_Glass --> Final_Mask["Mặt Nạ Dự Đoán Cuối Cùng (Y_pred: 0-4)"]
     end
 ```
 
@@ -486,7 +486,7 @@ trong đó $\sigma(z) = \frac{1}{1 + e^{-z}}$ là hàm Sigmoid, $W_{fc8} \in \ma
 
 1. **Yêu cầu đối với Team 2 (Implement/Fix):**
    - File triển khai: `src/models/wsss_inference_methods.py`.
-   - Phải hiện thực hóa đầy đủ lớp `WSSSTissueStage1NetCAM` tương thích 100% về tên layer (`conv1a`, `b2`..`b7`, `bn7`, `fc8`) với `repos/WSSS-Tissue/network/resnet38d.py` và `resnet38_cls.py` để nạp thành công `stage1_checkpoint_trained_on_bcss.pth`.
+   - Phải hiện thực hóa đầy đủ lớp `WSSSTissueStage1NetCAM` tương thích 100% về tên layer (`conv1a`, `b2-b7`, `bn7`, `fc8`) với `repos/WSSS-Tissue/network/resnet38d.py` và `resnet38_cls.py` để nạp thành công `stage1_checkpoint_trained_on_bcss.pth`.
    - Lớp `MultiMethodWSSSEngine` phải cung cấp phương thức `predict_all_methods(model, img_tensor, raw_rgb=None)` trả về từ điển chứa đúng 5 khóa: `M1_Baseline_SingleScale`, `M2_MultiView_D4_TTA`, `M3_LongTail_Prior_Calibration`, `M4_Spatial_Bilateral_Refinement`, `M5_Proposed_SOTA_Ensemble`.
    - Cập nhật script `scripts/generate_colab_variants.py` và tái tạo đồng bộ 4 file Jupyter Notebook trong `notebooks/` để nạp cả 2 checkpoint Stage 1 và Stage 2 từ Google Drive.
 2. **Yêu cầu đối với Team 3 (Recheck/Audit):**

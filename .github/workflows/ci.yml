@@ -30,7 +30,7 @@ jobs:
       - name: 1. Code Style & Linting Check
         run: |
           # Stop build if there are Python syntax errors or formatting/import issues
-          ruff check src/ tests/ --no-cache
+          ruff check src/ tests/ colab_runner_local/ --no-cache
 
       - name: 2. Academic & Medical Integrity Audit (Zero Mockup)
         run: |
@@ -50,7 +50,7 @@ jobs:
       - name: 4. Run Unit Tests & Integration Tests
         run: |
           if [ -d "tests" ]; then
-            pytest tests/ -v
+            pytest tests/ colab_runner_local/test_vps_colab_runner.py colab_runner_local/test_dashboard.py -v
           else
             echo "No tests directory found yet. Skipping pytest."
           fi

@@ -1230,6 +1230,126 @@ def test_export_report_cap_pdf_and_ui_button(monkeypatch: pytest.MonkeyPatch):
     assert 'exportQAReport("pdf")' in html
 
 
+def test_gate7_env_isolation_strict_legacy_cam_and_favicon(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """Tests WSSS_GATE7_DIR isolation, WSSS_STAGE2_V2_CKPT /health+503 parity, LEGACY_CAM_MODES+strict_weights 503, and /favicon.ico 204."""
+    # 1. GET /favicon.ico returns 204 No Content
+    fav_resp = client.get("/favicon.ico")
+    assert fav_resp.status_code == 204
+    assert fav_resp.content == b""
+
+    # 2. WSSS_GATE7_DIR=/nonexistent isolates discovery (never leaks checkpoints/vps_evidence)
+    nonexistent_dir = str(tmp_path / "missing_gate7_dir")
+    nonexistent_s2 = str(tmp_path / "missing_stage2.pth")
+    with monkeypatch.context() as mp:
+        mp.setenv("WSSS_GATE7_DIR", nonexistent_dir)
+        mp.setenv("WSSS_STAGE2_CKPT", nonexistent_s2)
+        mp.delenv("WSSS_STAGE2_V2_CKPT", raising=False)
+        mp.delenv("WSSS_STAGE1_CLS_CKPT", raising=False)
+        isolated_mgr = api_mod.ClinicalWorkstationInferenceManager()
+        mp.setattr(api_mod, "_manager", isolated_mgr)
+
+        found, s1_cls, g7_err = isolated_mgr._discover_gate7_checkpoints()
+        assert found == {}
+        assert s1_cls is None
+        assert g7_err is not None and "WSSS_GATE7_DIR" in g7_err
+
+        for hpath in ("/health", "/api/v1/health"):
+            hresp = client.get(hpath)
+            assert hresp.status_code == 200
+            hdata = hresp.json()["model"]
+            assert hdata["gate7_available_arms"] == []
+            assert hdata["loaded"] is False
+            assert hdata["stage2_loaded"] is False
+            assert "WSSS_GATE7_DIR" in (hdata["checkpoint_error"] or "")
+
+    # 2b. WSSS_GATE7_DIR pointing to an existing directory with only arm6.pth never backfills arm5/7/8
+    partial_dir = tmp_path / "partial_gate7"
+    partial_dir.mkdir()
+    (partial_dir / "arm6.pth").write_bytes(b"stub")
+    with monkeypatch.context() as mp:
+        mp.setenv("WSSS_GATE7_DIR", str(partial_dir))
+        mp.delenv("WSSS_STAGE2_V2_CKPT", raising=False)
+        partial_mgr = api_mod.ClinicalWorkstationInferenceManager()
+        found_partial, _, err_partial = partial_mgr._discover_gate7_checkpoints()
+        assert list(found_partial.keys()) == ["arm6"]
+        assert err_partial is None
+
+    # 3. WSSS_STAGE2_V2_CKPT=/nonexistent omits arm5 from /health AND returns 503 on /predict/patch
+    missing_v2 = str(tmp_path / "nonexistent_arm5.pth")
+    img_b64 = encode_image_to_base64(np.full((64, 64, 3), 160, dtype=np.uint8), format="PNG")
+    with monkeypatch.context() as mp:
+        mp.setenv("WSSS_STAGE2_V2_CKPT", missing_v2)
+        mp.delenv("WSSS_GATE7_DIR", raising=False)
+        v2_mgr = api_mod.ClinicalWorkstationInferenceManager()
+        mp.setattr(api_mod, "_manager", v2_mgr)
+
+        for hpath in ("/health", "/api/v1/health"):
+            hdata = client.get(hpath).json()["model"]
+            assert "arm5" not in hdata["gate7_available_arms"]
+            assert "WSSS_STAGE2_V2_CKPT" in (hdata["checkpoint_error"] or "")
+
+        pred_503 = client.post(
+            "/api/v1/predict/patch",
+            json={"image_base64": img_b64, "mode": "gate7_arm5"},
+        )
+        assert pred_503.status_code == 503
+
+    # 3b. Simultaneous valid WSSS_GATE7_DIR (arm6 only) + broken WSSS_STAGE2_V2_CKPT:
+    # /health advertises arm6 only; arm5/4arm fail closed with 503 while arm6 remains callable
+    with monkeypatch.context() as mp:
+        mp.setenv("WSSS_STAGE2_V2_CKPT", missing_v2)
+        mp.setenv("WSSS_GATE7_DIR", str(partial_dir))
+        mp.setenv("WSSS_STAGE2_CKPT", nonexistent_s2)
+        mixed_mgr = api_mod.ClinicalWorkstationInferenceManager()
+        mixed_mgr.ensure_initialized()
+
+        class _StubArm6(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> dict:
+                b, _, h, w = x.shape
+                logits = torch.zeros((b, 4, h, w), dtype=torch.float32, device=x.device)
+                logits[:, 0] = 2.0
+                return {"seg_logits": logits}
+
+        mixed_mgr._gate7_models["arm6"] = _StubArm6()
+        mp.setattr(api_mod, "_manager", mixed_mgr)
+
+        hdata_m = client.get("/api/v1/health").json()["model"]
+        assert hdata_m["gate7_available_arms"] == ["arm6"]
+        assert "gate7_arm6" in hdata_m["available_methods"]
+        assert "gate7_arm5" not in hdata_m["available_methods"]
+        for blocked_mode in ("gate7_arm5", "gate7_arm5_tta", "gate7_4arm", "gate7_4arm_cgm"):
+            assert client.post(
+                "/api/v1/predict/patch",
+                json={"image_base64": img_b64, "mode": blocked_mode},
+            ).status_code == 503
+        ok_arm6 = client.post(
+            "/api/v1/predict/patch",
+            json={"image_base64": img_b64, "mode": "gate7_arm6"},
+        )
+        assert ok_arm6.status_code == 200
+        assert ok_arm6.json()["checkpoint_verified"] is True
+
+    # 4. LEGACY_CAM_MODES fail closed with HTTP 503 when strict_weights=True (even if stage2_loaded=True)
+    stub_client, stub_mgr = _fast_stub_client(monkeypatch)
+    assert stub_mgr.stage2_loaded is True
+    for legacy_mode in ("legacy_proposed", "baseline", "classmix", "relocalization"):
+        resp_strict = stub_client.post(
+            "/api/v1/predict/patch",
+            json={"image_base64": img_b64, "mode": legacy_mode, "strict_weights": True},
+        )
+        assert resp_strict.status_code == 503, f"Expected 503 for {legacy_mode} with strict_weights=True, got {resp_strict.status_code}"
+        detail_l = resp_strict.json()["detail"].lower()
+        assert "strict_weights" in detail_l and "legacy" in detail_l
+
+    # Non-strict mode still permits legacy_proposed fallback with checkpoint_verified=False
+    resp_non_strict = stub_client.post(
+        "/api/v1/predict/patch",
+        json={"image_base64": img_b64, "mode": "legacy_proposed", "strict_weights": False},
+    )
+    assert resp_non_strict.status_code == 200
+    assert resp_non_strict.json()["checkpoint_verified"] is False
+
+
 
 
 

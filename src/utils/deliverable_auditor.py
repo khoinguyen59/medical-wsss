@@ -9,6 +9,7 @@ Chức năng kiểm tra 4 tầng:
 4. Document Structure Audit: Kiểm tra cấu trúc tiêu đề, bảng biểu, chú giải hình ảnh.
 """
 
+import glob
 import os
 import re
 import sys
@@ -60,8 +61,8 @@ class DeliverableAuditor:
     def audit_markdown_file(self, md_path: str) -> List[DeliverableIssue]:
         """Audits a markdown file across all quality gates."""
         abs_path = os.path.abspath(md_path)
-        if not os.path.exists(abs_path):
-            self.issues.append(DeliverableIssue("STRUCTURE", "CRITICAL", md_path, 0, f"Tệp không tồn tại: {md_path}", "Kiểm tra đường dẫn."))
+        if not os.path.isfile(abs_path):
+            self.issues.append(DeliverableIssue("STRUCTURE", "CRITICAL", md_path, 0, f"Tệp không tồn tại hoặc là thư mục: {md_path}", "Kiểm tra đường dẫn tệp hợp lệ."))
             return self.issues
 
         with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
@@ -751,11 +752,24 @@ DEFAULT_ALL_TARGETS: List[str] = [
 ]
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] in ("--all", "-a"):
+def _expand_cli_targets(raw_args: List[str]) -> List[str]:
+    """Expand CLI wildcard arguments (*, ?, [, **) to matching files for Windows shells."""
+    expanded: List[str] = []
+    for arg in raw_args:
+        if any(ch in arg for ch in ("*", "?", "[")):
+            matches = sorted(m for m in glob.glob(arg, recursive=True) if os.path.isfile(m))
+            expanded.extend(matches if matches else [arg])
+        else:
+            expanded.append(arg)
+    return expanded
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args and args[0] in ("--all", "-a"):
         targets = list(DEFAULT_ALL_TARGETS)
-    elif len(sys.argv) > 1:
-        targets = sys.argv[1:]
+    elif args:
+        targets = _expand_cli_targets(args)
     else:
         targets = [os.path.join("product", "proposal", "SE374_MINI_PROPOSAL_WSSS_WSI.md")]
     all_success = True
@@ -763,5 +777,9 @@ if __name__ == "__main__":
         success = run_audit(target)
         if not success:
             all_success = False
-    sys.exit(0 if all_success else 1)
+    return 0 if all_success else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 

@@ -15,7 +15,7 @@ Toàn bộ chiến dịch nghiên cứu và thực nghiệm Stage-1 -> Stage-2 t
 Các cột mốc định lượng đã xác minh bằng log thực nghiệm thật và chữ ký SHA256:
 
 1. **Stage-1 Đột phá (`se374_arm_b_full`, Ep 5 EMA + Dual-Expert Classifier):**
-   - Nâng chất lượng mặt nạ giả mềm (`sg_dap_soft`, `T = 0.25`) trên toàn bộ tập VAL (`3,418` patches) từ **`72.03%`** (Author official) lên **`74.13%` mIoU (`85.07%` mDice, `+2.10%`)**.
+   - Trên giao thức đối chuẩn Gate-4 `ms_tta_sg_dap` (`se374_gate4_bench`), `arm_b_full` nâng chất lượng mặt nạ giả trên toàn bộ tập VAL (`3,418` patches) từ **`72.03%`** (Author official) lên **`73.18%` mIoU (`+1.15%`)**, và trên đường ống memmap mềm có cổng `y_gt` ở `T = 0.25` (`se374_g7_diag_r2_val`, `q_s1_sgdap`) đạt **`74.13%` mIoU (`85.07%` mDice)**.
 2. **Gate-6 Round-1 4-Arm Cross-Family Ensemble (`se374_s2v2_ensemble`, 4 họ kiến trúc):**
    - Đạt **`72.47%` TEST mIoU (`83.84%` mDice, `95% CI [66.96%, 76.43%]`)** trên 23 bệnh nhân TEST độc lập (`4,986` patches), vượt Author Official Pure (`69.47%` L4) **`+2.99%`** (`perm_p_holm = 0.0004`, `wilcoxon_p_holm = 0.000105`, `19W/0T/4L`) và vượt Step-0 Upgraded Author (`70.42%` L4) **`+2.04%`**.
 3. **Gate-7 Step-0 VAL Ceiling Diagnostic (`se374_g7_diag_r2_val`, 0% TEST):**
@@ -212,7 +212,7 @@ Các cột mốc định lượng đã xác minh bằng log thực nghiệm th�
 | **`arm5_dinov2_large_r2` (`336px`)** | **13.66 ms** | **73.2 FPS** | **72.24%** | 173.89 ms | 5.8 FPS (`12x`) | 72.65% |
 | **`primary_4arm_ensemble` (`no-CGM`)** | **36.75 ms** | **27.2 FPS** | **72.68%** | 534.59 ms | 1.9 FPS (`48x`) | **72.79%** |
 
-*(Ghi chú giao thức `04b_v2`: Mốc `arm5` `12x` Deployed `72.65%` dùng `s2_self` CGM với `0` lượt suy luận Stage-1 bổ sung, khớp độ trễ `173.89 ms` - so với `72.55%` `no_cgm` và `72.63%` `s1_s2_50_50` CGM trong `02c_v2`. Bảng đo đồng chuẩn `torch.bfloat16` cho mọi mô hình gồm `Author 1x Raw BF16 = 5.67 ms / 176.63 FPS` (`69.34%`); đối chiếu thêm mốc FP32 thuần `author_stage2_fp32 = 3.80 ms / 263.27 FPS` (`69.47%`) và kết quả đo Wave-2B trên GPU `NVIDIA RTX PRO 6000 Blackwell G4`: `arm5` 1x Raw `334.7 FPS`, `primary_4arm_ensemble` 1x Raw `110.3 FPS`.)*
+*(Ghi chú giao thức `04b_v2`: Mốc `arm5` `12x` Deployed `72.65%` dùng `s2_self` CGM với `0` lượt suy luận Stage-1 bổ sung, khớp độ trễ `173.89 ms` - so với `72.55%` `no_cgm` và `72.63%` `s1_s2_50_50` CGM trong `02c_v2`. Bảng đo đồng chuẩn `torch.bfloat16` cho mọi mô hình gồm `Author 1x Raw BF16 = 5.67 ms / 176.63 FPS` (`69.34%`); đối chiếu thêm mốc FP32 thuần `author_stage2_fp32 = 3.80 ms / 263.27 FPS` tương ứng chế độ `1x` raw **`69.34%`** trên L4 (`69.35%` trên A100), trong khi mốc `69.47%-69.48%` cần bổ sung Stage-1 CGM (`cgm_author_mul0`), và kết quả đo Wave-2B trên GPU `NVIDIA RTX PRO 6000 Blackwell G4`: `arm5` 1x Raw `334.7 FPS`, `primary_4arm_ensemble` 1x Raw `110.3 FPS`.)*
 
 ### 6.4. Chéo Cơ Quan Zero-Shot `BCSS (40x Vú) -> LUAD-HistoSeg (10x Phổi)` & Phóng Đại `2x` (`04b_v2`, `n = 307`, `20` Ca)
 

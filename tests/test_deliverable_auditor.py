@@ -335,6 +335,55 @@ class TestDeliverableAuditor:
             bad_issues = aud_bad.audit_markdown_file(md_bad)
             assert any(i.category == "TYPOGRAPHY" and i.severity == "WARNING" for i in bad_issues)
 
+    def test_cli_wildcard_glob_expansion_on_windows(self):
+        """CLI must expand wildcard args (*, ?, [) deterministically and report missing patterns as CRITICAL."""
+        import subprocess
+        import sys
+
+        from src.utils.deliverable_auditor import _expand_cli_targets, main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md_a = os.path.join(tmpdir, "doc_a.md")
+            md_b = os.path.join(tmpdir, "doc_b.md")
+            for p, title in ((md_a, "Report A"), (md_b, "Report B")):
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(f"# {title}\n\nNoi dung hop le khong co loi.\n")
+
+            star_pat = os.path.join(tmpdir, "*.md")
+            q_pat = os.path.join(tmpdir, "doc_?.md")
+            bracket_pat = os.path.join(tmpdir, "doc_[ab].md")
+            expected = sorted([md_a, md_b])
+            assert _expand_cli_targets([star_pat]) == expected
+            assert _expand_cli_targets([q_pat]) == expected
+            assert _expand_cli_targets([bracket_pat]) == expected
+
+            # Missing wildcard pattern falls back to [arg] and returns exit code 1 (CRITICAL)
+            miss_pat = os.path.join(tmpdir, "does_not_exist_*.md")
+            assert _expand_cli_targets([miss_pat]) == [miss_pat]
+            assert main([miss_pat]) == 1
+            assert main([star_pat]) == 0
+
+            # Subdirectory matching '*' must be skipped cleanly, while '**' recurses into nested files
+            nested_dir = os.path.join(tmpdir, "sub")
+            os.makedirs(nested_dir)
+            md_c = os.path.join(nested_dir, "doc_c.md")
+            with open(md_c, "w", encoding="utf-8") as f:
+                f.write("# Report C\n\nNoi dung hop le trong thu muc con.\n")
+            assert _expand_cli_targets([os.path.join(tmpdir, "*")]) == expected
+            assert _expand_cli_targets([os.path.join(tmpdir, "**", "*.md")]) == sorted([md_a, md_b, md_c])
+            assert main([os.path.join(tmpdir, "*")]) == 0
+            assert main([nested_dir]) == 1
+
+            # Real subprocess invocation passing unexpanded wildcard string (Windows shell behavior)
+            res = subprocess.run(
+                [sys.executable, os.path.join("src", "utils", "deliverable_auditor.py"), star_pat],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert res.returncode == 0, f"Wildcard CLI failed: {res.stdout}\n{res.stderr}"
+            assert res.stdout.count("[DELIVERABLE QUALITY AUDIT: PASSED]") == 2
+
 
 
 

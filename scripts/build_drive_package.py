@@ -951,17 +951,17 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
 def build_drive_package(
     project_root: Optional[Path] = None,
     output_base_dir: Optional[Path] = None,
-    sync_repo_files: Optional[bool] = None,
+    sync_repo_files: bool = False,
 ) -> Dict[str, object]:
     """Assembles `drive_upload_ready/SE374_WSSS_Drive_Code/` and `SE374_WSSS_Drive_Code.zip`.
 
-    When `output_base_dir` is supplied (for isolated testing), skips mutating workspace files unless
-    `sync_repo_files=True` is explicitly passed.
+    Mutating tracked repository files is opt-in (`sync_repo_files=True` / `--sync-repo`) so
+    rebuilding `drive_upload_ready/` never overwrites tracked CRLF notebooks with LF bytes.
     """
     root = (project_root or PROJECT_ROOT).resolve()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    should_sync_repo = (output_base_dir is None) if sync_repo_files is None else bool(sync_repo_files)
+    should_sync_repo = bool(sync_repo_files)
     if should_sync_repo:
         update_scientific_runner_notebook(root)
         sync_historical_and_standalone_outputs(root)
@@ -1092,12 +1092,15 @@ def build_drive_package(
         newline="\n",
     )
 
-    # 7. Build pre-zipped SE374_WSSS_Drive_Code.zip for 1-click upload to Google Drive
+    # 7. Build pre-zipped SE374_WSSS_Drive_Code.zip directly from bundle_dir (never inside bundle_dir)
     zip_outer_path = out_base / "SE374_WSSS_Drive_Code.zip"
     if zip_outer_path.exists():
         zip_outer_path.unlink()
+    stale_inner_zip = bundle_dir / "SE374_WSSS_Drive_Code.zip"
+    if stale_inner_zip.exists():
+        stale_inner_zip.unlink()
 
-    all_bundle_files = sorted([p for p in bundle_dir.rglob("*") if p.is_file()])
+    all_bundle_files = sorted([p for p in bundle_dir.rglob("*") if p.is_file() and p.suffix != ".zip"])
     with zipfile.ZipFile(zip_outer_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for file_path in all_bundle_files:
             rel_inside_bundle = file_path.relative_to(bundle_dir).as_posix()
@@ -1106,14 +1109,10 @@ def build_drive_package(
             zf.write(file_path, arcname=rel_inside_bundle)
             zf.write(file_path, arcname=f"SE374_WSSS_Drive_Code/{rel_inside_bundle}")
 
-    # Also place a copy inside bundle_dir/SE374_WSSS_Drive_Code.zip for convenience
-    zip_inner_path = bundle_dir / "SE374_WSSS_Drive_Code.zip"
-    shutil.copy2(zip_outer_path, zip_inner_path)
-
     return {
         "bundle_dir": str(bundle_dir),
         "zip_outer_path": str(zip_outer_path),
-        "zip_inner_path": str(zip_inner_path),
+        "zip_inner_path": None,
         "readme_path": str(readme_bundle_path),
         "manifest_path": str(manifest_path),
         "src_files_count": len(copied_src_files),
@@ -1125,7 +1124,17 @@ def build_drive_package(
 
 
 if __name__ == "__main__":
-    summary = build_drive_package()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build SE374_WSSS_Drive_Code bundle and ZIP archive.")
+    parser.add_argument(
+        "--sync-repo",
+        action="store_true",
+        default=False,
+        help="Opt-in: synchronize tracked repository runner notebooks before packaging.",
+    )
+    cli_args = parser.parse_args()
+    summary = build_drive_package(sync_repo_files=cli_args.sync_repo)
     print(f"[OK] Assembled Drive bundle at : {summary['bundle_dir']}")
     print(f"[OK] Pre-zipped archive at     : {summary['zip_outer_path']}")
     print(f"[OK] Packaged src/ files count : {summary['src_files_count']}")

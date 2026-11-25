@@ -38,6 +38,7 @@ scratch/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.hypothesis/
 
 # Graphify & Multi-Agent Internal Scaffolding (Excluded from Clean Project Source)
 .agents/

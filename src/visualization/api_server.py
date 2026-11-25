@@ -303,27 +303,35 @@ class ClinicalWorkstationInferenceManager:
     def _discover_gate7_checkpoints(self) -> Tuple[Dict[str, Path], Optional[Path], Optional[str]]:
         """Discover verified Gate-7 Track A arm checkpoints without touching broken root checkpoints."""
         found: Dict[str, Path] = {}
-        err: Optional[str] = None
+        errors: List[str] = []
 
         env_v2 = os.environ.get("WSSS_STAGE2_V2_CKPT", "").strip()
+        env_v2_explicit = bool(env_v2)
         if env_v2:
             env_v2_p = Path(env_v2)
             if not env_v2_p.is_file():
-                err = f"WSSS_STAGE2_V2_CKPT not found: {env_v2}"
+                errors.append(f"WSSS_STAGE2_V2_CKPT not found: {env_v2}")
             else:
                 found["arm5"] = env_v2_p
 
         env_g7_dir = os.environ.get("WSSS_GATE7_DIR", "").strip()
         search_roots: List[Path] = []
         if env_g7_dir:
-            search_roots.append(Path(env_g7_dir))
-        search_roots.append(PROJECT_ROOT / "checkpoints" / "vps_evidence")
+            g7_root = Path(env_g7_dir)
+            if not g7_root.is_dir():
+                errors.append(f"WSSS_GATE7_DIR not found: {env_g7_dir}")
+            else:
+                search_roots.append(g7_root)
+        else:
+            search_roots.append(PROJECT_ROOT / "checkpoints" / "vps_evidence")
 
         for root in search_roots:
             if not root.is_dir():
                 continue
             for arm_key in GATE7_ARM_ORDER:
                 if arm_key in found:
+                    continue
+                if arm_key == "arm5" and env_v2_explicit:
                     continue
                 full_name = GATE7_ARM_FULL_NAMES[arm_key]
                 direct_cands = [
@@ -341,8 +349,9 @@ class ClinicalWorkstationInferenceManager:
 
         s1_cls_p: Optional[Path] = None
         env_s1_cls = os.environ.get("WSSS_STAGE1_CLS_CKPT", "").strip()
-        if env_s1_cls and Path(env_s1_cls).is_file():
-            s1_cls_p = Path(env_s1_cls)
+        if env_s1_cls:
+            if Path(env_s1_cls).is_file():
+                s1_cls_p = Path(env_s1_cls)
         else:
             for root in search_roots:
                 if not root.is_dir():
@@ -356,6 +365,7 @@ class ClinicalWorkstationInferenceManager:
                     s1_cls_p = s1_globs[0]
                     break
 
+        err = "; ".join(errors) if errors else None
         return found, s1_cls_p, err
 
     def ensure_initialized(self) -> None:
@@ -617,7 +627,7 @@ class ClinicalWorkstationInferenceManager:
             ]
             train_img_dir = next((c for c in train_candidates if c.is_dir()), None)
             if self.model_stage2 is not None and train_img_dir is not None:
-                all_tr = sorted(train_img_dir.glob("*.png"))
+                all_tr = sorted(train_img_dir.rglob("*.png"))
                 if all_tr:
                     cal_paths: List[Path] = []
                     seen_train_pids = set()
@@ -729,7 +739,8 @@ class ClinicalWorkstationInferenceManager:
             and not Path(os.environ.get("WSSS_STAGE2_CKPT", "").strip()).is_file()
         )
         if req_mode in GATE7_MODES:
-            if env_v2_missing:
+            arm5_dependent = req_mode in ("gate7_arm5", "gate7_arm5_tta", "gate7_4arm", "gate7_4arm_cgm")
+            if env_v2_missing and arm5_dependent:
                 raise HTTPException(
                     status_code=503,
                     detail=self.checkpoint_error or "Configured WSSS_STAGE2_V2_CKPT is missing.",
@@ -739,6 +750,15 @@ class ClinicalWorkstationInferenceManager:
                 method_key=req_mode,
                 enforce_otsu=enforce_otsu,
                 precomputed_cache=precomputed_cache,
+            )
+
+        if (strict_weights or self._fail_closed_env_triggered()) and req_mode in LEGACY_CAM_MODES:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Legacy CAM mode '{req_mode}' uses unverified benchmark heads and is blocked "
+                    "when strict_weights=True."
+                ),
             )
 
         if env_s2_missing and req_mode not in LEGACY_CAM_MODES:
@@ -925,6 +945,13 @@ class ClinicalWorkstationInferenceManager:
             return pred_mask.astype(np.int64), probs_4cls, method_key, True, aux
 
         # Fallback to legacy Stage-1 CAM benchmarking engine (only when requested or Stage-2 absent)
+        if strict_weights or self._fail_closed_env_triggered():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Legacy CAM fallback for mode '{req_mode}' is blocked when strict_weights=True."
+                ),
+            )
         legacy_engine = self._get_legacy_engine(req_mode)
         pred_mask = legacy_engine.generate_pseudo_mask(
             image_tensor=img_tensor,
@@ -970,7 +997,7 @@ def _discover_clinical_samples() -> List[Dict[str, Any]]:
     for img_dir, mask_dir in candidates:
         if not img_dir.is_dir():
             continue
-        pngs = sorted(img_dir.glob("*.png"))
+        pngs = sorted(img_dir.rglob("*.png"))
         if not pngs:
             continue
 
@@ -979,7 +1006,8 @@ def _discover_clinical_samples() -> List[Dict[str, Any]]:
         by_patient: Dict[str, List[Tuple[int, float, Path, Optional[Path], List[str]]]] = {}
         for p in pngs[::step]:
             pid = extract_patient_id(p.name)
-            mp = mask_dir / p.name
+            rel_mp = mask_dir / p.relative_to(img_dir)
+            mp = rel_mp if rel_mp.is_file() else (mask_dir / p.name)
             if mp.is_file():
                 m_arr = np.array(Image.open(mp), dtype=np.int64)
                 fg_shares = [float((m_arr == c).mean()) for c in range(4)]
@@ -2441,6 +2469,12 @@ def serve_viewer() -> Any:
     if os.path.exists(INDEX_HTML):
         return FileResponse(INDEX_HTML, media_type="text/html")
     return HTMLResponse("<h3>Clinical Viewer template not found in static folder.</h3>", status_code=404)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon_no_content() -> Response:
+    """Returns 204 No Content so browser viewer loads with zero favicon 404 noise."""
+    return Response(status_code=204)
 
 
 @app.get("/health")

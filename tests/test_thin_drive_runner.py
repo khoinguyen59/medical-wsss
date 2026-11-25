@@ -150,17 +150,21 @@ def test_2_drive_bundle_packager_creates_complete_folder_and_zip(tmp_path):
     raw_bytes = (bundle_dir / "src" / "models" / "wsss_inference_methods.py").read_bytes()
     assert b"\r\n" not in raw_bytes, "Packaged source files must use POSIX LF ('\\n') line endings for Linux Colab VMs"
 
-    # Verify pre-zipped archive integrity and extraction round-trip
+    # Verify pre-zipped archive integrity, zero nested zip, and 1-to-1 directory parity
     zip_outer = out_base / "SE374_WSSS_Drive_Code.zip"
     zip_inner = bundle_dir / "SE374_WSSS_Drive_Code.zip"
     assert zip_outer.is_file(), f"Missing outer zip archive: {zip_outer}"
-    assert zip_inner.is_file(), f"Missing inner zip archive copy: {zip_inner}"
+    assert not zip_inner.exists(), f"Nested inner zip archive must not exist inside bundle_dir: {zip_inner}"
     assert zipfile.is_zipfile(zip_outer), "SE374_WSSS_Drive_Code.zip is not a valid zip file"
 
     extract_target = tmp_path / "colab_content"
     with zipfile.ZipFile(zip_outer, "r") as zf:
         assert zf.testzip() is None, "Corrupted member detected in SE374_WSSS_Drive_Code.zip"
         namelist = set(zf.namelist())
+        assert not any(n.endswith(".zip") for n in namelist), "Zip archive must not contain nested .zip entries"
+        dir_rel_files = {p.relative_to(bundle_dir).as_posix() for p in bundle_dir.rglob("*") if p.is_file()}
+        expected_entries = dir_rel_files | {f"SE374_WSSS_Drive_Code/{r}" for r in dir_rel_files}
+        assert namelist == expected_entries, "ZIP entries must match bundle_dir 1-to-1 with zero stale entries"
         assert "src/models/wsss_inference_methods.py" in namelist
         assert "SE374_WSSS_Drive_Code/src/models/wsss_inference_methods.py" in namelist
         assert "README_DRIVE_SETUP.md" in namelist
@@ -699,9 +703,12 @@ def test_10_colab_import_contract_and_four_scenarios_auto_discovery(tmp_path):
             f"Cell 1 in {nb_name} must explicitly document Scenarios A, B, C, D"
         )
 
-        # 4. Cell 2 Code contract: checks mount, zips, candidates, and github fallback
+        # 4. Cell 2 Code contract: checks mount (ThinDriveRunner) or INVARIANT-28 local disk (BonusDemo), zips, candidates, and github fallback
         c2_src = "".join(cells[2].get("source", []))
-        assert "drive.mount" in c2_src, f"Cell 2 in {nb_name} missing drive.mount"
+        if nb_name.endswith("BonusDemo.ipynb"):
+            assert "drive.mount" not in c2_src, f"Cell 2 in {nb_name} violates INVARIANT-28 (contains drive.mount)"
+        else:
+            assert "drive.mount" in c2_src, f"Cell 2 in {nb_name} missing drive.mount"
         assert "SE374_WSSS_Drive_Code.zip" in c2_src, f"Cell 2 in {nb_name} missing zip handling"
         assert "MYDRIVE" in c2_src, f"Cell 2 in {nb_name} missing MYDRIVE definition"
         assert "https://github.com/khoinguyen59/medical-wsss.git" in c2_src, (
