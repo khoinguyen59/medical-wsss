@@ -12,8 +12,8 @@
 | Phiên Chạy Thật (Run ID) | Thư Mục Lưu Trữ | Kiến Trúc & Kỹ Thuật Đột Phá | mIoU 4 Lớp (%) | mDice 4 Lớp (%) | PA 4 Lớp (%) | mIoU 5 Lớp (%) | TUM IoU (%) | STR IoU (%) | LYM IoU (%) | NEC IoU (%) | BACK IoU (%) | Tốc Độ (FPS) |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Lần 1 (Baseline Full)** | `experiments/colab_run_1_stage2_baseline` | Stage-2 DeepLabV3+ ResNet-101 đơn lẻ (chưa tích hợp Stage-1 CGM), Otsu Gating | **68.71%** | **81.15%** | **84.94%** | 67.36% | 79.12% | 73.50% | 56.97% | 65.23% | 70.26% | 23.38 |
-| **Lần 2 (Dual-Stage M1-M5)** | `experiments/colab_run_2_dual_stage_ensemble` | Dual-Stage (`ResNet38d Net_CAM` + `DeepLabV3+`), 5 Methods (`M1..M5`, FP32): Cổng phân loại CGM + Multi-View TTA + Long-Tail Prior + Pure-Glass Guard | **70.49%** | **82.51%** | **85.35%** | 76.38% | 79.19% | 73.80% | 61.27% | 67.69% | 99.93% | 5.77 |
-| **Lần 3 (Thin Runner M1-M7 SOTA)** | `experiments/colab_run_3_multiscale_sota_v2` | **Thin Drive Runner v2 (`MultiMethodWSSSEngineV2`, FP16 AMP, 7 Methods `M1..M7`): Kim Tự Tháp Đa Tỷ Lệ D4 (`0.75x, 1.0x, 1.25x`) Entropy-Weighted + Cổng Mềm Stage-1** | **70.53%** | **82.54%** | **85.41%** | **76.41%** | **79.37%** | **73.82%** | **61.33%** | **67.61%** *(M5: 67.67%)* | **99.93%** | **4.91** *(7 methods)* |
+| **Lần 2 (Dual-Stage M1-M5)** | `experiments/colab_run_2_dual_stage_ensemble` | Dual-Stage (`ResNet38d Net_CAM` + `DeepLabV3+`), 5 Methods (`M1-M5`, FP32): Cổng phân loại CGM + Multi-View TTA + Long-Tail Prior + Pure-Glass Guard | **70.49%** | **82.51%** | **85.35%** | 76.38% | 79.19% | 73.80% | 61.27% | 67.69% | 99.93% | 5.77 |
+| **Lần 3 (Thin Runner M1-M7 SOTA)** | `experiments/colab_run_3_multiscale_sota_v2` | **Thin Drive Runner v2 (`MultiMethodWSSSEngineV2`, FP16 AMP, 7 Methods `M1-M7`): Kim Tự Tháp Đa Tỷ Lệ D4 (`0.75x, 1.0x, 1.25x`) Entropy-Weighted + Cổng Mềm Stage-1** | **70.53%** | **82.54%** | **85.41%** | **76.41%** | **79.37%** | **73.82%** | **61.33%** | **67.61%** *(M5: 67.67%)* | **99.93%** | **4.91** *(7 methods)* |
 
 ---
 

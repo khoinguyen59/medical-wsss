@@ -3855,7 +3855,7 @@ def _sanitize_nb_header_and_metadata(nb_data, nb_filename):
     return nb_data
 
 
-def build_suites():
+def build_suites(mirror_root: bool = False):
     # Update base notebooks with genuine src/ pipelines, fixed URLs, and clean scientific prose
     nb01 = json.load(open(BASE_DIR / "01_Train_Stage1_Classifier.ipynb", encoding="utf-8"))
     nb01 = _sanitize_nb_header_and_metadata(nb01, "01_Train_Stage1_Classifier.ipynb")
@@ -4080,15 +4080,16 @@ def build_suites():
             json.dump(l4_nb, f, indent=1)
         print(f"Created dedicated L4 notebook: {l4_path}")
 
-    # Synchronize root T4 notebooks
-    for fname in [
-        "01_Train_Stage1_Classifier_T4.ipynb",
-        "02_Pseudo_Masks_Train_Stage2_T4.ipynb",
-        "03_Train_Proposed_MedSAM_T4.ipynb",
-        "04_Exhaustive_Benchmark_Survival_T4.ipynb",
-    ]:
-        shutil.copyfile(BASE_DIR / fname, Path(fname))
-        print(f"Synchronized root {fname}")
+    # Optionally synchronize root T4 notebooks (disabled by default to avoid root duplicates)
+    if mirror_root:
+        for fname in [
+            "01_Train_Stage1_Classifier_T4.ipynb",
+            "02_Pseudo_Masks_Train_Stage2_T4.ipynb",
+            "03_Train_Proposed_MedSAM_T4.ipynb",
+            "04_Exhaustive_Benchmark_Survival_T4.ipynb",
+        ]:
+            shutil.copyfile(BASE_DIR / fname, Path(fname))
+            print(f"Synchronized root {fname}")
 
 if __name__ == "__main__":
     build_suites()

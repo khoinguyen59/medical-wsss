@@ -77,11 +77,22 @@ Hệ thống SE374.R11 sử dụng 2 bộ dữ liệu mô bệnh học chuẩn q
 
 ## 2. Cấu Trúc Thư Mục Thực Tế, Bóc Tách Tên Tệp & Dò Tìm Đa Tầng
 
-### 2.1 Cấu Trúc Thư Mục Thực Tế Trên Đĩa (`data/BCSS-WSSS/`)
+### 2.1 Cấu Trúc Thư Mục Thực Tế Trên Đĩa (`data/`)
+
+Bộ dữ liệu đầy đủ `data/BCSS-WSSS/` được loại trừ khỏi Git qua `.gitignore` để giữ kho mã nguồn gọn nhẹ; chỉ có tập mẫu nhỏ `data/sample_dataset/` được theo dõi trong Git nhằm phục vụ kiểm thử tự động (`pytest`) và chạy thử cục bộ không cần tải toàn bộ bộ dữ liệu.
+
+| Đường Dẫn | Trạng Thái Lưu Trữ | Mô Tả Chi Tiết |
+| :--- | :---: | :--- |
+| `data/BCSS-WSSS/training/` | Cục bộ (gitignored) | `23,422` ảnh huấn luyện (`106` bệnh nhân), chỉ có nhãn yếu multi-hot trong tên tệp (`TCGA-...+[abcd].png`). |
+| `data/BCSS-WSSS/val/img/` & `val/mask/` | Cục bộ (gitignored) | `3,418` ảnh kiểm định (`22` bệnh nhân) kèm mặt nạ dense mask chế độ `P` (`0-3` cho 4 lớp mô, `4` cho `BACK`). |
+| `data/BCSS-WSSS/test/img/` & `test/mask/` | Cục bộ (gitignored) | `4,986` ảnh kiểm thử độc lập held-out (`23` bệnh nhân) kèm mặt nạ dense mask do bác sĩ giải phẫu bệnh gán nhãn. |
+| `data/BCSS-WSSS/*.lst` | Cục bộ (gitignored) | Danh sách tệp `train.lst`, `val.lst`, `test.lst`, `Readme.txt` và `Example_for_using_image-level_label.py` từ bản phát hành gốc. |
+| `data/sample_dataset/` (`train/`, `valid/`, `test/`) | Theo dõi trong Git | Tập mẫu mini (`4` ảnh `train`, `2` cặp `valid/img` + `valid/mask`, `2` cặp `test/img` + `test/mask`) dùng cho `pytest` và chạy thử nhanh. |
+| `data/LUAD-HistoSeg/` (ung thư phổi) | Tải trực tiếp trên Cloud/Colab | Không lưu cục bộ trong `data/`; được tải tự động trên môi trường Colab/GPU thông qua `src/colab_pkg/downloader.py` khi chạy kiểm định chéo cơ quan. |
 
 ```text
 data/
-|-- BCSS-WSSS/
+|-- BCSS-WSSS/                      # Bộ dữ liệu chính ung thư vú (Han et al., MedIA 2022, gitignored)
 |   |-- training/                    # 23,422 PNGs (106 bệnh nhân, chỉ có nhãn yếu [tsln])
 |   |   |-- TCGA-A1-A0SK-DX1_xmin45749_ymin25055_MPP-0.2500+0[1101].png
 |   |   `-- TCGA-A1-A0SK-DX1_xmin45749_ymin25055_MPP-0.2500+100[1100].png
@@ -90,12 +101,17 @@ data/
 |   |   |   `-- TCGA-EW-A1PB-DX1_xmin57214_ymin25940_MPP-0.2500+0.png
 |   |   `-- mask/                    # 3,418 PNGs 8-bit Palette mode "P" (giá trị 0-4)
 |   |       `-- TCGA-EW-A1PB-DX1_xmin57214_ymin25940_MPP-0.2500+0.png
-|   `-- test/
-|       |-- img/                     # 4,986 PNGs (23 bệnh nhân Held-Out Test)
-|       |   `-- TCGA-D8-A27F-DX1_xmin98787_ymin6725_MPP-0.2500+0.png
-|       `-- mask/                    # 4,986 PNGs 8-bit Palette mode "P" (giá trị 0-4)
-|           `-- TCGA-D8-A27F-DX1_xmin98787_ymin6725_MPP-0.2500+0.png
-`-- LUAD-HistoSeg/                   # Bộ dữ liệu phổi kiểm định chéo cơ quan (tùy chọn)
+|   |-- test/
+|   |   |-- img/                     # 4,986 PNGs (23 bệnh nhân Held-Out Test)
+|   |   |   `-- TCGA-D8-A27F-DX1_xmin98787_ymin6725_MPP-0.2500+0.png
+|   |   `-- mask/                    # 4,986 PNGs 8-bit Palette mode "P" (giá trị 0-4)
+|   |       `-- TCGA-D8-A27F-DX1_xmin98787_ymin6725_MPP-0.2500+0.png
+|   `-- train.lst / val.lst / test.lst / Readme.txt
+|-- sample_dataset/                  # Tập mẫu mini theo dõi trong Git cho pytest & dry-run
+|   |-- train/                       # 4 ảnh mẫu huấn luyện
+|   |-- valid/                       # 2 cặp img/ + mask/
+|   `-- test/                        # 2 cặp img/ + mask/
+`-- LUAD-HistoSeg/                   # Bộ dữ liệu phổi kiểm định chéo cơ quan (tải qua downloader.py)
     |-- training/                    # 16,678 PNGs (nhãn yếu [a b c d])
     |-- val/                         # 300 PNGs (img/ + mask/)
     `-- test/                        # 307 PNGs (img/ + mask/)

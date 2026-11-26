@@ -705,7 +705,7 @@ def test_notebook_01_zero_tie_and_compact_best_checkpoint():
 
 
 def test_notebook_01_stage1_parity_and_spawn_guards():
-    """Verify Notebook 01 enforces env presets, spawn D4 loaders, ModelEMA, resume, and split VPS alarms."""
+    """Verify Notebook 01 enforces env presets, spawn D4 loaders, ModelEMA, resume, and split training alarms."""
     for key in ("stage1", "stage1_t4", "stage1_l4"):
         nb_data = json.loads(NOTEBOOKS[key].read_text(encoding="utf-8"))
         c4 = "".join(nb_data["cells"][4]["source"])
@@ -740,7 +740,7 @@ def test_notebook_01_stage1_parity_and_spawn_guards():
         assert "ema_state_dict" in c12 and "proj_head_state_dict" in c12
         assert "best_cls_score" in c12 and "joint_no_improve" in c12
 
-        # C-D1 / C-D3 / C-D4 / C-D5 + VPS alarms: Stage1Trainer, dual-branch loss, clip_grad_norm_, split alarms
+        # C-D1 / C-D3 / C-D4 / C-D5 + training alarms: Stage1Trainer, dual-branch loss, clip_grad_norm_, split alarms
         assert "PDA_START_EPOCH = EXP_CFG.pda_start_epoch" in c14
         assert "0.5 * criterion(logits_clean, labels) + 0.5 * criterion(logits_pda, labels)" in c14
         assert "clip_grad_norm_(_trainable_all, max_norm=5.0)" in c14
@@ -749,7 +749,7 @@ def test_notebook_01_stage1_parity_and_spawn_guards():
         assert "[CALIBRATION COLLAPSE ALARM]" in c14
         assert "[EARLY STOP PATIENCE]" in c14
         assert "[EARLY REGRESSION ALARM]" not in c14, (
-            f"{key} Cell 14 must never emit [EARLY REGRESSION ALARM] so colab_run_script exits cleanly on patience"
+            f"{key} Cell 14 must never emit [EARLY REGRESSION ALARM] so automated runner exits cleanly on patience"
         )
         assert "stage1_best_cls.pth" in c12 and "stage1_best_cls.pth" in c14 and "stage1_best_cls.pth" in c16
 

@@ -1,27 +1,32 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCSS-WSSS Clinical Digital Pathology Workstation</title>
+  <title>BCSS-WSSS - Trạm Giải Phẫu Bệnh Số Ngoại Tuyến</title>
   <link rel="icon" href="data:,">
   <style>
     :root {
-      --bg-canvas: #0b111d;
-      --panel-bg: #11192b;
-      --surface-bg: #18233a;
-      --surface-elev: #1f2d49;
-      --border-subtle: #283755;
-      --border-strong: #3b4f75;
-      --text-primary: #f1f5f9;
-      --text-secondary: #cbd5e1;
-      --text-muted: #94a3b8;
-      --accent-blue: #2563eb;
-      --accent-blue-hover: #1d4ed8;
-      --accent-cyan: #06b6d4;
-      --match-green: #10b981;
-      --margin-amber: #f59e0b;
-      --error-red: #ef4444;
+      /* He mau Y khoa chuan quang hoc: Trang Lam Sang + Xanh Phau Thuat / Xanh Y Khoa */
+      --bg-canvas: #F4FAFA;
+      --panel-bg: #FFFFFF;
+      --surface-bg: #F8FCFB;
+      --surface-elev: #E6F4F1;
+      --viewport-bg: #EAF3F1;
+      --border-subtle: #D5E6E4;
+      --border-strong: #9AC7C2;
+      --text-primary: #14313A;
+      --text-secondary: #36565E;
+      --text-muted: #5A767E;
+      --accent-teal: #0E7C86;
+      --accent-teal-hover: #0A626A;
+      --accent-surgical: #00957E;
+      --accent-scrub: #2A9D8F;
+      --accent-mint-soft: #E3F5F1;
+      --match-green: #00896B;
+      --margin-amber: #C27803;
+      --error-red: #C81E1E;
+      /* Bang mau mo hoc chuan BCSS-WSSS (giu nguyen 100% khong bien doi mau mo) */
       --color-tum: #E41A1C;
       --color-str: #4DAF4A;
       --color-lym: #377EB8;
@@ -33,7 +38,7 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
 
     body {
@@ -47,72 +52,77 @@
 
     button:focus-visible,
     select:focus-visible,
-    input:focus-visible {
-      outline: 2px solid var(--accent-cyan);
+    input:focus-visible,
+    summary:focus-visible {
+      outline: 2px solid var(--accent-teal);
       outline-offset: 2px;
     }
 
-    /* Header Bar */
+    /* Header Bar - Clinical White with Surgical Green Hospital Top Stripe */
     header {
       background-color: var(--panel-bg);
+      border-top: 3px solid var(--accent-surgical);
       border-bottom: 1px solid var(--border-subtle);
-      padding: 8px 18px;
+      padding: 7px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      min-height: 54px;
-      gap: 12px;
+      min-height: 52px;
+      gap: 10px;
       flex-shrink: 0;
+      box-shadow: 0 1px 4px rgba(14, 124, 134, 0.06);
+      z-index: 30;
     }
 
     .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 9px;
       min-width: 0;
     }
 
     .brand-mark {
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
-      background: linear-gradient(135deg, #1d4ed8, #0369a1);
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      background: linear-gradient(135deg, var(--accent-teal), var(--accent-surgical));
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 800;
       font-size: 0.78rem;
       letter-spacing: 0.5px;
-      color: #ffffff;
+      color: #FFFFFF;
       flex-shrink: 0;
+      box-shadow: 0 2px 6px rgba(0, 149, 126, 0.22);
     }
 
     .brand h1 {
-      font-size: 0.98rem;
+      font-size: 0.96rem;
       font-weight: 700;
-      letter-spacing: 0.2px;
+      letter-spacing: 0.1px;
+      color: var(--text-primary);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
     .badge {
-      background: rgba(37, 99, 235, 0.22);
-      border: 1px solid rgba(59, 130, 246, 0.45);
-      color: #bfdbfe;
+      background: var(--accent-mint-soft);
+      border: 1px solid var(--border-strong);
+      color: var(--accent-teal);
       padding: 2px 8px;
       border-radius: 999px;
-      font-size: 0.68rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
+      font-size: 0.67rem;
+      font-weight: 700;
+      letter-spacing: 0.3px;
       white-space: nowrap;
     }
 
     .header-right {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       flex-shrink: 0;
     }
 
@@ -120,26 +130,33 @@
       display: inline-flex;
       background: var(--bg-canvas);
       border: 1px solid var(--border-strong);
-      border-radius: 7px;
+      border-radius: 8px;
       padding: 2px;
-      gap: 2px;
+      gap: 3px;
     }
 
     .tab-btn {
       padding: 5px 11px;
       border: none;
-      border-radius: 5px;
+      border-radius: 6px;
       background: transparent;
       color: var(--text-secondary);
       font-size: 0.75rem;
       font-weight: 600;
       cursor: pointer;
       transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .tab-btn:hover {
+      background: var(--surface-elev);
+      color: var(--text-primary);
     }
 
     .tab-btn[aria-selected="true"] {
-      background: var(--accent-blue);
-      color: #ffffff;
+      background: var(--accent-teal);
+      color: #FFFFFF;
+      box-shadow: 0 1px 4px rgba(14, 124, 134, 0.24);
     }
 
     .ckpt-pill {
@@ -148,49 +165,76 @@
       gap: 7px;
       padding: 4px 10px;
       border-radius: 999px;
-      font-size: 0.75rem;
+      font-size: 0.73rem;
       font-weight: 600;
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.35);
-      color: #6ee7b7;
+      background: #E6F6F2;
+      border: 1px solid #8CCFC1;
+      color: #006B58;
       white-space: nowrap;
     }
 
     .ckpt-pill.warn {
-      background: rgba(245, 158, 11, 0.14);
-      border-color: rgba(245, 158, 11, 0.4);
-      color: #fcd34d;
+      background: #FEF6E7;
+      border-color: #E7BA68;
+      color: #9A5800;
     }
 
     .status-dot {
       width: 8px;
       height: 8px;
-      background-color: #10b981;
+      background-color: var(--accent-surgical);
       border-radius: 50%;
-      box-shadow: 0 0 8px #10b981;
     }
 
     .ckpt-pill.warn .status-dot {
-      background-color: #f59e0b;
-      box-shadow: 0 0 8px #f59e0b;
+      background-color: var(--margin-amber);
+    }
+
+    /* Persistent Clinical RUO Notice Bar */
+    .ruo-banner {
+      background: #EDF7F5;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      padding: 4px 16px;
+      font-size: 0.72rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .ruo-banner strong {
+      color: var(--accent-teal);
+    }
+
+    .ruo-mode-tag {
+      font-size: 0.69rem;
+      font-weight: 700;
+      padding: 1px 8px;
+      border-radius: 999px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-strong);
+      color: var(--accent-surgical);
+      white-space: nowrap;
     }
 
     /* Main 3-Column Clinical Grid */
     .main-workspace {
       display: grid;
-      grid-template-columns: 320px 1fr 355px;
+      grid-template-columns: 332px 1fr 362px;
       flex: 1;
-      height: calc(100vh - 54px);
+      height: calc(100vh - 80px);
       overflow: hidden;
     }
 
     .sidebar-left,
     .sidebar-right {
-      background-color: var(--panel-bg);
-      padding: 12px;
+      background-color: var(--bg-canvas);
+      padding: 10px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 9px;
       overflow-y: auto;
     }
 
@@ -203,18 +247,21 @@
     }
 
     .panel-card {
-      background-color: var(--surface-bg);
+      background-color: var(--panel-bg);
       border: 1px solid var(--border-subtle);
-      border-radius: 8px;
-      padding: 11px;
+      border-radius: 9px;
+      padding: 10px 11px;
+      box-shadow: 0 1px 3px rgba(20, 49, 58, 0.04);
     }
 
     .panel-card h3 {
       font-size: 0.72rem;
       text-transform: uppercase;
-      letter-spacing: 0.7px;
-      color: var(--text-secondary);
-      margin-bottom: 9px;
+      letter-spacing: 0.55px;
+      color: var(--accent-teal);
+      margin-bottom: 8px;
+      padding-bottom: 5px;
+      border-bottom: 1px solid #EAF3F2;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -222,15 +269,15 @@
     }
 
     .form-group {
-      margin-bottom: 9px;
+      margin-bottom: 8px;
     }
 
     .form-group label {
       display: block;
-      font-size: 0.75rem;
+      font-size: 0.74rem;
       color: var(--text-secondary);
-      margin-bottom: 4px;
-      font-weight: 500;
+      margin-bottom: 3px;
+      font-weight: 600;
     }
 
     .form-group select,
@@ -238,19 +285,25 @@
     .form-group input[type="text"],
     .form-group input[type="number"] {
       width: 100%;
-      padding: 6px 9px;
-      background: var(--bg-canvas);
+      padding: 6px 8px;
+      background: var(--surface-bg);
       border: 1px solid var(--border-strong);
       color: var(--text-primary);
       border-radius: 6px;
-      font-size: 0.79rem;
+      font-size: 0.78rem;
+    }
+
+    .form-group select:focus,
+    .form-group input:focus {
+      background: #FFFFFF;
+      border-color: var(--accent-teal);
     }
 
     .filter-row {
       display: grid;
       grid-template-columns: 1.25fr 0.95fr;
       gap: 6px;
-      margin-bottom: 8px;
+      margin-bottom: 7px;
     }
 
     .source-bar {
@@ -258,68 +311,74 @@
       align-items: center;
       justify-content: space-between;
       gap: 6px;
-      margin-bottom: 8px;
-      font-size: 0.72rem;
+      margin-bottom: 7px;
+      font-size: 0.71rem;
       color: var(--text-secondary);
     }
 
     .source-pill {
       padding: 2px 7px;
       border-radius: 4px;
-      background: rgba(59, 130, 246, 0.16);
-      border: 1px solid rgba(59, 130, 246, 0.35);
-      color: #bfdbfe;
+      background: var(--accent-mint-soft);
+      border: 1px solid var(--border-strong);
+      color: var(--accent-teal);
       font-weight: 600;
     }
 
     .source-pill.custom {
-      background: rgba(245, 158, 11, 0.16);
-      border-color: rgba(245, 158, 11, 0.45);
-      color: #fde68a;
+      background: #FEF6E7;
+      border-color: #E7BA68;
+      color: #9A5800;
     }
 
     .btn-inline {
       padding: 3px 8px;
       font-size: 0.71rem;
-      border-radius: 4px;
+      border-radius: 5px;
       border: 1px solid var(--border-strong);
-      background: var(--surface-elev);
+      background: #FFFFFF;
       color: var(--text-primary);
       cursor: pointer;
+      font-weight: 600;
     }
 
     .btn-inline:hover {
-      border-color: var(--accent-cyan);
+      background: var(--surface-elev);
+      border-color: var(--accent-teal);
     }
 
     .checkbox-row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 0.78rem;
+      gap: 7px;
+      font-size: 0.77rem;
       color: var(--text-primary);
-      margin-top: 6px;
+      margin-top: 5px;
       cursor: pointer;
+    }
+
+    .checkbox-row input[type="checkbox"] {
+      accent-color: var(--accent-surgical);
     }
 
     .btn {
       width: 100%;
-      padding: 8px 12px;
+      padding: 8px 11px;
       border: none;
       border-radius: 6px;
       font-weight: 600;
-      font-size: 0.81rem;
+      font-size: 0.80rem;
       cursor: pointer;
       transition: all 0.15s ease;
     }
 
     .btn-primary {
-      background-color: var(--accent-blue);
-      color: #ffffff;
+      background-color: var(--accent-teal);
+      color: #FFFFFF;
     }
 
     .btn-primary:hover:not(:disabled) {
-      background-color: var(--accent-blue-hover);
+      background-color: var(--accent-teal-hover);
     }
 
     .btn-primary:disabled {
@@ -328,75 +387,101 @@
     }
 
     .btn-secondary {
-      background-color: var(--surface-elev);
+      background-color: var(--surface-bg);
       border: 1px solid var(--border-strong);
       color: var(--text-primary);
-      margin-top: 7px;
+      margin-top: 6px;
     }
 
     .btn-secondary:hover {
-      background-color: #293a5e;
+      background-color: var(--surface-elev);
+      border-color: var(--accent-teal);
     }
 
     .btn-secondary.active-toggle {
-      background-color: #0369a1;
-      border-color: #38bdf8;
-      color: #ffffff;
+      background-color: var(--accent-surgical);
+      border-color: var(--accent-surgical);
+      color: #FFFFFF;
     }
 
     .btn-compare {
-      background: linear-gradient(135deg, #1d4ed8, #0369a1);
-      color: #ffffff;
-      margin-top: 8px;
+      background: linear-gradient(135deg, var(--accent-teal), var(--accent-surgical));
+      color: #FFFFFF;
+      margin-top: 7px;
     }
 
     .btn-compare:hover {
-      background: linear-gradient(135deg, #1e40af, #075985);
+      filter: brightness(0.94);
     }
 
     .slider-container {
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 4px;
       margin-bottom: 6px;
     }
 
     .slider-header {
       display: flex;
       justify-content: space-between;
-      font-size: 0.75rem;
+      font-size: 0.74rem;
       color: var(--text-secondary);
+      font-weight: 500;
     }
 
     input[type="range"] {
       width: 100%;
-      accent-color: var(--accent-blue);
+      accent-color: var(--accent-surgical);
+    }
+
+    details.advanced-details {
+      margin-top: 7px;
+      border: 1px dashed var(--border-strong);
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: var(--surface-bg);
+    }
+
+    details.advanced-details summary {
+      font-size: 0.73rem;
+      font-weight: 600;
+      color: var(--accent-teal);
+      cursor: pointer;
+      user-select: none;
     }
 
     .blurred-controls-box {
       margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px dashed var(--border-strong);
+      padding-top: 7px;
+      border-top: 1px dashed var(--border-subtle);
     }
 
     .blurred-controls-box.highlight {
-      border-color: var(--accent-cyan);
+      border-color: var(--accent-surgical);
     }
 
     .wsi-dropzone {
       border: 1px dashed var(--border-strong);
       border-radius: 6px;
       padding: 8px;
-      background: var(--bg-canvas);
+      background: var(--surface-bg);
       margin-bottom: 8px;
-      font-size: 0.74rem;
-      color: var(--text-muted);
+      font-size: 0.73rem;
+      color: var(--text-secondary);
+      line-height: 1.4;
     }
 
-    /* Center Viewport */
+    .wsi-dropzone code {
+      background: var(--surface-elev);
+      color: var(--accent-teal);
+      padding: 0 3px;
+      border-radius: 3px;
+    }
+
+    /* Center Viewport - Neutral Sterile Soft-Mint Microscope Stage */
     .viewport-center {
       position: relative;
-      background-color: #070b14;
+      background-color: var(--viewport-bg);
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -405,25 +490,25 @@
     .view-mode-ribbon {
       background-color: var(--panel-bg);
       border-bottom: 1px solid var(--border-subtle);
-      padding: 7px 12px;
+      padding: 6px 11px;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
+      gap: 6px;
       z-index: 20;
     }
 
     .mode-pills {
       display: flex;
       flex-wrap: wrap;
-      gap: 5px;
+      gap: 4px;
     }
 
     .mode-pill {
-      padding: 5px 9px;
+      padding: 4px 8px;
       border-radius: 5px;
-      font-size: 0.74rem;
+      font-size: 0.72rem;
       font-weight: 600;
       border: 1px solid var(--border-strong);
       background-color: var(--surface-bg);
@@ -433,20 +518,30 @@
     }
 
     .mode-pill:hover {
-      color: var(--text-primary);
-      border-color: var(--accent-blue);
+      color: var(--accent-teal);
+      background-color: var(--surface-elev);
+      border-color: var(--accent-teal);
     }
 
     .mode-pill.active {
-      background-color: var(--accent-blue);
-      border-color: var(--accent-blue);
-      color: #ffffff;
+      background-color: var(--accent-teal);
+      border-color: var(--accent-teal);
+      color: #FFFFFF;
     }
 
     .mode-pill.qa-pill.active {
-      background-color: #047857;
-      border-color: #10b981;
-      color: #ffffff;
+      background-color: var(--accent-surgical);
+      border-color: var(--accent-surgical);
+      color: #FFFFFF;
+    }
+
+    .slide-meta-strip {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+    }
+
+    .slide-meta-strip strong {
+      color: var(--text-primary);
     }
 
     .viewport-stage {
@@ -457,7 +552,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: radial-gradient(circle at center, #0e1729 0%, #070b14 100%);
+      background: radial-gradient(circle at center, #F3F9F8 0%, #E3EFEC 100%);
     }
 
     #openseadragon-viewer {
@@ -481,74 +576,78 @@
 
     .zoom-toolbar {
       position: absolute;
-      top: 12px;
-      right: 12px;
+      top: 10px;
+      right: 10px;
       z-index: 12;
       display: flex;
       align-items: center;
       gap: 4px;
-      background: rgba(15, 23, 42, 0.88);
+      background: rgba(255, 255, 255, 0.94);
       border: 1px solid var(--border-strong);
       border-radius: 7px;
       padding: 4px 6px;
-      backdrop-filter: blur(6px);
+      box-shadow: 0 2px 10px rgba(20, 49, 58, 0.10);
     }
 
     .zoom-btn {
-      background: var(--surface-elev);
+      background: var(--surface-bg);
       border: 1px solid var(--border-subtle);
       color: var(--text-primary);
       border-radius: 4px;
       padding: 3px 8px;
-      font-size: 0.74rem;
+      font-size: 0.73rem;
       font-weight: 700;
       cursor: pointer;
     }
 
     .zoom-btn:hover {
-      border-color: var(--accent-cyan);
+      background: var(--surface-elev);
+      border-color: var(--accent-teal);
     }
 
     .zoom-btn.active {
-      background: #0369a1;
-      border-color: #38bdf8;
-      color: #ffffff;
+      background: var(--accent-surgical);
+      border-color: var(--accent-surgical);
+      color: #FFFFFF;
     }
 
     .zoom-readout {
-      font-size: 0.72rem;
+      font-size: 0.71rem;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: var(--text-secondary);
-      padding: 0 6px;
-      min-width: 48px;
+      color: var(--accent-teal);
+      font-weight: 700;
+      padding: 0 5px;
+      min-width: 46px;
       text-align: center;
     }
 
     .pixel-inspector-hud {
       position: absolute;
-      bottom: 12px;
-      left: 12px;
-      z-index: 12;
-      background: rgba(15, 23, 42, 0.90);
+      bottom: 10px;
+      left: 10px;
+      z-index: 16;
+      background: rgba(255, 255, 255, 0.95);
       border: 1px solid var(--border-strong);
+      border-left: 3px solid var(--accent-surgical);
       border-radius: 6px;
       padding: 5px 10px;
-      font-size: 0.73rem;
+      font-size: 0.72rem;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: var(--text-primary);
       pointer-events: none;
-      max-width: calc(100% - 170px);
+      max-width: calc(100% - 175px);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      box-shadow: 0 2px 8px rgba(20, 49, 58, 0.10);
     }
 
     .scale-bar-hud {
       position: absolute;
-      bottom: 12px;
-      right: 12px;
-      z-index: 12;
-      background: rgba(15, 23, 42, 0.88);
+      bottom: 10px;
+      right: 10px;
+      z-index: 16;
+      background: rgba(255, 255, 255, 0.95);
       border: 1px solid var(--border-strong);
       border-radius: 6px;
       padding: 5px 9px;
@@ -557,20 +656,22 @@
       align-items: center;
       gap: 3px;
       pointer-events: none;
+      box-shadow: 0 2px 8px rgba(20, 49, 58, 0.10);
     }
 
     .scale-bar-line {
       height: 4px;
-      width: 60px;
-      border-left: 2px solid #f8fafc;
-      border-right: 2px solid #f8fafc;
-      border-bottom: 2px solid #f8fafc;
+      width: 100px;
+      border-left: 2px solid var(--accent-teal);
+      border-right: 2px solid var(--accent-teal);
+      border-bottom: 2px solid var(--accent-teal);
     }
 
     .scale-bar-label {
-      font-size: 0.69rem;
+      font-size: 0.68rem;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: var(--text-primary);
+      font-weight: 600;
     }
 
     #magnifierLoupe {
@@ -578,18 +679,18 @@
       width: 120px;
       height: 120px;
       border-radius: 50%;
-      border: 2px solid #38bdf8;
-      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.7);
+      border: 2.5px solid var(--accent-surgical);
+      box-shadow: 0 0 0 2px #FFFFFF, 0 8px 22px rgba(20, 49, 58, 0.28);
       pointer-events: none;
       display: none;
-      z-index: 14;
-      background: #070b14;
+      z-index: 17;
+      background: #FFFFFF;
     }
 
     .stage-loading-overlay {
       position: absolute;
       inset: 0;
-      background: rgba(7, 11, 20, 0.72);
+      background: rgba(244, 250, 250, 0.84);
       z-index: 25;
       display: none;
       flex-direction: column;
@@ -606,8 +707,8 @@
     .spinner {
       width: 34px;
       height: 34px;
-      border: 3px solid rgba(59, 130, 246, 0.25);
-      border-top-color: #38bdf8;
+      border: 3px solid #CFE8E3;
+      border-top-color: var(--accent-surgical);
       border-radius: 50%;
       animation: spin 0.75s linear infinite;
     }
@@ -622,7 +723,7 @@
       inset: 0;
       display: none;
       flex-direction: column;
-      background: #070b14;
+      background: var(--viewport-bg);
       z-index: 15;
     }
 
@@ -634,11 +735,11 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      padding: 7px 12px;
-      background: rgba(17, 25, 43, 0.95);
+      gap: 8px;
+      padding: 6px 12px;
+      background: #FFFFFF;
       border-bottom: 1px solid var(--border-subtle);
-      font-size: 0.75rem;
+      font-size: 0.74rem;
       z-index: 6;
     }
 
@@ -647,15 +748,16 @@
       align-items: center;
       gap: 6px;
       color: var(--text-secondary);
+      font-weight: 600;
     }
 
     .split-select-group select {
-      background: var(--bg-canvas);
+      background: var(--surface-bg);
       border: 1px solid var(--border-strong);
       color: var(--text-primary);
       border-radius: 5px;
       padding: 3px 8px;
-      font-size: 0.75rem;
+      font-size: 0.74rem;
     }
 
     .split-frame {
@@ -666,7 +768,7 @@
       overflow: hidden;
       user-select: none;
       touch-action: none;
-      background: #070b14;
+      background: var(--viewport-bg);
       cursor: grab;
     }
 
@@ -686,11 +788,11 @@
       position: absolute;
       top: 0;
       bottom: 0;
-      width: 2px;
-      background: #38bdf8;
+      width: 2.5px;
+      background: var(--accent-surgical);
       z-index: 4;
       cursor: ew-resize;
-      box-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
+      box-shadow: 0 0 6px rgba(0, 149, 126, 0.55);
     }
 
     .split-handle {
@@ -701,29 +803,31 @@
       width: 30px;
       height: 30px;
       border-radius: 50%;
-      background: #0369a1;
-      border: 2px solid #ffffff;
-      color: #ffffff;
+      background: var(--accent-teal);
+      border: 2px solid #FFFFFF;
+      color: #FFFFFF;
       font-size: 0.72rem;
       font-weight: 700;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: ew-resize;
+      box-shadow: 0 2px 8px rgba(14, 124, 134, 0.35);
     }
 
     .split-label {
       position: absolute;
       top: 10px;
-      padding: 3px 8px;
+      padding: 3px 9px;
       font-size: 0.72rem;
       font-weight: 700;
-      background: rgba(15, 23, 42, 0.88);
+      background: rgba(255, 255, 255, 0.94);
       border: 1px solid var(--border-strong);
-      border-radius: 4px;
+      border-radius: 5px;
       z-index: 5;
-      color: #e2e8f0;
+      color: var(--text-primary);
       pointer-events: none;
+      box-shadow: 0 1px 4px rgba(20, 49, 58, 0.10);
     }
 
     .split-label.left { left: 10px; }
@@ -732,19 +836,19 @@
     .viewport-footer {
       background-color: var(--panel-bg);
       border-top: 1px solid var(--border-subtle);
-      padding: 7px 14px;
+      padding: 6px 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 10px;
-      font-size: 0.75rem;
+      font-size: 0.73rem;
       color: var(--text-secondary);
       flex-shrink: 0;
     }
 
     .qa-legend-strip {
       display: flex;
-      gap: 11px;
+      gap: 10px;
       align-items: center;
       flex-wrap: wrap;
     }
@@ -755,50 +859,77 @@
       height: 10px;
       border-radius: 2px;
       margin-right: 4px;
+      border: 1px solid rgba(20, 49, 58, 0.18);
+      vertical-align: middle;
     }
 
     /* Right Panel KPI & Legend */
+    .qa-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+      margin-bottom: 6px;
+    }
+
     .qa-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 7px;
+      gap: 6px;
     }
 
     .qa-stat {
-      background: var(--bg-canvas);
+      background: var(--surface-bg);
       border: 1px solid var(--border-subtle);
       border-radius: 6px;
-      padding: 7px 9px;
+      padding: 6px 7px;
     }
 
     .qa-stat-label {
-      font-size: 0.68rem;
+      font-size: 0.64rem;
       text-transform: uppercase;
       color: var(--text-muted);
-      letter-spacing: 0.4px;
+      letter-spacing: 0.3px;
+      font-weight: 700;
     }
 
     .qa-stat-val {
-      font-size: 1.08rem;
-      font-weight: 700;
+      font-size: 0.98rem;
+      font-weight: 800;
       margin-top: 2px;
     }
 
     .qa-stat-sub {
-      font-size: 0.67rem;
+      font-size: 0.64rem;
       color: var(--text-muted);
       margin-top: 1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .val-green { color: var(--match-green); }
     .val-red { color: var(--error-red); }
     .val-amber { color: var(--margin-amber); }
-    .val-blue { color: #60a5fa; }
+    .val-blue { color: var(--accent-teal); }
+
+    .agreement-stacked-bar {
+      display: flex;
+      height: 7px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #E2EEEC;
+      margin-bottom: 7px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .seg-match { background: var(--accent-surgical); transition: width 0.25s ease; }
+    .seg-margin { background: #EAB308; transition: width 0.25s ease; }
+    .seg-error { background: var(--error-red); transition: width 0.25s ease; }
 
     .legend-list {
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 4px;
     }
 
     .legend-item {
@@ -811,39 +942,40 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      font-size: 0.79rem;
-      padding: 4px 5px;
-      border-radius: 4px;
+      font-size: 0.78rem;
+      padding: 3px 5px;
+      border-radius: 5px;
       cursor: pointer;
     }
 
     .legend-item:hover {
-      background: rgba(255, 255, 255, 0.06);
+      background: var(--surface-elev);
     }
 
     .legend-item.selected-spotlight {
-      background: rgba(59, 130, 246, 0.18);
-      outline: 1px solid rgba(59, 130, 246, 0.55);
+      background: var(--accent-mint-soft);
+      outline: 1px solid var(--accent-scrub);
     }
 
     .legend-badge {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
     }
 
     .color-swatch {
       width: 12px;
       height: 12px;
       border-radius: 3px;
+      border: 1px solid rgba(20, 49, 58, 0.18);
     }
 
     .progress-bar-bg {
-      background: #1e293b;
+      background: #E2EEEC;
       height: 5px;
       border-radius: 3px;
       overflow: hidden;
-      margin-bottom: 3px;
+      margin-bottom: 2px;
     }
 
     .progress-bar-fill {
@@ -853,45 +985,47 @@
     }
 
     .biomarker-card {
-      background: var(--bg-canvas);
+      background: var(--surface-bg);
       border: 1px solid var(--border-subtle);
+      border-left: 3px solid var(--accent-teal);
       border-radius: 6px;
-      padding: 9px;
-      margin-bottom: 7px;
+      padding: 8px 9px;
+      margin-bottom: 6px;
     }
 
     .biomarker-title {
-      font-size: 0.7rem;
+      font-size: 0.69rem;
       text-transform: uppercase;
       color: var(--text-secondary);
-      letter-spacing: 0.4px;
+      letter-spacing: 0.35px;
+      font-weight: 700;
     }
 
     .biomarker-value {
-      font-size: 1.32rem;
-      font-weight: 700;
+      font-size: 1.26rem;
+      font-weight: 800;
       margin: 2px 0;
-      color: #60a5fa;
+      color: var(--accent-teal);
     }
 
     .biomarker-subtext {
-      font-size: 0.7rem;
+      font-size: 0.69rem;
       color: var(--text-muted);
     }
 
     .status-alert {
-      padding: 8px 9px;
+      padding: 7px 9px;
       border-radius: 6px;
-      font-size: 0.74rem;
+      font-size: 0.73rem;
       line-height: 1.4;
-      background: rgba(59, 130, 246, 0.1);
-      border: 1px solid rgba(59, 130, 246, 0.3);
-      color: #bfdbfe;
+      background: var(--accent-mint-soft);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
     }
 
     .confusions-list {
-      margin-top: 7px;
-      font-size: 0.73rem;
+      margin-top: 6px;
+      font-size: 0.71rem;
       color: var(--text-secondary);
       display: flex;
       flex-direction: column;
@@ -905,12 +1039,27 @@
       gap: 6px;
     }
 
+    .wsi-status-card {
+      display: none;
+      background: #E6F6F2;
+      border: 1px solid #8CCFC1;
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 0.74rem;
+      color: var(--text-primary);
+      line-height: 1.45;
+    }
+
+    .wsi-status-card strong {
+      color: #006B58;
+    }
+
     /* Multi-Method Compare Modal */
     .modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(3, 7, 18, 0.82);
-      backdrop-filter: blur(4px);
+      background: rgba(20, 49, 58, 0.56);
+      backdrop-filter: blur(3px);
       z-index: 100;
       display: none;
       align-items: center;
@@ -925,38 +1074,41 @@
     .modal-box {
       background: var(--panel-bg);
       border: 1px solid var(--border-strong);
+      border-top: 4px solid var(--accent-surgical);
       border-radius: 10px;
-      width: min(1220px, 96vw);
+      width: min(1240px, 96vw);
       max-height: 92vh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      box-shadow: 0 18px 46px rgba(20, 49, 58, 0.25);
     }
 
     .modal-header {
-      padding: 12px 16px;
+      padding: 11px 16px;
       border-bottom: 1px solid var(--border-subtle);
       display: flex;
       justify-content: space-between;
       align-items: center;
+      background: #FFFFFF;
     }
 
     .compare-toolbar {
-      padding: 10px 16px;
-      background: var(--surface-bg);
+      padding: 9px 16px;
+      background: var(--bg-canvas);
       border-bottom: 1px solid var(--border-subtle);
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      font-size: 0.75rem;
+      gap: 8px;
+      font-size: 0.74rem;
     }
 
     .compare-method-checks {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
     }
 
@@ -965,49 +1117,56 @@
       align-items: center;
       gap: 4px;
       padding: 3px 7px;
-      border-radius: 4px;
-      background: var(--bg-canvas);
-      border: 1px solid var(--border-subtle);
-      color: var(--text-secondary);
+      border-radius: 5px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
       cursor: pointer;
+      font-weight: 500;
+    }
+
+    .compare-method-checks input[type="checkbox"] {
+      accent-color: var(--accent-surgical);
     }
 
     .modal-body {
-      padding: 16px;
+      padding: 15px;
       overflow-y: auto;
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 14px;
+      gap: 13px;
+      background: var(--bg-canvas);
     }
 
     .compare-card {
-      background: var(--surface-bg);
+      background: #FFFFFF;
       border: 1px solid var(--border-subtle);
       border-radius: 8px;
       padding: 10px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 7px;
+      box-shadow: 0 1px 4px rgba(20, 49, 58, 0.06);
     }
 
     .compare-card img {
       width: 100%;
       aspect-ratio: 1 / 1;
       object-fit: contain;
-      border-radius: 4px;
+      border-radius: 5px;
       border: 1px solid var(--border-subtle);
-      background: #070b14;
+      background: #F4FAFA;
       image-rendering: pixelated;
     }
 
     .compare-title {
-      font-size: 0.81rem;
+      font-size: 0.80rem;
       font-weight: 700;
-      color: #f8fafc;
+      color: var(--accent-teal);
     }
 
     .compare-metrics {
-      font-size: 0.74rem;
+      font-size: 0.73rem;
       color: var(--text-secondary);
       line-height: 1.45;
     }
@@ -1021,18 +1180,18 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      max-width: 360px;
+      max-width: 370px;
     }
 
     .toast {
-      background: var(--panel-bg);
+      background: #FFFFFF;
       border: 1px solid var(--border-strong);
-      border-left: 4px solid var(--accent-blue);
+      border-left: 4px solid var(--accent-teal);
       color: var(--text-primary);
       padding: 9px 12px;
-      border-radius: 6px;
-      font-size: 0.78rem;
-      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+      border-radius: 7px;
+      font-size: 0.77rem;
+      box-shadow: 0 8px 24px rgba(20, 49, 58, 0.18);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -1040,7 +1199,7 @@
     }
 
     .toast.error { border-left-color: var(--error-red); }
-    .toast.success { border-left-color: var(--match-green); }
+    .toast.success { border-left-color: var(--accent-surgical); }
     .toast.warn { border-left-color: var(--margin-amber); }
 
     .empty-cohort-banner {
@@ -1052,7 +1211,7 @@
       justify-content: center;
       text-align: center;
       padding: 24px;
-      background: rgba(11, 17, 29, 0.88);
+      background: rgba(244, 250, 250, 0.92);
       color: var(--text-secondary);
       font-size: 0.86rem;
       line-height: 1.5;
@@ -1100,217 +1259,229 @@
   <header>
     <div class="brand">
       <div class="brand-mark">DX</div>
-      <h1>BCSS-WSSS Clinical Digital Pathology Workstation</h1>
-      <span class="badge">Visual QA & Biomarkers v2.0</span>
+      <h1>Trạm Giải Phẫu Bệnh Số BCSS-WSSS</h1>
+      <span class="badge">Trắng - Xanh Y Khoa | Ngoại Tuyến</span>
     </div>
     <div class="header-right">
-      <div class="tab-bar" role="tablist" aria-label="Workstation Mode">
-        <button type="button" role="tab" class="tab-btn" id="tabPatchQA" aria-selected="true">Single Patch QA</button>
-        <button type="button" role="tab" class="tab-btn" id="tabWSI" aria-selected="false">WSI Multi-Tile Stitch</button>
+      <div class="tab-bar" role="tablist" aria-label="Chế độ Trạm Lâm Sàng">
+        <button type="button" role="tab" class="tab-btn" id="tabClinical" aria-selected="false">Chẩn đoán Lâm sàng</button>
+        <button type="button" role="tab" class="tab-btn" id="tabPatchQA" aria-selected="true">Kiểm chứng Nghiên cứu (GT)</button>
+        <button type="button" role="tab" class="tab-btn" id="tabWSI" aria-selected="false">Ghép lát cắt WSI</button>
       </div>
       <div class="ckpt-pill" id="systemHealth">
         <span class="status-dot"></span>
-        <span id="healthText">Initializing Models...</span>
+        <span id="healthText">Đang khởi tạo trọng số...</span>
       </div>
     </div>
   </header>
+
+  <div class="ruo-banner" id="ruoClinicalNotice" role="note">
+    <span><strong>LƯU Ý LÂM SÀNG (RUO - Research Use Only):</strong> Phần mềm hỗ trợ nghiên cứu và đào tạo giải phẫu bệnh số; kết quả phân vùng AI và chỉ số VTP/TSR cần bác sĩ chuyên khoa thẩm định độc lập trước mọi quyết định lâm sàng.</span>
+    <span class="ruo-mode-tag" id="activeWorkModeTag">Chế độ: Kiểm chứng Nghiên cứu (Có GT)</span>
+  </div>
 
   <main class="main-workspace">
     <!-- Left Sidebar -->
     <aside class="sidebar-left">
       <div class="panel-card" id="patchIngestionCard">
-        <h3>Cohort & Patch Ingestion</h3>
+        <h3 id="ingestionPanelTitle">Nạp Lát Cắt Mô Bệnh Học</h3>
         <div class="filter-row">
-          <input type="text" id="sampleSearchInput" placeholder="Filter patient ID..." aria-label="Filter cohort by patient ID">
-          <select id="morphologyFilter" aria-label="Filter by tissue morphology">
-            <option value="">All Classes</option>
-            <option value="TUM">TUM</option>
-            <option value="STR">STR</option>
-            <option value="LYM">LYM</option>
-            <option value="NEC">NEC</option>
-            <option value="Glass">Glass Margin</option>
+          <input type="text" id="sampleSearchInput" placeholder="Lọc mã bệnh nhân..." aria-label="Lọc theo mã bệnh nhân">
+          <select id="morphologyFilter" aria-label="Lọc theo thành phần mô">
+            <option value="">Tất cả lớp mô</option>
+            <option value="TUM">Khối u (TUM)</option>
+            <option value="STR">Mô đệm (STR)</option>
+            <option value="LYM">Bạch huyết (LYM)</option>
+            <option value="NEC">Hoại tử (NEC)</option>
+            <option value="Glass">Viền kính trắng</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="sampleSelect">Held-Out TCGA-BRCA Test Cases (Real GT)</label>
+          <label for="sampleSelect" id="sampleSelectLabel">Ca bệnh Held-Out TCGA-BRCA (Có GT bác sĩ)</label>
           <select id="sampleSelect">
-            <option value="">Loading test cohort...</option>
+            <option value="">Đang tải danh sách ca bệnh...</option>
           </select>
         </div>
         <div class="source-bar">
-          <span class="source-pill" id="activeSourceBadge">Source: Cohort Sample</span>
-          <button type="button" class="btn-inline" id="btnClearUpload">Clear Upload</button>
+          <span class="source-pill" id="activeSourceBadge">Nguồn: Mẫu đoàn hệ</span>
+          <button type="button" class="btn-inline" id="btnClearUpload">Xóa ảnh tải lên</button>
         </div>
         <div class="form-group">
-          <label for="patchUpload">Or Upload Custom H&E Patch (PNG/JPG)</label>
+          <label for="patchUpload">Hoặc tải ảnh mô bệnh học H&amp;E (PNG/JPG)</label>
           <input type="file" id="patchUpload" accept="image/png, image/jpeg">
         </div>
-        <div class="form-group">
-          <label for="gtUpload">Optional Reference GT Mask (Index PNG)</label>
+        <div class="form-group" id="gtUploadGroup">
+          <label for="gtUpload">Mặt nạ đáp án bác sĩ GT tùy chọn (PNG Index)</label>
           <input type="file" id="gtUpload" accept="image/png">
         </div>
-        <button type="button" class="btn btn-primary" id="btnRunInference">Run WSSS Analysis</button>
+        <button type="button" class="btn btn-primary" id="btnRunInference">Phân Tích Phân Vùng AI</button>
       </div>
 
       <div class="panel-card" id="wsiControlPanel" style="display:none;">
-        <h3>WSI Multi-Tile Stitcher</h3>
+        <h3>Ghép Lát Cắt WSI Đa Mảnh</h3>
         <div class="wsi-dropzone">
-          Select up to 64 tiles (PNG/JPG). Coordinates auto-parse from <code>_xmin..._ymin...</code> or BCSS <code>+N</code> column-major filenames, or pack in a regular grid.
+          Chọn tối đa 64 mảnh ảnh H&amp;E (PNG/JPG). Hệ thống tự đọc tọa độ <code>_xmin..._ymin...</code> hoặc mã cột BCSS <code>+N</code> để ghép bản đồ mô thống nhất.
         </div>
         <div class="form-group">
-          <label for="wsiTilesInput">Upload WSI Tile Patches</label>
+          <label for="wsiTilesInput">Tải nhiều mảnh ảnh WSI (Tiles)</label>
           <input type="file" id="wsiTilesInput" multiple accept="image/png, image/jpeg">
         </div>
         <div class="filter-row">
           <div class="form-group" style="margin-bottom:0;">
-            <label for="wsiRowsInput">Grid Rows (0=Auto)</label>
+            <label for="wsiRowsInput">Số hàng lưới (0=Tự động)</label>
             <input type="number" id="wsiRowsInput" min="0" max="64" value="0">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label for="wsiColsInput">Grid Columns</label>
+            <label for="wsiColsInput">Số cột lưới</label>
             <input type="number" id="wsiColsInput" min="1" max="16" value="2">
           </div>
         </div>
-        <div class="form-group" style="margin-top:8px;">
-          <label for="wsiOverlapInput">Tile Overlap (px)</label>
+        <div class="form-group" style="margin-top:7px;">
+          <label for="wsiOverlapInput">Chồng lấp giữa các mảnh (px, 0 = liền kề BCSS)</label>
           <input type="number" id="wsiOverlapInput" min="0" max="128" value="0">
         </div>
-        <div class="form-group" style="margin-top:8px;">
-          <label for="wsiMethodSelect">WSI Inference Mode</label>
+        <div class="form-group" style="margin-top:7px;">
+          <label for="wsiMethodSelect">Mô hình suy luận WSI</label>
           <select id="wsiMethodSelect">
-            <optgroup label="Gate-7 Track A (Stage-2 v2 Dual-Head)">
-              <option value="gate7_arm5">Gate-7: Arm-5 DINOv2-L Adapter (Fast)</option>
-              <option value="gate7_arm5_tta">Gate-7: Arm-5 DINOv2-L Adapter (MS-3 H/V-Flip TTA)</option>
-              <option value="gate7_4arm">Gate-7: 4-Arm Calibrated Ensemble</option>
-              <option value="gate7_4arm_cgm">Gate-7: 4-Arm Ensemble + CGM (SOTA)</option>
+            <optgroup label="Mô hình chủ lực Gate-7 Track A (Dual-Head)">
+              <option value="gate7_arm5" selected>Gate-7: Arm-5 DINOv2-L (Nhanh)</option>
+              <option value="gate7_arm5_tta">Gate-7: Arm-5 DINOv2-L (TTA 3x)</option>
+              <option value="gate7_4arm">Gate-7: Tổ hợp 4-Arm hiệu chuẩn</option>
+              <option value="gate7_4arm_cgm">Gate-7: Tổ hợp 4-Arm + CGM (SOTA)</option>
               <option value="gate7_arm6">Gate-7: Arm-6 SegFormer-B5</option>
               <option value="gate7_arm7">Gate-7: Arm-7 ConvNeXt-L FPN</option>
               <option value="gate7_arm8">Gate-7: Arm-8 DeepLabV3+ R101</option>
             </optgroup>
-            <optgroup label="Verified Baseline & Multi-Method Engine">
-              <option value="m6" selected>M6: Multi-Scale D4 + Adaptive CAM</option>
-              <option value="m7">M7: Optical Curriculum + Bilateral V2</option>
-              <option value="m1">M1: Single-Scale DeepLabV3+</option>
+            <optgroup label="Mô hình đối chứng Baseline">
+              <option value="m6">M6: Đa tỷ lệ D4 + CAM thích nghi</option>
+              <option value="m7">M7: Mật độ quang học + Song phương</option>
+              <option value="m1">M1: DeepLabV3+ đơn tỷ lệ</option>
               <option value="combined">Combined: M6 + OD + SG-DAP + MP-PPC</option>
             </optgroup>
           </select>
         </div>
-        <button type="button" class="btn btn-primary" id="btnRunWSI">Stitch & Analyze WSI</button>
-        <div id="wsiRegionInfo" class="confusions-list" style="margin-top:8px;">No WSI composite stitched yet.</div>
+        <button type="button" class="btn btn-primary" id="btnRunWSI">Ghép &amp; Phân Tích WSI</button>
+        <div id="wsiRegionInfo" class="confusions-list" style="margin-top:8px;">Chưa có bản đồ ghép WSI nào.</div>
       </div>
 
-      <div class="panel-card">
-        <h3>Multi-Direction Inference Engine</h3>
+      <div class="panel-card" id="inferenceEngineCard">
+        <h3>Động Cơ Suy Luận WSSS</h3>
         <div class="form-group">
-          <label for="configSelect">Experimental Pipeline Mode</label>
+          <label for="configSelect">Chọn mô hình AI phân vùng</label>
           <select id="configSelect">
-            <optgroup label="Gate-7 Track A (Stage-2 v2 Dual-Head)">
-              <option value="gate7_4arm_cgm">Gate-7: 4-Arm Calibrated Ensemble + CGM (SOTA)</option>
-              <option value="gate7_4arm">Gate-7: 4-Arm Calibrated Ensemble</option>
-              <option value="gate7_arm5">Gate-7: Arm-5 DINOv2-L Adapter (Single Pass)</option>
-              <option value="gate7_arm5_tta">Gate-7: Arm-5 DINOv2-L Adapter (MS-3 H/V-Flip TTA)</option>
-              <option value="gate7_arm6">Gate-7: Arm-6 SegFormer-B5 Dual-Head</option>
-              <option value="gate7_arm7">Gate-7: Arm-7 ConvNeXt-L FPN Dual-Head</option>
-              <option value="gate7_arm8">Gate-7: Arm-8 DeepLabV3+ R101 Dual-Head</option>
+            <optgroup label="Mô hình chủ lực Gate-7 Track A (Dual-Head)">
+              <option value="gate7_arm5" selected>Gate-7: Arm-5 DINOv2-L (Nhanh)</option>
+              <option value="gate7_4arm_cgm">Gate-7: Tổ hợp 4-Arm + CGM (SOTA)</option>
+              <option value="gate7_4arm">Gate-7: Tổ hợp 4-Arm hiệu chuẩn</option>
+              <option value="gate7_arm5_tta">Gate-7: Arm-5 DINOv2-L (TTA 3x)</option>
+              <option value="gate7_arm6">Gate-7: Arm-6 SegFormer-B5</option>
+              <option value="gate7_arm7">Gate-7: Arm-7 ConvNeXt-L FPN</option>
+              <option value="gate7_arm8">Gate-7: Arm-8 DeepLabV3+ R101</option>
             </optgroup>
-            <optgroup label="Verified Baseline & Multi-Method Engine">
-              <option value="m6" selected>M6: Multi-Scale D4 + Adaptive CAM (Verified SOTA)</option>
-              <option value="m1">M1: Single-Scale DeepLabV3+ Baseline</option>
-              <option value="m2">M2: D4-TTA + Stage-1 CGM Gate</option>
-              <option value="m3">M3: D4-TTA + CGM + CAM Prior Fusion</option>
-              <option value="m4">M4: D4-TTA + CGM + Bilateral Refinement</option>
-              <option value="m5">M5: V1 Ensemble + Bilateral Refinement</option>
-              <option value="m7">M7: V2 Optical Density + Entropy CAM + Bilateral</option>
-              <option value="od_prior">Ablation: M6 + Beer-Lambert OD Prior</option>
-              <option value="sg_dap">Ablation: M6 + SG-DAP Markov Affinity</option>
-              <option value="mpppc">Ablation: M6 + SG-DAP + MP-PPC Prototypes</option>
-              <option value="combined">Combined: M6 + OD Prior + SG-DAP + MP-PPC</option>
+            <optgroup label="Đối chứng Baseline &amp; Ablation (M1-M7)">
+              <option value="m6">M6: Đa tỷ lệ D4 + CAM thích nghi</option>
+              <option value="m1">M1: DeepLabV3+ đơn tỷ lệ (Baseline)</option>
+              <option value="m2">M2: D4-TTA + Cổng CGM Stage-1</option>
+              <option value="m3">M3: D4-TTA + CGM + Kết hợp CAM</option>
+              <option value="m4">M4: D4-TTA + CGM + Lọc song phương</option>
+              <option value="m5">M5: Tổ hợp V1 + Lọc song phương</option>
+              <option value="m7">M7: Mật độ quang + Entropy + Song phương</option>
+              <option value="od_prior">Ablation: M6 + Tiên nghiệm OD Beer-Lambert</option>
+              <option value="sg_dap">Ablation: M6 + Lan truyền Markov SG-DAP</option>
+              <option value="mpppc">Ablation: M6 + SG-DAP + Mẫu MP-PPC</option>
+              <option value="combined">Combined: M6 + OD + SG-DAP + MP-PPC</option>
             </optgroup>
           </select>
         </div>
         <label class="checkbox-row">
           <input type="checkbox" id="otsuToggle" checked>
-          <span>Enforce Pure-Glass Otsu Guard (HSV)</span>
+          <span>Bật cổng lọc nền kính trắng quang học Otsu (Pure-Glass Guard)</span>
         </label>
-        <button type="button" class="btn btn-compare" id="btnCompareMethods">Compare Methods Side-by-Side</button>
+        <button type="button" class="btn btn-compare" id="btnCompareMethods">So Sánh Song Song Đa Mô Hình</button>
       </div>
 
-      <div class="panel-card">
-        <h3>Viewport Display Controls</h3>
+      <div class="panel-card" id="displayControlCard">
+        <h3>Điều Khiển Hiển Thị Vi Trường</h3>
         <div class="slider-container">
           <div class="slider-header">
-            <span>Diagnostic Overlay Opacity</span>
+            <span>Độ mờ lớp phủ phân vùng AI</span>
             <span id="opacityLabel">65%</span>
           </div>
           <input type="range" id="opacitySlider" min="0" max="100" value="65">
         </div>
-        <div class="blurred-controls-box" id="blurredDualControls">
-          <div class="slider-container">
-            <div class="slider-header">
-              <span>Blur Sigma (Dual QA)</span>
-              <span id="blurSigmaLabel">0.0 px</span>
-            </div>
-            <input type="range" id="blurSigmaSlider" min="0" max="12" step="0.5" value="0.0">
-          </div>
-          <div class="slider-container">
-            <div class="slider-header">
-              <span>H&E Dimming</span>
-              <span id="heDimLabel">55%</span>
-            </div>
-            <input type="range" id="heDimSlider" min="0" max="100" value="55">
-          </div>
-          <div class="slider-container">
-            <div class="slider-header">
-              <span>GT Layer Opacity</span>
-              <span id="gtAlphaLabel">45%</span>
-            </div>
-            <input type="range" id="gtAlphaSlider" min="0" max="100" value="45">
-          </div>
-          <div class="slider-container">
-            <div class="slider-header">
-              <span>Pred Layer Opacity</span>
-              <span id="predAlphaLabel">55%</span>
-            </div>
-            <input type="range" id="predAlphaSlider" min="0" max="100" value="55">
-          </div>
-          <div class="slider-container" style="margin-bottom:0;">
-            <div class="slider-header">
-              <span>Error Highlight (G/R/A)</span>
-              <span id="errAlphaLabel">70%</span>
-            </div>
-            <input type="range" id="errAlphaSlider" min="0" max="100" value="70">
-          </div>
-        </div>
-        <button type="button" class="btn btn-secondary" id="btnToggleOverlay">Toggle Mask On/Off (Space)</button>
-        <button type="button" class="btn btn-secondary" id="btnToggleSplit">Toggle Split-Curtain Compare (S)</button>
-        <div id="splitControlBox" style="display:none; margin-top:8px;">
+
+        <button type="button" class="btn btn-secondary" id="btnToggleOverlay">Bật / Tắt Lớp Phủ (Space)</button>
+        <button type="button" class="btn btn-secondary" id="btnToggleSplit">Bật Rèm So Sánh Kéo Tay (S)</button>
+        <div id="splitControlBox" style="display:none; margin-top:7px;">
           <div class="slider-header">
-            <span>Curtain Position</span>
+            <span>Vị trí thanh kéo rèm</span>
             <span id="splitPctLabel">50%</span>
           </div>
           <input type="range" id="splitSlider" min="5" max="95" value="50">
         </div>
+
+        <details class="advanced-details" id="advancedDisplayDetails">
+          <summary>Tùy chỉnh nâng cao (Dual QA &amp; Làm mờ)</summary>
+          <div class="blurred-controls-box" id="blurredDualControls">
+            <div class="slider-container">
+              <div class="slider-header">
+                <span>Độ làm mờ Sigma (Dual QA)</span>
+                <span id="blurSigmaLabel">0.0 px</span>
+              </div>
+              <input type="range" id="blurSigmaSlider" min="0" max="12" step="0.5" value="0.0">
+            </div>
+            <div class="slider-container">
+              <div class="slider-header">
+                <span>Giảm chói nền H&amp;E</span>
+                <span id="heDimLabel">55%</span>
+              </div>
+              <input type="range" id="heDimSlider" min="0" max="100" value="55">
+            </div>
+            <div class="slider-container">
+              <div class="slider-header">
+                <span>Độ rõ lớp GT bác sĩ</span>
+                <span id="gtAlphaLabel">45%</span>
+              </div>
+              <input type="range" id="gtAlphaSlider" min="0" max="100" value="45">
+            </div>
+            <div class="slider-container">
+              <div class="slider-header">
+                <span>Độ rõ lớp AI dự đoán</span>
+                <span id="predAlphaLabel">55%</span>
+              </div>
+              <input type="range" id="predAlphaSlider" min="0" max="100" value="55">
+            </div>
+            <div class="slider-container" style="margin-bottom:0;">
+              <div class="slider-header">
+                <span>Nổi bật Đúng / Biên / Lỗi</span>
+                <span id="errAlphaLabel">70%</span>
+              </div>
+              <input type="range" id="errAlphaSlider" min="0" max="100" value="70">
+            </div>
+          </div>
+        </details>
       </div>
     </aside>
 
     <!-- Center Multi-Mode Diagnostic Viewport -->
     <section class="viewport-center">
       <div class="view-mode-ribbon">
-        <div class="mode-pills" id="viewModePills" role="tablist" aria-label="Diagnostic Visualization Modes">
-          <button type="button" role="tab" class="mode-pill qa-pill active" data-mode="blurred_dual" aria-pressed="true">1. Blurred Dual QA</button>
-          <button type="button" role="tab" class="mode-pill qa-pill" data-mode="agreement" aria-pressed="false">2. Match vs Error</button>
-          <button type="button" role="tab" class="mode-pill" data-mode="overlay" aria-pressed="false">3. Seg Mask</button>
-          <button type="button" role="tab" class="mode-pill" data-mode="dual_blend" aria-pressed="false">4. GT + AI Blend</button>
-          <button type="button" role="tab" class="mode-pill" data-mode="contour" aria-pressed="false">5. Contours</button>
-          <button type="button" role="tab" class="mode-pill" data-mode="entropy" aria-pressed="false">6. Entropy</button>
-          <button type="button" role="tab" class="mode-pill" data-mode="cam" aria-pressed="false">7. Stage-1 CAM</button>
-          <button type="button" role="tab" class="mode-pill" data-mode="spotlight" aria-pressed="false">8. Spotlight</button>
-          <button type="button" role="tab" class="mode-pill" data-mode="gt" aria-pressed="false">9. Doctor GT</button>
+        <div class="mode-pills" id="viewModePills" role="tablist" aria-label="Chế độ hiển thị vi trường">
+          <button type="button" role="tab" class="mode-pill qa-pill active" data-mode="quad_4panel" data-gt-only="true" aria-pressed="true">0. Đối chiếu 4 Khung</button>
+          <button type="button" role="tab" class="mode-pill qa-pill" data-mode="agreement" data-gt-only="true" aria-pressed="false">1. Đúng vs Sai</button>
+          <button type="button" role="tab" class="mode-pill qa-pill" data-mode="blurred_dual" data-gt-only="true" aria-pressed="false">2. Dual QA làm mờ</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="overlay" aria-pressed="false">3. Mặt nạ AI</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="dual_blend" data-gt-only="true" aria-pressed="false">4. Pha GT + AI</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="contour" aria-pressed="false">5. Đường viền</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="entropy" aria-pressed="false">6. Bất định Entropy</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="cam" aria-pressed="false">7. CAM Stage-1</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="spotlight" aria-pressed="false">8. Soi riêng lớp</button>
+          <button type="button" role="tab" class="mode-pill" data-mode="gt" data-gt-only="true" aria-pressed="false">9. Đáp án GT</button>
         </div>
-        <div style="font-size:0.73rem; color:var(--text-secondary);">
-          Slide: <strong id="slideNameLabel" style="color:#f8fafc;">-</strong> |
-          Res: <strong id="resLabel">224 x 224</strong> |
-          Latency: <strong id="latencyLabel">-</strong>
+        <div class="slide-meta-strip">
+          Tiêu bản: <strong id="slideNameLabel">-</strong> |
+          Kích thước: <strong id="resLabel">224 x 224</strong> |
+          Độ trễ: <strong id="latencyLabel">-</strong>
         </div>
       </div>
 
@@ -1318,17 +1489,17 @@
         <div id="openseadragon-viewer" data-viewer-engine="openseadragon-compatible-canvas">
           <canvas id="stageCanvas"></canvas>
           <div class="zoom-toolbar">
-            <button type="button" class="zoom-btn" id="btnZoomIn" title="Zoom In (+)">+</button>
-            <button type="button" class="zoom-btn" id="btnZoomOut" title="Zoom Out (-)">-</button>
-            <button type="button" class="zoom-btn" id="btnZoomOne" title="Native 1:1 Pixels">1:1</button>
-            <button type="button" class="zoom-btn" id="btnZoomFit" title="Fit to Stage (0)">Fit</button>
+            <button type="button" class="zoom-btn" id="btnZoomIn" title="Phóng to (+)">+</button>
+            <button type="button" class="zoom-btn" id="btnZoomOut" title="Thu nhỏ (-)">-</button>
+            <button type="button" class="zoom-btn" id="btnZoomOne" title="Tỷ lệ pixel 1:1">1:1</button>
+            <button type="button" class="zoom-btn" id="btnZoomFit" title="Vừa khung nhìn (0)">Vừa khung</button>
             <span class="zoom-readout" id="zoomReadout">100%</span>
-            <button type="button" class="zoom-btn" id="btnToggleLoupe" title="Toggle Magnifier Loupe (L)" aria-pressed="false">Loupe</button>
+            <button type="button" class="zoom-btn" id="btnToggleLoupe" title="Bật/tắt kính lúp soi tế bào (L)" aria-pressed="false">Kính lúp</button>
           </div>
-          <div class="pixel-inspector-hud" id="pixelInspectorHUD">Hover tissue to inspect (x, y, GT, Pred, Conf%)</div>
+          <div class="pixel-inspector-hud" id="pixelInspectorHUD">Di chuột lên mô để soi tọa độ (x, y), nhãn mô và độ tin cậy%</div>
           <div class="scale-bar-hud" id="scaleBarHud">
             <div class="scale-bar-line" id="scaleBarLine"></div>
-            <div class="scale-bar-label" id="scaleBarLabel">50 um (0.25 MPP)</div>
+            <div class="scale-bar-label" id="scaleBarLabel">25 um (0.25 MPP)</div>
           </div>
           <canvas id="magnifierLoupe" width="120" height="120"></canvas>
         </div>
@@ -1337,31 +1508,31 @@
         <div class="split-curtain-container" id="splitContainer">
           <div class="split-toolbar">
             <div class="split-select-group">
-              <label for="splitLeftSelect">Left Layer:</label>
+              <label for="splitLeftSelect">Lớp bên trái:</label>
               <select id="splitLeftSelect">
-                <option value="gt" selected>Doctor GT</option>
-                <option value="raw">Raw H&E</option>
-                <option value="pred">AI Pred Mask</option>
-                <option value="blurred_dual">Blurred Dual QA</option>
-                <option value="agreement">Match vs Error</option>
-                <option value="contour">Contours</option>
-                <option value="entropy">Entropy</option>
-                <option value="cam">Stage-1 CAM</option>
+                <option value="raw" selected>Ảnh gốc H&amp;E</option>
+                <option value="gt">Đáp án Bác sĩ (GT)</option>
+                <option value="pred">Mặt nạ AI rời rạc</option>
+                <option value="blurred_dual">Dual QA làm mờ</option>
+                <option value="agreement">Đúng vs Sai</option>
+                <option value="contour">Đường viền</option>
+                <option value="entropy">Bất định Entropy</option>
+                <option value="cam">CAM Stage-1</option>
               </select>
             </div>
-            <span style="color:var(--text-muted); font-size:0.71rem;">Wheel to zoom | Drag canvas to pan | Drag divider to wipe</span>
+            <span style="color:var(--text-muted); font-size:0.71rem;">Cuộn chuột để phóng to | Kéo ảnh để di chuyển | Kéo thanh giữa để đối chiếu</span>
             <div class="split-select-group">
-              <label for="splitRightSelect">Right Layer:</label>
+              <label for="splitRightSelect">Lớp bên phải:</label>
               <select id="splitRightSelect">
-                <option value="blurred_dual" selected>Blurred Dual QA</option>
-                <option value="agreement">Match vs Error</option>
-                <option value="pred">AI Pred Mask</option>
-                <option value="overlay">H&E + AI Overlay</option>
-                <option value="contour">Contours</option>
-                <option value="entropy">Entropy</option>
-                <option value="cam">Stage-1 CAM</option>
-                <option value="gt">Doctor GT</option>
-                <option value="raw">Raw H&E</option>
+                <option value="overlay" selected>H&amp;E + Phân vùng AI</option>
+                <option value="blurred_dual">Dual QA làm mờ</option>
+                <option value="agreement">Đúng vs Sai</option>
+                <option value="pred">Mặt nạ AI rời rạc</option>
+                <option value="contour">Đường viền</option>
+                <option value="entropy">Bất định Entropy</option>
+                <option value="cam">CAM Stage-1</option>
+                <option value="gt">Đáp án Bác sĩ (GT)</option>
+                <option value="raw">Ảnh gốc H&amp;E</option>
               </select>
             </div>
           </div>
@@ -1371,75 +1542,92 @@
             <div class="split-divider" id="splitDivider" style="left:50%;">
               <div class="split-handle">&lt;&gt;</div>
             </div>
-            <span class="split-label left" id="splitLeftLabel">Doctor GT</span>
-            <span class="split-label right" id="splitRightLabel">Blurred Dual QA</span>
+            <span class="split-label left" id="splitLeftLabel">Ảnh gốc H&amp;E</span>
+            <span class="split-label right" id="splitRightLabel">H&amp;E + Phân vùng AI</span>
           </div>
         </div>
 
         <div class="empty-cohort-banner" id="emptyCohortBanner" role="status" aria-live="polite">
-          No tissue patch loaded. Select a held-out TCGA-BRCA cohort sample or upload an H&amp;E image patch to run clinical analysis.
+          Chưa nạp lát cắt mô bệnh học. Hãy chọn một ca mẫu Held-Out TCGA-BRCA hoặc tải ảnh H&amp;E để bắt đầu phân tích.
         </div>
 
         <div class="stage-loading-overlay" id="stageLoadingOverlay">
           <div class="spinner"></div>
-          <div style="font-size:0.82rem; color:#e2e8f0;" id="loadingStageText">Running WSSS Inference...</div>
+          <div style="font-size:0.82rem; font-weight:600; color:var(--accent-teal);" id="loadingStageText">Đang suy luận phân vùng mô bệnh học...</div>
         </div>
       </div>
 
       <div class="viewport-footer">
         <div class="qa-legend-strip" id="activeModeLegend">
-          <span><span class="qa-dot" style="background:#10b981;"></span>Green = TP Match</span>
-          <span><span class="qa-dot" style="background:#f59e0b;"></span>Amber = Margin / FN</span>
-          <span><span class="qa-dot" style="background:#ef4444;"></span>Red = Core Error</span>
+          <span><span class="qa-dot" style="background:#00957E;"></span>Xanh y khoa = Khớp GT</span>
+          <span><span class="qa-dot" style="background:#EAB308;"></span>Vàng = Lệch biên &lt;= 2px</span>
+          <span><span class="qa-dot" style="background:#C81E1E;"></span>Đỏ = Lỗi lõi</span>
         </div>
-        <div id="methodBadgeFooter">Method: -</div>
+        <div id="methodBadgeFooter">Mô hình: -</div>
       </div>
     </section>
 
     <!-- Right Verification & Clinical Biomarker Rail -->
     <aside class="sidebar-right">
+      <div class="wsi-status-card" id="wsiRightBanner">
+        <strong>CHẾ ĐỘ GHÉP LÁT CẮT WSI (KHÔNG GT)</strong><br>
+        <span id="wsiRightBannerText">Tải các mảnh H&amp;E cùng vùng mô ở cột trái để ghép bản đồ mô học và tính VTP/TSR toàn vùng.</span>
+      </div>
+
       <div class="panel-card" id="qaAuditCard">
         <h3>
-          <span>Visual Correctness Audit (vs GT)</span>
-          <span id="gtStatusTag" style="color:var(--match-green);">GT Active</span>
+          <span>Đối Chiếu Đáp Án Bác Sĩ (GT = 100%)</span>
+          <span id="gtStatusTag" style="color:var(--match-green);">Có GT</span>
         </h3>
+        <div class="qa-grid-3">
+          <div class="qa-stat">
+            <div class="qa-stat-label">Trùng khớp</div>
+            <div class="qa-stat-val val-green" id="qaExactMatch">-</div>
+            <div class="qa-stat-sub" id="qaPxSummary">Đúng lớp</div>
+          </div>
+          <div class="qa-stat">
+            <div class="qa-stat-label">Lệch biên 2px</div>
+            <div class="qa-stat-val val-amber" id="qaMarginShift">-</div>
+            <div class="qa-stat-sub" id="qaMarginPxSub">Vùng ranh giới</div>
+          </div>
+          <div class="qa-stat">
+            <div class="qa-stat-label">Lỗi lõi</div>
+            <div class="qa-stat-val val-red" id="qaCoreErr">-</div>
+            <div class="qa-stat-sub" id="qaErrBreakdown">FP / FN / Nhầm</div>
+          </div>
+        </div>
+        <div class="agreement-stacked-bar" title="Tổng Trùng khớp + Lệch biên 2px + Lỗi lõi = 100%">
+          <div class="seg-match" id="barExactMatch" style="width: 0%;"></div>
+          <div class="seg-margin" id="barMarginShift" style="width: 0%;"></div>
+          <div class="seg-error" id="barCoreErr" style="width: 0%;"></div>
+        </div>
         <div class="qa-grid">
           <div class="qa-stat">
-            <div class="qa-stat-label">Exact Match</div>
-            <div class="qa-stat-val val-green" id="qaExactMatch">-</div>
-            <div class="qa-stat-sub" id="qaPxSummary">All valid px</div>
-          </div>
-          <div class="qa-stat">
-            <div class="qa-stat-label">Core Error</div>
-            <div class="qa-stat-val val-red" id="qaCoreErr">-</div>
-            <div class="qa-stat-sub" id="qaErrBreakdown">FP / FN / Mis</div>
-          </div>
-          <div class="qa-stat">
-            <div class="qa-stat-label">mIoU (GT-Present)</div>
+            <div class="qa-stat-label">mIoU (Lớp có mặt)</div>
             <div class="qa-stat-val val-blue" id="qaMIoU">-</div>
             <div class="qa-stat-sub" id="qaMIoUPenSub">Penalized: -</div>
           </div>
           <div class="qa-stat">
-            <div class="qa-stat-label">Boundary F1</div>
-            <div class="qa-stat-val val-amber" id="qaBF1">-</div>
+            <div class="qa-stat-label">Boundary F1@2px</div>
+            <div class="qa-stat-val val-green" id="qaBF1">-</div>
             <div class="qa-stat-sub" id="qaDiceSub">mDice: -</div>
           </div>
         </div>
         <div class="confusions-list" id="topConfusionsList">
-          Select a held-out sample with Ground Truth to audit errors.
+          Chọn ca bệnh có mặt nạ GT để phân tích chi tiết vùng trùng và vùng sai.
         </div>
       </div>
 
       <div class="panel-card">
         <h3>
-          <span>5 Tissue Classes (Click to Spotlight)</span>
-          <span style="font-size:0.68rem; color:var(--text-muted);">BCSS-WSSS</span>
+          <span>5 Lớp Mô Học (Bấm để Soi Riêng)</span>
+          <span style="font-size:0.67rem; color:var(--text-muted);">BCSS-WSSS</span>
         </h3>
         <div class="legend-list">
           <button type="button" class="legend-item selected-spotlight" data-cls="0" aria-pressed="true">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-tum);"></div>
-              <span>Tumor (TUM)</span>
+              <span>Khối u (TUM)</span>
             </div>
             <strong id="pct-TUM">0.0%</strong>
           </button>
@@ -1450,7 +1638,7 @@
           <button type="button" class="legend-item" data-cls="1" aria-pressed="false">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-str);"></div>
-              <span>Stroma (STR)</span>
+              <span>Mô đệm (STR)</span>
             </div>
             <strong id="pct-STR">0.0%</strong>
           </button>
@@ -1461,7 +1649,7 @@
           <button type="button" class="legend-item" data-cls="2" aria-pressed="false">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-lym);"></div>
-              <span>Lymphocyte (LYM)</span>
+              <span>Bạch huyết bào (LYM)</span>
             </div>
             <strong id="pct-LYM">0.0%</strong>
           </button>
@@ -1472,7 +1660,7 @@
           <button type="button" class="legend-item" data-cls="3" aria-pressed="false">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-nec);"></div>
-              <span>Necrosis (NEC)</span>
+              <span>Mô hoại tử (NEC)</span>
             </div>
             <strong id="pct-NEC">0.0%</strong>
           </button>
@@ -1483,7 +1671,7 @@
           <button type="button" class="legend-item" data-cls="4" aria-pressed="false">
             <div class="legend-badge">
               <div class="color-swatch" style="background-color: var(--color-back);"></div>
-              <span>Background (BACK)</span>
+              <span>Nền kính trắng (BACK)</span>
             </div>
             <strong id="pct-BACK">100.0%</strong>
           </button>
@@ -1491,33 +1679,33 @@
             <div class="progress-bar-fill" id="bar-BACK" style="width: 100%; background-color: var(--color-back);"></div>
           </div>
         </div>
-        <div id="spotlightStatText" style="margin-top:6px; font-size:0.73rem; color:var(--text-secondary);"></div>
+        <div id="spotlightStatText" style="margin-top:6px; font-size:0.72rem; color:var(--text-secondary);"></div>
       </div>
 
       <div class="panel-card">
-        <h3>Clinical Biomarkers</h3>
+        <h3>Dấu Ấn Sinh Học Tiên Lượng (CAP)</h3>
         <div class="biomarker-card">
-          <div class="biomarker-title">Viable Tumor Percentage (VTP)</div>
+          <div class="biomarker-title">Tỷ Lệ Khối U Sống (VTP)</div>
           <div class="biomarker-value" id="valVTP">0.0%</div>
-          <div class="biomarker-subtext" id="gtRefVTP">N_tumor / N_tissue * 100%</div>
+          <div class="biomarker-subtext" id="gtRefVTP">Công thức: N_TUM / N_mô * 100%</div>
         </div>
         <div class="biomarker-card">
-          <div class="biomarker-title">Tumor-Stroma Ratio (TSR)</div>
+          <div class="biomarker-title">Tỷ Lệ U / Mô Đệm (TSR)</div>
           <div class="biomarker-value" id="valTSR">0.0%</div>
-          <div class="biomarker-subtext" id="gtRefTSR">N_tumor / (N_tumor + N_stroma) * 100%</div>
+          <div class="biomarker-subtext" id="gtRefTSR">Công thức: N_TUM / (N_TUM + N_STR) * 100%</div>
         </div>
         <div class="status-alert" id="biomarkerAssessment">
-          Awaiting patch segmentation inference.
+          Đang chờ kết quả phân vùng mô bệnh học.
         </div>
       </div>
 
       <div class="panel-card">
-        <h3>Export QA Report</h3>
+        <h3>Xuất Báo Cáo Kiểm Định &amp; Lâm Sàng</h3>
         <div class="export-btn-row">
-          <button type="button" class="btn btn-primary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportPdf">Export CAP PDF</button>
-          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportPng">PNG Sheet</button>
-          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportJson">JSON Audit</button>
-          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.74rem;" id="btnExportCsv">CSV Metrics</button>
+          <button type="button" class="btn btn-primary" style="margin-top:0; padding:7px 6px; font-size:0.73rem;" id="btnExportPdf" title="Xuất báo cáo chuẩn CAP PDF (Export CAP PDF)">Xuất CAP PDF</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.73rem;" id="btnExportPng">Ảnh Bảng PNG</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.73rem;" id="btnExportJson">Dữ Liệu JSON</button>
+          <button type="button" class="btn btn-secondary" style="margin-top:0; padding:7px 6px; font-size:0.73rem;" id="btnExportCsv">Bảng CSV</button>
         </div>
       </div>
     </aside>
@@ -1528,14 +1716,14 @@
     <div class="modal-box">
       <div class="modal-header">
         <div>
-          <strong style="font-size:0.95rem;" id="compareModalTitle">Multi-Method Side-by-Side Empirical Comparison</strong>
-          <div style="font-size:0.76rem; color:var(--text-secondary);" id="compareSubtitle">Evaluating active patch...</div>
+          <strong style="font-size:0.95rem; color:var(--accent-teal);" id="compareModalTitle">So Sánh Song Song Thực Nghiệm Đa Mô Hình</strong>
+          <div style="font-size:0.76rem; color:var(--text-secondary);" id="compareSubtitle">Đang đánh giá lát cắt hiện tại...</div>
         </div>
-        <button type="button" class="btn btn-secondary" style="width:auto; margin:0; padding:6px 14px;" id="btnCloseCompare">Close (Esc)</button>
+        <button type="button" class="btn btn-secondary" style="width:auto; margin:0; padding:6px 14px;" id="btnCloseCompare">Đóng (Esc)</button>
       </div>
       <div class="compare-toolbar" id="compareToolbar">
         <div class="compare-method-checks" id="compareMethodChecks">
-          <label><input type="checkbox" value="m1" checked> M1</label>
+          <label><input type="checkbox" value="m1"> M1</label>
           <label><input type="checkbox" value="m2"> M2</label>
           <label><input type="checkbox" value="m3"> M3</label>
           <label><input type="checkbox" value="m4"> M4</label>
@@ -1543,24 +1731,24 @@
           <label><input type="checkbox" value="m6" checked> M6</label>
           <label><input type="checkbox" value="m7"> M7</label>
           <label><input type="checkbox" value="od_prior"> OD Prior</label>
-          <label><input type="checkbox" value="sg_dap" checked> SG-DAP</label>
+          <label><input type="checkbox" value="sg_dap"> SG-DAP</label>
           <label><input type="checkbox" value="mpppc"> MP-PPC</label>
-          <label><input type="checkbox" value="combined" checked> Combined</label>
-          <label><input type="checkbox" value="gate7_arm5"> G7 Arm-5</label>
+          <label><input type="checkbox" value="combined"> Combined</label>
+          <label><input type="checkbox" value="gate7_arm5" checked> G7 Arm-5</label>
           <label><input type="checkbox" value="gate7_4arm"> G7 4-Arm</label>
-          <label><input type="checkbox" value="gate7_4arm_cgm"> G7 4-Arm+CGM</label>
+          <label><input type="checkbox" value="gate7_4arm_cgm" checked> G7 4-Arm+CGM</label>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
-          <label for="compareViewSelect" style="color:var(--text-secondary);">View:</label>
-          <select id="compareViewSelect" style="background:var(--bg-canvas); border:1px solid var(--border-strong); color:var(--text-primary); border-radius:5px; padding:4px 8px;">
-            <option value="blurred_dual" selected>Blurred Dual QA</option>
-            <option value="agreement">Match vs Error</option>
-            <option value="mask">Class Mask</option>
-            <option value="contour">Boundary Contours</option>
-            <option value="entropy">Shannon Entropy</option>
-            <option value="cam">Stage-1 CAM</option>
+          <label for="compareViewSelect" style="color:var(--text-secondary); font-weight:600;">Góc nhìn:</label>
+          <select id="compareViewSelect" style="background:#FFFFFF; border:1px solid var(--border-strong); color:var(--text-primary); border-radius:5px; padding:4px 8px;">
+            <option value="agreement" selected>Đúng vs Sai (Match vs Error)</option>
+            <option value="blurred_dual">Dual QA làm mờ</option>
+            <option value="mask">Mặt nạ lớp mô</option>
+            <option value="contour">Đường viền ranh giới</option>
+            <option value="entropy">Bất định Shannon Entropy</option>
+            <option value="cam">Bản đồ CAM Stage-1</option>
           </select>
-          <button type="button" class="btn btn-primary" style="width:auto; padding:5px 12px;" id="btnRunCompareNow">Run Selected</button>
+          <button type="button" class="btn btn-primary" style="width:auto; padding:5px 12px;" id="btnRunCompareNow">Chạy So Sánh</button>
         </div>
       </div>
       <div class="modal-body" id="compareGrid"></div>
@@ -1583,7 +1771,7 @@
     let overlayVisible = true;
     let splitCurtainMode = false;
     let loupeEnabled = false;
-    let activeViewMode = "blurred_dual";
+    let activeViewMode = "quad_4panel";
     let targetSpotlightClass = 0;
     let lastResult = null;
     let lastRawImageUrl = null;
@@ -1611,63 +1799,74 @@
     let gtColorCanvas = null;
     let predColorCanvas = null;
     let compositeCanvas = document.createElement("canvas");
+    let splitLeftSourceCanvas = document.createElement("canvas");
+    let splitRightSourceCanvas = document.createElement("canvas");
     const serverImageCache = new Map();
 
     const QA_MODE_LEGENDS = {
+      quad_4panel: [
+        { color: "#E41A1C", label: "TUM (Khối u)" },
+        { color: "#4DAF4A", label: "STR (Mô đệm)" },
+        { color: "#377EB8", label: "LYM (Bạch huyết)" },
+        { color: "#FF7F00", label: "NEC (Hoại tử)" },
+        { color: "#00957E", label: "Ô 4: Xanh = Khớp GT" },
+        { color: "#EAB308", label: "Vàng = Biên 2px" },
+        { color: "#C81E1E", label: "Đỏ = Lỗi lõi" },
+      ],
       blurred_dual: [
-        { color: "#10b981", label: "Green = TP Match" },
-        { color: "#f59e0b", label: "Amber = Margin Shift / Missed FN" },
-        { color: "#ef4444", label: "Red = Core Error / Tissue Misclass" },
-        { color: "#d946ef", label: "Magenta = Glass FP" },
+        { color: "#00957E", label: "Xanh y khoa = Khớp đúng GT (TP)" },
+        { color: "#EAB308", label: "Vàng = Lệch biên / Bỏ sót FN" },
+        { color: "#C81E1E", label: "Đỏ = Lỗi phân loại lõi" },
+        { color: "#D946EF", label: "Tím = Báo nhầm trên kính trắng" },
       ],
       agreement: [
-        { color: "#10b981", label: "Green = Exact Tissue Match" },
-        { color: "#f59e0b", label: "Amber = 2px Boundary Shift" },
-        { color: "#ef4444", label: "Red = Tissue Misclass" },
-        { color: "#d946ef", label: "Magenta = Glass FP" },
-        { color: "#3b82f6", label: "Blue = Missed FN" },
-        { color: "#e2e8f0", label: "Neutral = Clean Glass Match" },
+        { color: "#00957E", label: "Xanh = Khớp đúng lớp mô" },
+        { color: "#EAB308", label: "Vàng = Lệch biên <= 2px" },
+        { color: "#C81E1E", label: "Đỏ = Nhầm lớp lõi" },
+        { color: "#D946EF", label: "Tím = Báo nhầm kính (FP)" },
+        { color: "#2563EB", label: "Lam = Bỏ sót mô (FN)" },
+        { color: "#E2EEEC", label: "Trắng xám = Nền kính sạch" },
       ],
       overlay: [
-        { color: "#E41A1C", label: "TUM (Tumor)" },
-        { color: "#4DAF4A", label: "STR (Stroma)" },
-        { color: "#377EB8", label: "LYM (Lymphocyte)" },
-        { color: "#FF7F00", label: "NEC (Necrosis)" },
-        { color: "#999999", label: "BACK (Transparent Glass)" },
+        { color: "#E41A1C", label: "TUM (Khối u)" },
+        { color: "#4DAF4A", label: "STR (Mô đệm)" },
+        { color: "#377EB8", label: "LYM (Bạch huyết)" },
+        { color: "#FF7F00", label: "NEC (Hoại tử)" },
+        { color: "#999999", label: "BACK (Kính trắng)" },
       ],
       dual_blend: [
         { color: "#E41A1C", label: "TUM" },
         { color: "#4DAF4A", label: "STR" },
         { color: "#377EB8", label: "LYM" },
         { color: "#FF7F00", label: "NEC (50% GT + 50% AI)" },
-        { color: "#ff3838", label: "Red Outline = GT/AI Mismatch" },
+        { color: "#C81E1E", label: "Viền đỏ = Lệch GT/AI" },
       ],
       contour: [
-        { color: "#06b6d4", label: "Cyan Solid = Doctor GT Contour" },
-        { color: "#facc15", label: "Gold Dashed = AI Prediction Contour" },
+        { color: "#0E7C86", label: "Nét liền Cyan = Biên bác sĩ (GT)" },
+        { color: "#EAB308", label: "Nét đứt Vàng = Biên AI dự đoán" },
       ],
       entropy: [
-        { color: "#1f0c48", label: "Indigo = Confident (Low H)" },
-        { color: "#b63679", label: "Magenta = Moderate Entropy" },
-        { color: "#fb8861", label: "Orange = Boundary Uncertainty" },
-        { color: "#fcfdbf", label: "Bright = Peak Shannon Entropy" },
+        { color: "#1F0C48", label: "H = 0.00 (Tin cậy cao)" },
+        { color: "#B63679", label: "H = 0.50 (Phân vân vừa)" },
+        { color: "#FB8861", label: "H = 0.95 (Bất định biên)" },
+        { color: "#FCFDBF", label: "H = 1.39 ln(4) (Bất định đỉnh)" },
       ],
       cam: [
-        { color: "#1f0c48", label: "Low Stage-1 Activation" },
-        { color: "#b63679", label: "Moderate CAM Response" },
-        { color: "#fcffa4", label: "Peak Stage-1 CAM Loci" },
+        { color: "#1F0C48", label: "Kích hoạt Stage-1 thấp" },
+        { color: "#B63679", label: "Đáp ứng CAM trung bình" },
+        { color: "#FCFFA4", label: "Đỉnh kích hoạt CAM Stage-1" },
       ],
       spotlight: [
-        { color: "#10b981", label: "Green = True Positive (TP)" },
-        { color: "#ef4444", label: "Red = False Positive (FP)" },
-        { color: "#f59e0b", label: "Amber = False Negative (FN)" },
+        { color: "#00957E", label: "Xanh = Đúng dương tính (TP)" },
+        { color: "#C81E1E", label: "Đỏ = Báo nhầm thừa (FP)" },
+        { color: "#EAB308", label: "Vàng = Bỏ sót (FN)" },
       ],
       gt: [
         { color: "#E41A1C", label: "TUM" },
         { color: "#4DAF4A", label: "STR" },
         { color: "#377EB8", label: "LYM" },
         { color: "#FF7F00", label: "NEC" },
-        { color: "#999999", label: "BACK (Pathologist Ground Truth)" },
+        { color: "#999999", label: "BACK (Mặt nạ đáp án bác sĩ GT)" },
       ],
     };
 
@@ -1700,6 +1899,13 @@
         .join("");
     }
 
+    function syncSelectTooltip(selId) {
+      const el = document.getElementById(selId);
+      if (el && el.selectedOptions && el.selectedOptions[0]) {
+        el.title = el.selectedOptions[0].textContent;
+      }
+    }
+
     function computeCurrentImageKey(sourceTag, rawUrl, w, h) {
       const len = rawUrl ? rawUrl.length : 0;
       const head = rawUrl ? rawUrl.slice(0, 48) : "";
@@ -1708,7 +1914,7 @@
 
     function loadImageElement(src) {
       return new Promise((resolve, reject) => {
-        if (!src) return reject(new Error("Empty image source"));
+        if (!src) return reject(new Error("Nguồn ảnh rỗng"));
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = (e) => reject(e);
@@ -1850,37 +2056,57 @@
 
     function fitToViewport() {
       const stage = document.getElementById("openseadragon-viewer");
-      if (!stage) return;
-      const sw = stage.clientWidth || 600;
-      const sh = stage.clientHeight || 500;
-      const scale = Math.min(sw / viewState.imgW, sh / viewState.imgH) * 0.92;
+      const splitFrameEl = document.getElementById("splitFrame");
+      const anchor = (splitCurtainMode && splitFrameEl && splitFrameEl.clientWidth > 0 && splitFrameEl.clientHeight > 0)
+        ? splitFrameEl
+        : stage;
+      if (!anchor) return;
+      const sw = anchor.clientWidth || 600;
+      const sh = anchor.clientHeight || 500;
+      const scale = Math.min(sw / viewState.imgW, sh / viewState.imgH) * 0.90;
       viewState.scale = Math.max(0.25, scale);
       viewState.panX = (sw - viewState.imgW * viewState.scale) / 2.0;
       viewState.panY = (sh - viewState.imgH * viewState.scale) / 2.0;
     }
 
     function updateScaleBarAndZoomReadout() {
+      const safeScale = (Number.isFinite(viewState.scale) && viewState.scale > 0) ? viewState.scale : 1.0;
       const readout = document.getElementById("zoomReadout");
       if (readout) {
-        readout.innerText = Math.round(viewState.scale * 100) + "%";
+        readout.innerText = Math.round(safeScale * 100) + "%";
       }
       const lineEl = document.getElementById("scaleBarLine");
       const labelEl = document.getElementById("scaleBarLabel");
       if (!lineEl || !labelEl) return;
 
-      const candidatesUm = [10, 25, 50, 100, 200];
-      let chosenUm = 50;
-      let chosenPx = (50 / MPP_UM) * viewState.scale;
+      const candidatesUm = [2, 5, 10, 25, 50, 100, 200];
+      const targetPx = 96;
+      let chosenUm = candidatesUm[0];
+      let chosenPx = (chosenUm / MPP_UM) * safeScale;
+      let foundInRange = false;
       for (const um of candidatesUm) {
-        const px = (um / MPP_UM) * viewState.scale;
+        const px = (um / MPP_UM) * safeScale;
         if (px >= 42 && px <= 150) {
-          chosenUm = um;
-          chosenPx = px;
-          break;
+          if (!foundInRange || Math.abs(px - targetPx) < Math.abs(chosenPx - targetPx)) {
+            chosenUm = um;
+            chosenPx = px;
+            foundInRange = true;
+          }
         }
       }
-      chosenPx = Math.max(24, Math.min(180, chosenPx));
-      lineEl.style.width = Math.round(chosenPx) + "px";
+      if (!foundInRange) {
+        let bestErr = Infinity;
+        for (const um of candidatesUm) {
+          const px = (um / MPP_UM) * safeScale;
+          const err = Math.abs(px - targetPx);
+          if (err < bestErr) {
+            bestErr = err;
+            chosenUm = um;
+            chosenPx = px;
+          }
+        }
+      }
+      lineEl.style.width = Math.max(1, Math.round(chosenPx)) + "px";
       labelEl.innerText = `${chosenUm} um (${MPP_UM} MPP)`;
     }
 
@@ -2009,16 +2235,16 @@
           if (g > 4) continue;
           const off = i * 4;
           if (p === g && g < 4) {
-            cd[off] = 16;
-            cd[off + 1] = 185;
-            cd[off + 2] = 129;
+            cd[off] = 0;
+            cd[off + 1] = 149;
+            cd[off + 2] = 126;
             cd[off + 3] = Math.round(145 * errAlpha);
           } else if (p !== g) {
             const isMargin = boundaryZoneBuf && boundaryZoneBuf[i] === 1;
             if (isMargin || (g < 4 && p === 4)) {
-              cd[off] = 245;
-              cd[off + 1] = 158;
-              cd[off + 2] = 11;
+              cd[off] = 234;
+              cd[off + 1] = 179;
+              cd[off + 2] = 8;
               cd[off + 3] = Math.round(195 * errAlpha);
             } else if (g === 4 && p < 4) {
               cd[off] = 217;
@@ -2026,9 +2252,9 @@
               cd[off + 2] = 239;
               cd[off + 3] = Math.round(210 * errAlpha);
             } else {
-              cd[off] = 239;
-              cd[off + 1] = 68;
-              cd[off + 2] = 68;
+              cd[off] = 200;
+              cd[off + 1] = 30;
+              cd[off + 2] = 30;
               cd[off + 3] = Math.round(215 * errAlpha);
             }
           }
@@ -2060,31 +2286,31 @@
       const nPx = w * h;
       for (let i = 0; i < nPx; i++) {
         const off = i * 4;
-        const gray = (0.299 * rawPixels[off] + 0.587 * rawPixels[off + 1] + 0.114 * rawPixels[off + 2]) * 0.85;
+        const gray = (0.299 * rawPixels[off] + 0.587 * rawPixels[off + 1] + 0.114 * rawPixels[off + 2]) * 0.88;
         let rr = gray, gg = gray, bb = gray;
         const pC = predIndexBuf[i] === cls;
         if (pC) nPred++;
 
-        if (gtIndexBuf) {
+        if (gtIndexBuf && activeWorkstationTab !== "clinical") {
           const gVal = gtIndexBuf[i];
           if (gVal <= 4) {
             nValid++;
             const gC = gVal === cls;
             if (pC && gC) {
               nTp++;
-              rr = (1 - alpha) * gray + alpha * 16;
-              gg = (1 - alpha) * gray + alpha * 185;
-              bb = (1 - alpha) * gray + alpha * 129;
+              rr = (1 - alpha) * gray + alpha * 0;
+              gg = (1 - alpha) * gray + alpha * 149;
+              bb = (1 - alpha) * gray + alpha * 126;
             } else if (pC && !gC) {
               nFp++;
-              rr = (1 - alpha) * gray + alpha * 239;
-              gg = (1 - alpha) * gray + alpha * 68;
-              bb = (1 - alpha) * gray + alpha * 68;
+              rr = (1 - alpha) * gray + alpha * 200;
+              gg = (1 - alpha) * gray + alpha * 30;
+              bb = (1 - alpha) * gray + alpha * 30;
             } else if (!pC && gC) {
               nFn++;
-              rr = (1 - alpha) * gray + alpha * 245;
-              gg = (1 - alpha) * gray + alpha * 158;
-              bb = (1 - alpha) * gray + alpha * 11;
+              rr = (1 - alpha) * gray + alpha * 234;
+              gg = (1 - alpha) * gray + alpha * 179;
+              bb = (1 - alpha) * gray + alpha * 8;
             }
           }
         } else if (pC) {
@@ -2102,20 +2328,84 @@
 
       const statEl = document.getElementById("spotlightStatText");
       if (statEl) {
-        if (gtIndexBuf && nValid > 0) {
+        if (gtIndexBuf && nValid > 0 && activeWorkstationTab !== "clinical") {
           const union = nTp + nFp + nFn;
           const iou = union > 0 ? (nTp / union * 100.0) : 100.0;
           const prec = (nTp + nFp) > 0 ? (nTp / (nTp + nFp) * 100.0) : 0.0;
           const rec = (nTp + nFn) > 0 ? (nTp / (nTp + nFn) * 100.0) : 0.0;
-          statEl.innerText = `Spotlight ${CLASS_NAMES[cls]} -> IoU: ${iou.toFixed(1)}% | Prec: ${prec.toFixed(1)}% | Rec: ${rec.toFixed(1)}% (TP:${nTp} FP:${nFp} FN:${nFn} px)`;
+          statEl.innerText = `Soi lớp ${CLASS_NAMES[cls]} -> IoU: ${iou.toFixed(1)}% | Prec: ${prec.toFixed(1)}% | Rec: ${rec.toFixed(1)}% (TP:${nTp} FP:${nFp} FN:${nFn})`;
         } else {
           const pct = nPx > 0 ? (nPred / nPx * 100.0) : 0.0;
-          statEl.innerText = `Spotlight ${CLASS_NAMES[cls]} -> Predicted Coverage: ${pct.toFixed(1)}% (${nPred} px)`;
+          statEl.innerText = `Soi lớp ${CLASS_NAMES[cls]} -> Tỷ lệ phủ dự đoán: ${pct.toFixed(1)}% (${nPred} px)`;
         }
       }
     }
 
+    function renderQuad4PanelIntoCanvas(targetCanvas) {
+      const cellSize = 336;
+      const hdrH = 30;
+      const pad = 12;
+      const gap = 12;
+      const totalW = pad * 2 + cellSize * 2 + gap;
+      const totalH = pad * 2 + (cellSize + hdrH) * 2 + gap;
+      targetCanvas.width = totalW;
+      targetCanvas.height = totalH;
+      const ctx = targetCanvas.getContext("2d");
+
+      ctx.fillStyle = "#F4FAFA";
+      ctx.fillRect(0, 0, totalW, totalH);
+
+      const vm = lastResult && lastResult.verification_metrics;
+      const methodTxt = (lastResult && lastResult.method_used) ? lastResult.method_used.toUpperCase() : "AI";
+      const matchStr = vm
+        ? `4. Chồng lớp Đúng/Sai (${vm.exact_match_pct.toFixed(1)}% Khớp | ${(vm.boundary_margin_pct || 0).toFixed(1)}% Biên | ${vm.core_error_pct.toFixed(1)}% Lỗi)`
+        : "4. Chồng lớp Đúng / Sai (Không có GT)";
+
+      const cRaw = document.createElement("canvas");
+      const cGt = document.createElement("canvas");
+      const cAi = document.createElement("canvas");
+      const cErr = document.createElement("canvas");
+      renderModeToCanvas("raw", cRaw);
+      renderModeToCanvas("gt", cGt);
+      renderModeToCanvas("overlay", cAi);
+      renderModeToCanvas(serverImageCache.has("agreement") ? "agreement" : "overlay", cErr);
+
+      const cells = [
+        { x: pad, y: pad, title: "1. Ảnh gốc mô bệnh học H&E (40x, 0.25 MPP)", src: cRaw },
+        { x: pad + cellSize + gap, y: pad, title: "2. Đáp án Bác sĩ (Pathologist GT)", src: cGt },
+        { x: pad, y: pad + cellSize + hdrH + gap, title: `3. Mô hình AI dự đoán (${methodTxt})`, src: cAi },
+        { x: pad + cellSize + gap, y: pad + cellSize + hdrH + gap, title: matchStr, src: cErr },
+      ];
+
+      for (const cell of cells) {
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(cell.x, cell.y, cellSize, cellSize + hdrH);
+        ctx.fillStyle = "#E6F4F1";
+        ctx.fillRect(cell.x, cell.y, cellSize, hdrH);
+        ctx.strokeStyle = "#9AC7C2";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(cell.x, cell.y, cellSize, cellSize + hdrH);
+        ctx.beginPath();
+        ctx.moveTo(cell.x, cell.y + hdrH);
+        ctx.lineTo(cell.x + cellSize, cell.y + hdrH);
+        ctx.stroke();
+
+        ctx.fillStyle = "#14313A";
+        ctx.font = "700 11.5px Segoe UI, sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(cell.title, cell.x + 8, cell.y + hdrH / 2 + 0.5, cellSize - 16);
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(cell.src, cell.x, cell.y + hdrH, cellSize, cellSize);
+      }
+    }
+
     function renderModeToCanvas(mode, targetCanvas) {
+      if (mode === "quad_4panel") {
+        renderQuad4PanelIntoCanvas(targetCanvas);
+        return;
+      }
       const w = viewState.imgW;
       const h = viewState.imgH;
       targetCanvas.width = w;
@@ -2166,16 +2456,16 @@
           if (rawImgCanvas) ctx.drawImage(rawImgCanvas, 0, 0, w, h);
           ctx.drawImage(gtImg, 0, 0, w, h);
         } else {
-          ctx.fillStyle = "#11192b";
+          ctx.fillStyle = "#F4FAFA";
           ctx.fillRect(0, 0, w, h);
-          ctx.strokeStyle = "#334155";
+          ctx.strokeStyle = "#9AC7C2";
           ctx.lineWidth = 2;
           ctx.strokeRect(4, 4, Math.max(1, w - 8), Math.max(1, h - 8));
-          ctx.fillStyle = "#94a3b8";
+          ctx.fillStyle = "#36565E";
           ctx.font = "bold 12px sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText("No Reference GT Provided", w / 2, h / 2);
+          ctx.fillText("Không có mặt nạ GT đối chiếu", w / 2, h / 2);
         }
         return;
       }
@@ -2190,7 +2480,7 @@
       }
     }
 
-    function drawCanvasWithViewState(canvasEl, sourceCanvas) {
+    function drawCanvasWithViewState(canvasEl, sourceCanvas, fitSourceDirect = false) {
       const parent = canvasEl.parentElement;
       if (!parent) return;
       const cw = parent.clientWidth || 600;
@@ -2204,37 +2494,62 @@
       if (!sourceCanvas || sourceCanvas.width === 0) return;
 
       ctx.save();
-      ctx.imageSmoothingEnabled = viewState.scale < 2.0;
-      ctx.drawImage(
-        sourceCanvas,
-        viewState.panX,
-        viewState.panY,
-        viewState.imgW * viewState.scale,
-        viewState.imgH * viewState.scale
-      );
+      if (fitSourceDirect) {
+        const sw = sourceCanvas.width;
+        const sh = sourceCanvas.height;
+        const fitS = Math.min((cw - 20) / sw, (ch - 56) / sh);
+        const dw = sw * fitS;
+        const dh = sh * fitS;
+        const dx = (cw - dw) / 2.0;
+        const dy = Math.max(8, (ch - dh - 28) / 2.0);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(sourceCanvas, dx, dy, dw, dh);
+      } else {
+        ctx.imageSmoothingEnabled = viewState.scale < 2.0;
+        ctx.drawImage(
+          sourceCanvas,
+          viewState.panX,
+          viewState.panY,
+          viewState.imgW * viewState.scale,
+          viewState.imgH * viewState.scale
+        );
+      }
       ctx.restore();
     }
 
+    function isQuadOverviewActive() {
+      return !splitCurtainMode && activeViewMode === "quad_4panel" && activeWorkstationTab === "patch";
+    }
+
     function renderStageAndSplit() {
+      const isQuad = isQuadOverviewActive();
       const stageCanvas = document.getElementById("stageCanvas");
       if (stageCanvas) {
-        drawCanvasWithViewState(stageCanvas, compositeCanvas);
+        drawCanvasWithViewState(stageCanvas, compositeCanvas, isQuad);
+      }
+      const scaleHud = document.getElementById("scaleBarHud");
+      if (scaleHud) {
+        scaleHud.style.display = isQuad ? "none" : "flex";
+      }
+      const zoomTb = document.querySelector(".zoom-toolbar");
+      if (zoomTb) {
+        zoomTb.style.display = isQuad ? "none" : "flex";
       }
       if (splitCurtainMode) {
         const leftCanvas = document.getElementById("splitLeftCanvas");
         const rightCanvas = document.getElementById("splitRightCanvas");
         if (!rawImgCanvas && compositeCanvas.width === 0) {
+          splitLeftSourceCanvas.width = 0;
+          splitRightSourceCanvas.width = 0;
           drawCanvasWithViewState(leftCanvas, null);
           drawCanvasWithViewState(rightCanvas, null);
         } else {
           const leftMode = document.getElementById("splitLeftSelect").value;
           const rightMode = document.getElementById("splitRightSelect").value;
-          const lcBuf = document.createElement("canvas");
-          const rcBuf = document.createElement("canvas");
-          renderModeToCanvas(leftMode, lcBuf);
-          renderModeToCanvas(rightMode, rcBuf);
-          drawCanvasWithViewState(leftCanvas, lcBuf);
-          drawCanvasWithViewState(rightCanvas, rcBuf);
+          renderModeToCanvas(leftMode, splitLeftSourceCanvas);
+          renderModeToCanvas(rightMode, splitRightSourceCanvas);
+          drawCanvasWithViewState(leftCanvas, splitLeftSourceCanvas);
+          drawCanvasWithViewState(rightCanvas, splitRightSourceCanvas);
         }
         document.getElementById("splitLeftLabel").innerText =
           document.getElementById("splitLeftSelect").selectedOptions[0].textContent;
@@ -2263,7 +2578,7 @@
       document.getElementById("resLabel").innerText = result.mask_shape[1] + " x " + result.mask_shape[0];
       document.getElementById("latencyLabel").innerText = (result.latency_ms || 0).toFixed(0) + " ms";
       document.getElementById("methodBadgeFooter").innerText =
-        "Method: " + (result.method_used || "-") + (result.checkpoint_verified ? " [Verified Checkpoint]" : " [Fallback]");
+        "Mô hình: " + (result.method_used || "-") + (result.checkpoint_verified ? " [Trọng số xác thực]" : " [Dự phòng]");
 
       document.getElementById("valVTP").innerText = result.biomarkers.viable_tumor_percentage.toFixed(1) + "%";
       document.getElementById("valTSR").innerText = result.biomarkers.tumor_stroma_ratio.toFixed(1) + "%";
@@ -2280,69 +2595,87 @@
       const tsr = result.biomarkers.tumor_stroma_ratio;
       const assessEl = document.getElementById("biomarkerAssessment");
       if (dist["BACK"] > 95.0) {
-        assessEl.innerText = "Negative Control: Pure unstained glass confirmed by Otsu Guard.";
+        assessEl.innerText = "Mẫu đối chứng âm: Kính trắng quang học sạch được xác nhận bởi Otsu Guard.";
       } else if ((dist["TUM"] + dist["STR"]) <= 5.0) {
-        assessEl.innerText = "Non-Tumor/Non-Stroma Dominant Tissue (Insufficient TUM+STR <= 5% for CAP TSR).";
+        assessEl.innerText = "Mô không ưu thế TUM/STR (tổng TUM+STR <= 5%, chưa đủ ngưỡng đánh giá CAP TSR).";
       } else if (tsr <= 50.0) {
-        assessEl.innerText = "CAP Stroma-Rich Phenotype (TSR <= 50%): High-Risk Profile | VTP = " + vtp.toFixed(1) + "%.";
+        assessEl.innerText = "Kiểu hình giàu mô đệm CAP (TSR <= 50%): Nhóm nguy cơ cao (Mesker/UNITED) | VTP = " + vtp.toFixed(1) + "%.";
       } else {
-        assessEl.innerText = "Stroma-Poor Phenotype (TSR > 50%): Standard Risk | TSR = " + tsr.toFixed(1) + "%.";
+        assessEl.innerText = "Kiểu hình ít mô đệm (TSR > 50%): Nhóm nguy cơ tiêu chuẩn | TSR = " + tsr.toFixed(1) + "%.";
       }
 
       if (result.spotlight_stats) {
         const ss = result.spotlight_stats;
-        document.getElementById("spotlightStatText").innerText = ss.iou_pct !== undefined
-          ? (`Spotlight ${ss.class_name} -> IoU: ${ss.iou_pct.toFixed(1)}% | Prec: ${ss.precision_pct.toFixed(1)}% | Rec: ${ss.recall_pct.toFixed(1)}%`)
-          : (`Spotlight ${ss.class_name} -> Predicted Coverage: ${ss.pred_pct.toFixed(1)}%`);
+        const clsPct = dist[ss.class_name] !== undefined ? Number(dist[ss.class_name]) : Number(ss.pred_pct || 0);
+        document.getElementById("spotlightStatText").innerText = (ss.iou_pct !== undefined && activeWorkstationTab !== "clinical")
+          ? (`Soi lớp ${ss.class_name} -> IoU: ${ss.iou_pct.toFixed(1)}% | Prec: ${ss.precision_pct.toFixed(1)}% | Rec: ${ss.recall_pct.toFixed(1)}%`)
+          : (`Soi lớp ${ss.class_name} -> Tỷ lệ phủ dự đoán: ${clsPct.toFixed(1)}%`);
       }
 
       const vm = result.verification_metrics;
       const gtTag = document.getElementById("gtStatusTag");
       if (vm) {
-        gtTag.innerText = "GT Verified";
+        const matchPct = Number(vm.exact_match_pct || 0);
+        const marginPct = vm.boundary_margin_pct !== undefined
+          ? Number(vm.boundary_margin_pct)
+          : Math.max(0, 100.0 - matchPct - Number(vm.core_error_pct || 0));
+        const corePct = Number(vm.core_error_pct || 0);
+
+        gtTag.innerText = "GT Xác thực";
         gtTag.style.color = "var(--match-green)";
-        document.getElementById("qaExactMatch").innerText = vm.exact_match_pct.toFixed(1) + "%";
-        document.getElementById("qaCoreErr").innerText = vm.core_error_pct.toFixed(1) + "%";
+        document.getElementById("qaExactMatch").innerText = matchPct.toFixed(1) + "%";
+        document.getElementById("qaMarginShift").innerText = marginPct.toFixed(1) + "%";
+        document.getElementById("qaCoreErr").innerText = corePct.toFixed(1) + "%";
         document.getElementById("qaMIoU").innerText = vm.miou_4cls.toFixed(1) + "%";
         document.getElementById("qaBF1").innerText = vm.boundary_f1.toFixed(1) + "%";
+
+        document.getElementById("barExactMatch").style.width = Math.max(0, Math.min(100, matchPct)) + "%";
+        document.getElementById("barMarginShift").style.width = Math.max(0, Math.min(100, marginPct)) + "%";
+        document.getElementById("barCoreErr").style.width = Math.max(0, Math.min(100, corePct)) + "%";
 
         const penVal = vm.miou_penalized_4cls !== undefined ? vm.miou_penalized_4cls : vm.miou_4cls;
         document.getElementById("qaMIoUPenSub").innerText = "Penalized: " + penVal.toFixed(1) + "%";
         document.getElementById("qaDiceSub").innerText = "mDice: " + (vm.mdice_4cls || 0).toFixed(1) + "%";
-        document.getElementById("qaPxSummary").innerText = `TP ${vm.tp_px || 0} / ${vm.valid_tissue_px || 0} fg px`;
-        document.getElementById("qaErrBreakdown").innerText = `FP:${vm.fp_glass_px || 0} FN:${vm.fn_missed_px || 0} Mis:${vm.misclass_px || 0}`;
+        document.getElementById("qaPxSummary").innerText = `TP ${vm.tp_px || 0} / ${vm.valid_tissue_px || 0}`;
+        document.getElementById("qaMarginPxSub").innerText = `${vm.margin_err_px || 0} px biên`;
+        document.getElementById("qaErrBreakdown").innerText = `FP:${vm.fp_glass_px || 0} FN:${vm.fn_missed_px || 0} M:${vm.misclass_px || 0}`;
 
         if (vm.top_confusions && vm.top_confusions.length > 0) {
           document.getElementById("topConfusionsList").innerHTML =
-            "<strong>Top Errors (GT -&gt; AI):</strong> " +
+            "<strong>Nhầm lẫn chính (GT -&gt; AI):</strong> " +
             vm.top_confusions.map(c => `${c.gt_class} -&gt; ${c.pred_class} (${c.pct_of_patch}%)`).join(" | ");
         } else {
-          document.getElementById("topConfusionsList").innerText = "Zero core class confusions detected.";
+          document.getElementById("topConfusionsList").innerText = "Không phát hiện nhầm lẫn lõi nghiêm trọng.";
         }
       } else {
-        gtTag.innerText = "No GT Mask";
+        gtTag.innerText = "Không có GT";
         gtTag.style.color = "var(--margin-amber)";
         document.getElementById("qaExactMatch").innerText = "-";
+        document.getElementById("qaMarginShift").innerText = "-";
         document.getElementById("qaCoreErr").innerText = "-";
         document.getElementById("qaMIoU").innerText = "-";
         document.getElementById("qaBF1").innerText = "-";
+        document.getElementById("barExactMatch").style.width = "0%";
+        document.getElementById("barMarginShift").style.width = "0%";
+        document.getElementById("barCoreErr").style.width = "0%";
         document.getElementById("qaMIoUPenSub").innerText = "Penalized: -";
         document.getElementById("qaDiceSub").innerText = "mDice: -";
-        document.getElementById("qaPxSummary").innerText = "No GT reference";
+        document.getElementById("qaPxSummary").innerText = "Chưa có GT";
+        document.getElementById("qaMarginPxSub").innerText = "-";
         document.getElementById("qaErrBreakdown").innerText = "-";
         document.getElementById("topConfusionsList").innerText =
-          "Mean Shannon Entropy: " + (result.mean_entropy || 0).toFixed(3) + " (Upload or select sample GT for error map).";
+          "Shannon Entropy trung bình: " + (result.mean_entropy || 0).toFixed(3) + " (Nạp mặt nạ GT nếu muốn đối chiếu đúng/sai).";
       }
 
       const gtBio = result.gt_biomarkers || (lastSampleMeta && lastSampleMeta.gt_biomarkers);
-      if (gtBio) {
+      if (gtBio && activeWorkstationTab !== "clinical") {
         document.getElementById("gtRefVTP").innerText =
-          "GT Reference VTP: " + gtBio.viable_tumor_percentage.toFixed(1) + "%";
+          "Đối chiếu GT VTP: " + gtBio.viable_tumor_percentage.toFixed(1) + "%";
         document.getElementById("gtRefTSR").innerText =
-          "GT Reference TSR: " + gtBio.tumor_stroma_ratio.toFixed(1) + "%";
+          "Đối chiếu GT TSR: " + gtBio.tumor_stroma_ratio.toFixed(1) + "%";
       } else {
-        document.getElementById("gtRefVTP").innerText = "N_tumor / N_tissue * 100%";
-        document.getElementById("gtRefTSR").innerText = "N_tumor / (N_tumor + N_stroma) * 100%";
+        document.getElementById("gtRefVTP").innerText = "Công thức: N_TUM / N_mô * 100%";
+        document.getElementById("gtRefTSR").innerText = "Công thức: N_TUM / (N_TUM + N_STR) * 100%";
       }
     }
 
@@ -2380,9 +2713,9 @@
       compositeCanvas.height = 0;
       renderStageAndSplit();
       const slideLbl = document.getElementById("slideNameLabel");
-      if (slideLbl) slideLbl.innerText = "No Tissue Patch Loaded";
+      if (slideLbl) slideLbl.innerText = "Chưa nạp ảnh mô";
       const footer = document.getElementById("methodBadgeFooter");
-      if (footer) footer.innerText = "Method: - (Awaiting Real Tissue Patch)";
+      if (footer) footer.innerText = "Mô hình: - (Đang chờ ảnh H&E)";
       const hud = document.getElementById("pixelInspectorHUD");
       if (hud) hud.innerText = message;
       setEmptyCohortBanner(true, message);
@@ -2405,9 +2738,10 @@
       } else {
         const opt = document.createElement("option");
         opt.value = "";
-        opt.textContent = "No matching cohort cases";
+        opt.textContent = "Không tìm thấy ca bệnh phù hợp";
         select.appendChild(opt);
       }
+      syncSelectTooltip("sampleSelect");
     }
 
     async function loadCohortSamples(patientFilter = "", morphFilter = "") {
@@ -2417,7 +2751,7 @@
         if (morphFilter) params.set("morphology", morphFilter);
         const qs = params.toString();
         const res = await fetch("/api/v1/samples" + (qs ? ("?" + qs) : ""));
-        if (!res.ok) throw new Error("Samples API failed");
+        if (!res.ok) throw new Error("Lỗi tải API danh sách ca bệnh");
         const data = await res.json();
         if (!patientFilter && !morphFilter) {
           allCohortSamples = data.samples || [];
@@ -2433,7 +2767,7 @@
           );
           renderCohortSelect(filtered);
         } else {
-          showToast("Could not load cohort samples: " + err.message, "error");
+          showToast("Không thể tải danh sách ca bệnh: " + err.message, "error");
         }
       }
     }
@@ -2442,10 +2776,10 @@
       const badge = document.getElementById("activeSourceBadge");
       if (!badge) return;
       badge.classList.toggle("custom", isCustom);
-      badge.innerText = isCustom ? "Source: Custom Upload" : "Source: Cohort Sample";
+      badge.innerText = isCustom ? "Nguồn: Ảnh tải lên" : "Nguồn: Mẫu đoàn hệ";
     }
 
-    function setStageLoading(active, label = "Running WSSS Inference...") {
+    function setStageLoading(active, label = "Đang suy luận phân vùng mô bệnh học...") {
       const ov = document.getElementById("stageLoadingOverlay");
       const txt = document.getElementById("loadingStageText");
       if (txt) txt.innerText = label;
@@ -2472,8 +2806,8 @@
 
       const runBtn = document.getElementById("btnRunInference");
       runBtn.disabled = true;
-      runBtn.innerText = "Running Inference...";
-      setStageLoading(true, "Running Multi-Scale WSSS Inference...");
+      runBtn.innerText = "Đang phân tích AI...";
+      setStageLoading(true, "Đang chạy mô hình phân vùng WSSS...");
 
       try {
         const fileInput = document.getElementById("patchUpload");
@@ -2514,7 +2848,7 @@
           nextSampleMeta = null;
           sourceTag = "upload:" + fileInput.files[0].name;
           nextSlideTitle = fileInput.files[0].name;
-          if (gtInput.files.length > 0) {
+          if (activeWorkstationTab !== "clinical" && gtInput.files.length > 0) {
             const gtB64 = await readFileAsDataURL(gtInput.files[0]);
             if (isStale()) return;
             payload.gt_mask_base64 = gtB64;
@@ -2534,7 +2868,7 @@
           }
           payload.sample_id = sampleId;
         } else {
-          const emptyMsg = "No real cohort samples available. Upload an H&E tissue patch or check the dataset directory.";
+          const emptyMsg = "Chưa có mẫu bệnh nhân cục bộ. Hãy tải ảnh H&E hoặc kiểm tra thư mục dữ liệu.";
           clearStageForEmptyCohort(emptyMsg);
           syncSourceBadge(false);
           showToast(emptyMsg, "info");
@@ -2569,7 +2903,10 @@
         if (nextSlideTitle !== null) {
           document.getElementById("slideNameLabel").innerText = nextSlideTitle;
         }
-        if (!lastResult.agreement_overlay_base64 && (activeViewMode === "agreement" || activeViewMode === "blurred_dual")) {
+        if (activeWorkstationTab === "clinical") {
+          const gtOnlyModes = new Set(["quad_4panel", "agreement", "blurred_dual", "dual_blend", "gt"]);
+          if (gtOnlyModes.has(activeViewMode)) setActiveModePill("overlay");
+        } else if (!lastResult.agreement_overlay_base64 && (activeViewMode === "agreement" || activeViewMode === "blurred_dual" || activeViewMode === "quad_4panel")) {
           setActiveModePill("overlay");
         }
 
@@ -2584,13 +2921,13 @@
       } catch (err) {
         if ((err && err.name === "AbortError") || signal.aborted || activeInferenceCtrl !== myCtrl || activeWorkstationTab === "wsi") return;
         console.error("Inference failed:", err);
-        showToast("Inference error: " + err.message, "error");
+        showToast("Lỗi suy luận AI: " + err.message, "error");
       } finally {
         if (activeInferenceCtrl === myCtrl) {
           activeInferenceCtrl = null;
           setStageLoading(false);
           runBtn.disabled = false;
-          runBtn.innerText = "Run WSSS Analysis";
+          runBtn.innerText = "Phân Tích Phân Vùng AI";
         }
       }
     }
@@ -2603,9 +2940,9 @@
       if (data.gt_color_base64) {
         grid.innerHTML += `
           <div class="compare-card">
-            <div class="compare-title">Pathologist Reference (GT)</div>
+            <div class="compare-title">Đáp Án Bác Sĩ (GT)</div>
             <img src="${data.gt_color_base64}" alt="Doctor GT">
-            <div class="compare-metrics">Hand-annotated multi-class Ground Truth</div>
+            <div class="compare-metrics">Mặt nạ giải phẫu bệnh chuẩn do chuyên gia gán nhãn</div>
           </div>
         `;
       }
@@ -2619,9 +2956,12 @@
         else if (viewType === "entropy") imgSrc = item.entropy_overlay_base64 || imgSrc;
         else if (viewType === "cam") imgSrc = item.cam_overlay_base64 || item.entropy_overlay_base64 || imgSrc;
 
+        const marginPct = vm
+          ? (vm.boundary_margin_pct !== undefined ? vm.boundary_margin_pct : Math.max(0, 100 - vm.exact_match_pct - vm.core_error_pct))
+          : 0;
         const statsHtml = vm
-          ? `mIoU: <strong>${vm.miou_4cls.toFixed(1)}%</strong> (Pen: ${vm.miou_penalized_4cls !== undefined ? vm.miou_penalized_4cls.toFixed(1) : vm.miou_4cls.toFixed(1)}%)<br>Exact Match: <span class="val-green">${vm.exact_match_pct.toFixed(1)}%</span> | Core Err: <span class="val-red">${vm.core_error_pct.toFixed(1)}%</span><br>BF1: ${vm.boundary_f1.toFixed(1)}% | Latency: ${item.latency_ms.toFixed(0)} ms`
-          : `VTP: ${item.biomarkers.viable_tumor_percentage}% | TSR: ${item.biomarkers.tumor_stroma_ratio}%<br>Entropy: ${item.mean_entropy.toFixed(3)} | Latency: ${item.latency_ms.toFixed(0)} ms`;
+          ? `mIoU: <strong>${vm.miou_4cls.toFixed(1)}%</strong> (Pen: ${vm.miou_penalized_4cls !== undefined ? vm.miou_penalized_4cls.toFixed(1) : vm.miou_4cls.toFixed(1)}%)<br>Khớp: <span class="val-green">${vm.exact_match_pct.toFixed(1)}%</span> | Biên: <span class="val-amber">${marginPct.toFixed(1)}%</span> | Lỗi: <span class="val-red">${vm.core_error_pct.toFixed(1)}%</span><br>BF1: ${vm.boundary_f1.toFixed(1)}% | Trễ: ${item.latency_ms.toFixed(0)} ms`
+          : `VTP: ${item.biomarkers.viable_tumor_percentage}% | TSR: ${item.biomarkers.tumor_stroma_ratio}%<br>Entropy: ${item.mean_entropy.toFixed(3)} | Trễ: ${item.latency_ms.toFixed(0)} ms`;
 
         grid.innerHTML += `
           <div class="compare-card">
@@ -2642,11 +2982,11 @@
       const allChecked = Array.from(document.querySelectorAll("#compareMethodChecks input:checked"))
         .map(el => el.value);
       if (allChecked.length > 6) {
-        showToast("Maximum 6 methods can be compared side-by-side; comparing the first 6 selected.", "warn");
+        showToast("So sánh tối đa 6 mô hình cùng lúc; đang chạy 6 mô hình đầu tiên.", "warn");
       }
       const checked = allChecked.slice(0, 6);
-      const methods = checked.length > 0 ? checked : ["m1", "m6", "sg_dap", "combined"];
-      grid.innerHTML = "<div style='color:var(--text-secondary);'>Running multi-method comparison (" + methods.join(", ") + ")...</div>";
+      const methods = checked.length > 0 ? checked : ["m6", "gate7_arm5", "gate7_4arm_cgm"];
+      grid.innerHTML = "<div style='color:var(--text-secondary);'>Đang chạy so sánh song song (" + methods.join(", ") + ")...</div>";
 
       try {
         const fileInput = document.getElementById("patchUpload");
@@ -2672,13 +3012,13 @@
         } else if (sampleId) {
           payload.sample_id = sampleId;
         } else {
-          const emptyMsg = "No real tissue patch loaded. Select a cohort sample or upload an H&E patch first.";
+          const emptyMsg = "Chưa nạp lát cắt mô bệnh học để so sánh.";
           grid.innerHTML = "";
           const infoDiv = document.createElement("div");
           infoDiv.style.color = "var(--text-secondary)";
           infoDiv.textContent = emptyMsg;
           grid.appendChild(infoDiv);
-          sub.innerText = "Awaiting real tissue patch";
+          sub.innerText = "Đang chờ ảnh mô bệnh học";
           showToast(emptyMsg, "info");
           return;
         }
@@ -2690,15 +3030,15 @@
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
         activeCompareData = await res.json();
-        sub.innerText = "Patient / Slide: " + document.getElementById("slideNameLabel").innerText;
+        sub.innerText = "Bệnh nhân / Tiêu bản: " + document.getElementById("slideNameLabel").innerText;
         renderCompareCards(activeCompareData);
       } catch (err) {
         grid.innerHTML = "";
         const errDiv = document.createElement("div");
         errDiv.style.color = "var(--error-red)";
-        errDiv.textContent = "Comparison failed: " + (err && err.message ? err.message : String(err));
+        errDiv.textContent = "So sánh thất bại: " + (err && err.message ? err.message : String(err));
         grid.appendChild(errDiv);
-        showToast("Comparison failed: " + (err && err.message ? err.message : String(err)), "error");
+        showToast("So sánh thất bại: " + (err && err.message ? err.message : String(err)), "error");
       }
     }
 
@@ -2722,17 +3062,17 @@
         };
         if (fileInput.files.length > 0) {
           payload.image_base64 = lastCustomPatchB64 || await readFileAsDataURL(fileInput.files[0]);
-          if (gtInput.files.length > 0) {
+          if (activeWorkstationTab !== "clinical" && gtInput.files.length > 0) {
             payload.gt_mask_base64 = lastCustomGtB64 || await readFileAsDataURL(gtInput.files[0]);
           }
         } else if (sampleId) {
           payload.sample_id = sampleId;
         } else {
-          showToast("No tissue patch loaded. Select a cohort sample or upload an H&E patch before exporting.", "error");
+          showToast("Chưa nạp lát cắt mô để xuất báo cáo.", "error");
           return;
         }
 
-        showToast("Generating " + fmt.toUpperCase() + " diagnostic report...", "info");
+        showToast("Đang khởi tạo báo cáo " + fmt.toUpperCase() + "...", "info");
         const res = await fetch("/api/v1/export/report", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2753,9 +3093,9 @@
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-        showToast("Downloaded " + a.download, "success");
+        showToast("Đã tải xuống " + a.download, "success");
       } catch (err) {
-        showToast("Export failed: " + err.message, "error");
+        showToast("Xuất báo cáo thất bại: " + err.message, "error");
       }
     }
 
@@ -2767,7 +3107,7 @@
       const runPatchBtn = document.getElementById("btnRunInference");
       if (runPatchBtn) {
         runPatchBtn.disabled = false;
-        runPatchBtn.innerText = "Run WSSS Analysis";
+        runPatchBtn.innerText = "Phân Tích Phân Vùng AI";
       }
       if (activeWsiCtrl) {
         activeWsiCtrl.abort();
@@ -2775,7 +3115,7 @@
       }
       const input = document.getElementById("wsiTilesInput");
       if (!input || input.files.length === 0) {
-        showToast("Please select one or more WSI tile images first.", "error");
+        showToast("Vui lòng chọn ít nhất một ảnh lát cắt WSI trước khi ghép.", "error");
         return;
       }
       const myWsiCtrl = new AbortController();
@@ -2796,12 +3136,12 @@
       const userRows = rowsInputEl ? Math.max(0, parseInt(rowsInputEl.value || "0", 10)) : 0;
       const cols = Math.max(1, parseInt(document.getElementById("wsiColsInput").value || "2", 10));
       const overlap = Math.max(0, parseInt(document.getElementById("wsiOverlapInput").value || "0", 10));
-      const mode = document.getElementById("wsiMethodSelect").value || "m6";
+      const mode = document.getElementById("wsiMethodSelect").value || "gate7_arm5";
 
       const btn = document.getElementById("btnRunWSI");
       btn.disabled = true;
-      btn.innerText = "Stitching WSI...";
-      setStageLoading(true, `Stitching & analyzing ${files.length} WSI tiles...`);
+      btn.innerText = "Đang ghép WSI...";
+      setStageLoading(true, `Đang ghép và phân tích ${files.length} lát cắt WSI...`);
 
       try {
         const tilesPayload = [];
@@ -2877,6 +3217,7 @@
           }
         }
 
+        const tWsi0 = performance.now();
         const res = await fetch("/api/v1/predict/wsi", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2894,6 +3235,12 @@
           throw new Error(errData.detail || ("HTTP " + res.status));
         }
         const wsi = await res.json();
+        const wsiElapsedMs =
+          typeof wsi.inference_time_ms === "number"
+            ? wsi.inference_time_ms
+            : typeof wsi.latency_ms === "number"
+              ? wsi.latency_ms
+              : Math.max(1, performance.now() - tWsi0);
         if (activeWsiCtrl !== myWsiCtrl || wsiSignal.aborted || activeWorkstationTab !== "wsi") return;
         const compUrl = wsi.composite_heatmap_base64 || wsi.composite_overlay_base64 || wsi.composite_mask_base64;
         const compImg = await loadImageElement(compUrl);
@@ -2922,34 +3269,95 @@
         setEmptyCohortBanner(false);
 
         lastLoadedImageKey = "wsi:" + wsi.slide_id + ":" + viewState.imgW + "x" + viewState.imgH;
+        setActiveModePill("overlay");
+        updateActiveModeLegend("overlay");
         fitToViewport();
         renderStageAndSplit();
 
+        const rs = wsi.region_summary || {};
+        const wsiMethod = rs.method_used || wsi.method || mode || "gate7_arm5";
+        const wsiDist = wsi.class_distribution || {};
+        const wsiVtp = Number(wsi.biomarkers?.viable_tumor_percentage || 0);
+        const wsiTsr = Number(wsi.biomarkers?.tumor_stroma_ratio || 0);
+
         document.getElementById("slideNameLabel").innerText = wsi.slide_id;
         document.getElementById("resLabel").innerText = viewState.imgW + " x " + viewState.imgH;
-        document.getElementById("valVTP").innerText = wsi.biomarkers.viable_tumor_percentage.toFixed(1) + "%";
-        document.getElementById("valTSR").innerText = wsi.biomarkers.tumor_stroma_ratio.toFixed(1) + "%";
-        for (const [cls, pct] of Object.entries(wsi.class_distribution || {})) {
+        document.getElementById("latencyLabel").innerText = Math.round(wsiElapsedMs) + " ms";
+        document.getElementById("methodBadgeFooter").innerText =
+          "Mô hình: " + wsiMethod + " [Trọng số xác thực]";
+        document.getElementById("valVTP").innerText = wsiVtp.toFixed(1) + "%";
+        document.getElementById("valTSR").innerText = wsiTsr.toFixed(1) + "%";
+        document.getElementById("gtRefVTP").innerText = "Công thức: N_TUM / N_mô * 100% (Toàn vùng WSI)";
+        document.getElementById("gtRefTSR").innerText = "Công thức: N_TUM / (N_TUM + N_STR) * 100% (Toàn vùng WSI)";
+
+        for (const [cls, pct] of Object.entries(wsiDist)) {
           const pctEl = document.getElementById("pct-" + cls);
           const barEl = document.getElementById("bar-" + cls);
           if (pctEl) pctEl.innerText = pct.toFixed(1) + "%";
           if (barEl) barEl.style.width = pct + "%";
         }
-        const rs = wsi.region_summary || {};
+
+        const assessEl = document.getElementById("biomarkerAssessment");
+        if (wsi.biomarkers && wsi.biomarkers.clinical_assessment) {
+          assessEl.innerText = wsi.biomarkers.clinical_assessment;
+        } else if ((wsiDist["BACK"] || 0) > 95.0) {
+          assessEl.innerText = "Mẫu đối chứng âm: Kính trắng quang học sạch (Otsu Guard).";
+        } else if (((wsiDist["TUM"] || 0) + (wsiDist["STR"] || 0)) <= 5.0) {
+          assessEl.innerText = "Mô không ưu thế TUM/STR (TUM+STR <= 5%).";
+        } else if (wsiTsr <= 50.0) {
+          assessEl.innerText =
+            "Kiểu hình giàu mô đệm CAP (TSR <= 50%): Nguy cơ cao | VTP = " + wsiVtp.toFixed(1) + "%.";
+        } else {
+          assessEl.innerText =
+            "Kiểu hình ít mô đệm (TSR > 50%): Nguy cơ tiêu chuẩn | TSR = " + wsiTsr.toFixed(1) + "%.";
+        }
+
+        const gtTag = document.getElementById("gtStatusTag");
+        if (gtTag) {
+          gtTag.innerText = "WSI COMPOSITE (NO GT)";
+          gtTag.style.color = "var(--text-secondary)";
+        }
+        document.getElementById("qaExactMatch").innerText = "N/A";
+        document.getElementById("qaMarginShift").innerText = "N/A";
+        document.getElementById("qaCoreErr").innerText = "N/A";
+        document.getElementById("qaMIoU").innerText = "N/A";
+        document.getElementById("qaBF1").innerText = "N/A";
+        document.getElementById("barExactMatch").style.width = "0%";
+        document.getElementById("barMarginShift").style.width = "0%";
+        document.getElementById("barCoreErr").style.width = "0%";
+        document.getElementById("qaPxSummary").innerText = "WSI không nhãn GT";
+        document.getElementById("qaMarginPxSub").innerText = "--";
+        document.getElementById("qaErrBreakdown").innerText = "--";
+        document.getElementById("qaMIoUPenSub").innerText = "Penalized: --";
+        document.getElementById("qaDiceSub").innerText = "mDice: --";
+        document.getElementById("topConfusionsList").innerText =
+          "Chế độ ghép lát cắt WSI không gắn mặt nạ GT bác sĩ.";
+        const spotEl = document.getElementById("spotlightStatText");
+        if (spotEl) spotEl.innerText = "Chế độ WSI Ghép (Phủ phân vùng 4 lớp mô)";
+        const hudEl = document.getElementById("pixelInspectorHUD");
+        if (hudEl) {
+          hudEl.innerText =
+            `WSI Ghép (${viewState.imgW} x ${viewState.imgH} px, ${wsi.num_tiles} mảnh @ ${MPP_UM} MPP)`;
+        }
+
+        const wsiBannerTxt = document.getElementById("wsiRightBannerText");
+        if (wsiBannerTxt) {
+          wsiBannerTxt.innerText = `Đã ghép ${wsi.num_tiles} mảnh (${viewState.imgW}x${viewState.imgH} px) | Mô phủ: ${rs.tissue_coverage_pct || 0}% | Lớp ưu thế: ${rs.dominant_class || "-"}`;
+        }
         document.getElementById("wsiRegionInfo").innerText =
-          `Canvas: ${rs.canvas_width || viewState.imgW}x${rs.canvas_height || viewState.imgH} | Tissue: ${rs.tissue_coverage_pct || 0}% | Dominant: ${rs.dominant_class || "-"}`;
-        showToast(`Stitched ${wsi.num_tiles} tiles (${viewState.imgW}x${viewState.imgH} px).`, "success");
+          `Canvas: ${rs.canvas_width || viewState.imgW}x${rs.canvas_height || viewState.imgH} | Mô phủ: ${rs.tissue_coverage_pct || 0}% | Lớp ưu thế: ${rs.dominant_class || "-"}`;
+        showToast(`Đã ghép xong ${wsi.num_tiles} mảnh WSI (${viewState.imgW}x${viewState.imgH} px).`, "success");
       } catch (err) {
         if ((err && err.name === "AbortError") || wsiSignal.aborted || activeWsiCtrl !== myWsiCtrl || activeWorkstationTab !== "wsi") {
           return;
         }
-        showToast("WSI stitch failed: " + err.message, "error");
+        showToast("Ghép WSI thất bại: " + err.message, "error");
       } finally {
         if (activeWsiCtrl === myWsiCtrl) {
           activeWsiCtrl = null;
           setStageLoading(false);
           btn.disabled = false;
-          btn.innerText = "Stitch & Analyze WSI";
+          btn.innerText = "Ghép & Phân Tích WSI";
         }
       }
     }
@@ -2965,17 +3373,18 @@
           const avail = Array.isArray(m.available_methods) ? m.available_methods : [];
           if (m.loaded) {
             pill.classList.remove("warn");
-            const srcTag = (!m.stage2_loaded && Array.isArray(m.gate7_available_arms) && m.gate7_available_arms.length > 0)
-              ? "Verified Gate-7 Weights"
-              : "Verified Weights";
+            const hasG7 = Array.isArray(m.gate7_available_arms) && m.gate7_available_arms.length > 0;
+            const srcTag = hasG7 ? "Trọng số Gate-7 xác thực" : "Trọng số xác thực";
             txt.innerText = srcTag + " (" + m.device.toUpperCase() + " | Torch " + data.system.torch_version + ")";
           } else {
             pill.classList.add("warn");
-            txt.innerText = "Fallback Mode (No Checkpoints on Disk)";
+            txt.innerText = "Chế độ dự phòng (Thiếu trọng số)";
           }
           if (avail.length > 0) {
             const availSet = new Set(avail);
-            const preferred = (m.mode && availSet.has(m.mode)) ? m.mode : avail[0];
+            const preferred = availSet.has("gate7_arm5")
+              ? "gate7_arm5"
+              : ((m.mode && availSet.has(m.mode)) ? m.mode : avail[0]);
             for (const selId of ["configSelect", "wsiMethodSelect"]) {
               const sel = document.getElementById(selId);
               if (sel && !availSet.has(sel.value)) {
@@ -2983,6 +3392,7 @@
                   || Array.from(sel.options).find(o => availSet.has(o.value));
                 if (matchOpt) sel.value = matchOpt.value;
               }
+              syncSelectTooltip(selId);
             }
             const cmpChecks = Array.from(document.querySelectorAll("#compareMethodChecks input[type='checkbox']"));
             if (cmpChecks.length > 0 && !cmpChecks.some(cb => cb.checked && availSet.has(cb.value))) {
@@ -2998,7 +3408,7 @@
         }
       } catch (_e) {
         pill.classList.add("warn");
-        txt.innerText = "Health Check Unreachable";
+        txt.innerText = "Không kết nối được máy chủ API";
       }
     }
 
@@ -3032,37 +3442,65 @@
     function updatePixelInspectorAndLoupe(clientX, clientY, targetRect) {
       const hud = document.getElementById("pixelInspectorHUD");
       const loupe = document.getElementById("magnifierLoupe");
+      const stageEl = document.getElementById("openseadragon-viewer");
+      const stageRect = stageEl ? stageEl.getBoundingClientRect() : targetRect;
       if (!rawImgCanvas || compositeCanvas.width === 0 || compositeCanvas.height === 0) {
         if (loupe) loupe.style.display = "none";
         return;
       }
+      if (isQuadOverviewActive()) {
+        if (loupe) loupe.style.display = "none";
+        if (hud && lastResult && lastResult.verification_metrics) {
+          const vm = lastResult.verification_metrics;
+          const mp = vm.boundary_margin_pct !== undefined ? vm.boundary_margin_pct : Math.max(0, 100 - vm.exact_match_pct - vm.core_error_pct);
+          hud.innerText = `Đối chiếu 4 Khung | Khớp: ${vm.exact_match_pct.toFixed(1)}% | Biên 2px: ${mp.toFixed(1)}% | Lỗi lõi: ${vm.core_error_pct.toFixed(1)}% | mIoU: ${vm.miou_4cls.toFixed(1)}%`;
+        }
+        return;
+      }
+
       const ix = Math.floor((clientX - targetRect.left - viewState.panX) / viewState.scale);
       const iy = Math.floor((clientY - targetRect.top - viewState.panY) / viewState.scale);
 
       if (ix < 0 || iy < 0 || ix >= viewState.imgW || iy >= viewState.imgH) {
-        if (hud) hud.innerText = "Hover tissue to inspect (x, y, GT, Pred, Conf%)";
+        if (hud && activeWorkstationTab !== "wsi") {
+          hud.innerText = activeWorkstationTab === "clinical"
+            ? "Di chuột lên mô để soi tọa độ (x, y), lớp AI dự đoán và độ tin cậy%"
+            : "Di chuột lên mô để soi tọa độ (x, y), GT bác sĩ, AI dự đoán và độ tin cậy%";
+        }
         if (loupe) loupe.style.display = "none";
         return;
       }
 
-      const idx = iy * viewState.imgW + ix;
-      const predC = predIndexBuf ? CLASS_NAMES[Math.min(4, predIndexBuf[idx])] : "-";
-      const gtVal = gtIndexBuf ? gtIndexBuf[idx] : null;
-      const gtC = gtVal !== null ? (gtVal <= 4 ? CLASS_NAMES[gtVal] : "IGN") : "N/A";
-      const confStr = confBuf ? Math.round((confBuf[idx] / 255.0) * 100.0) + "%" : "-";
-      let statusStr = "Pred";
-      if (gtIndexBuf && predIndexBuf && gtVal <= 4) {
-        if (gtVal === predIndexBuf[idx]) statusStr = "MATCH";
-        else if (boundaryZoneBuf && boundaryZoneBuf[idx] === 1) statusStr = "MARGIN";
-        else statusStr = "ERROR";
-      }
-      if (hud) {
-        hud.innerText = `(${ix}, ${iy}) | GT: ${gtC} | Pred: ${predC} | ${statusStr} | Conf: ${confStr}`;
+      if (activeWorkstationTab === "wsi" && !predIndexBuf) {
+        if (hud) {
+          hud.innerText = `(${ix}, ${iy}) | WSI Ghép (${viewState.imgW} x ${viewState.imgH} px @ ${MPP_UM} MPP)`;
+        }
+      } else {
+        const idx = iy * viewState.imgW + ix;
+        const predC = predIndexBuf ? CLASS_NAMES[Math.min(4, predIndexBuf[idx])] : "-";
+        const confStr = confBuf ? Math.round((confBuf[idx] / 255.0) * 100.0) + "%" : "-";
+        if (activeWorkstationTab === "clinical") {
+          if (hud) {
+            hud.innerText = `(${ix}, ${iy}) | AI Dự đoán: ${predC} | Độ tin cậy: ${confStr}`;
+          }
+        } else {
+          const gtVal = gtIndexBuf ? gtIndexBuf[idx] : null;
+          const gtC = gtVal !== null ? (gtVal <= 4 ? CLASS_NAMES[gtVal] : "IGN") : "N/A";
+          let statusStr = "AI";
+          if (gtIndexBuf && predIndexBuf && gtVal <= 4) {
+            if (gtVal === predIndexBuf[idx]) statusStr = "MATCH";
+            else if (boundaryZoneBuf && boundaryZoneBuf[idx] === 1) statusStr = "BIÊN 2px";
+            else statusStr = "LỖI";
+          }
+          if (hud) {
+            hud.innerText = `(${ix}, ${iy}) | GT: ${gtC} | Pred: ${predC} | ${statusStr} | Conf: ${confStr}`;
+          }
+        }
       }
 
-      if (loupe && loupeEnabled && !splitCurtainMode) {
-        const lx = Math.max(8, Math.min(targetRect.width - 130, clientX - targetRect.left + 18));
-        const ly = Math.max(8, Math.min(targetRect.height - 130, clientY - targetRect.top - 60));
+      if (loupe && loupeEnabled) {
+        const lx = Math.max(8, Math.min(stageRect.width - 130, clientX - stageRect.left + 18));
+        const ly = Math.max(8, Math.min(stageRect.height - 130, clientY - stageRect.top - 60));
         loupe.style.left = lx + "px";
         loupe.style.top = ly + "px";
         loupe.style.display = "block";
@@ -3075,20 +3513,35 @@
         const half = Math.floor(win / 2);
         const sx = imgW > win ? Math.max(0, Math.min(imgW - win, ix - half)) : 0;
         const sy = imgH > win ? Math.max(0, Math.min(imgH - win, iy - half)) : 0;
-        lctx.drawImage(
-          compositeCanvas,
-          sx,
-          sy,
-          win,
-          win,
-          0,
-          0,
-          120,
-          120
-        );
+
+        if (splitCurtainMode && splitLeftSourceCanvas.width > 0 && splitRightSourceCanvas.width > 0) {
+          const divFrameX = (splitPct / 100.0) * targetRect.width;
+          const divImgX = (divFrameX - viewState.panX) / viewState.scale;
+          const divLoupeX = ((divImgX - sx) / Math.max(1, win)) * 120;
+          lctx.drawImage(splitRightSourceCanvas, sx, sy, win, win, 0, 0, 120, 120);
+          if (divLoupeX > 0) {
+            lctx.save();
+            lctx.beginPath();
+            lctx.rect(0, 0, Math.min(120, divLoupeX), 120);
+            lctx.clip();
+            lctx.drawImage(splitLeftSourceCanvas, sx, sy, win, win, 0, 0, 120, 120);
+            lctx.restore();
+            if (divLoupeX < 120) {
+              lctx.strokeStyle = "#00957E";
+              lctx.lineWidth = 1.5;
+              lctx.beginPath();
+              lctx.moveTo(divLoupeX, 0);
+              lctx.lineTo(divLoupeX, 120);
+              lctx.stroke();
+            }
+          }
+        } else {
+          lctx.drawImage(compositeCanvas, sx, sy, win, win, 0, 0, 120, 120);
+        }
+
         const cx = ((ix - sx + 0.5) / Math.max(1, win)) * 120;
         const cy = ((iy - sy + 0.5) / Math.max(1, win)) * 120;
-        lctx.strokeStyle = "rgba(56, 189, 248, 0.85)";
+        lctx.strokeStyle = "rgba(14, 124, 134, 0.90)";
         lctx.lineWidth = 1;
         lctx.beginPath();
         lctx.moveTo(cx, 0);
@@ -3118,11 +3571,16 @@
       await checkHealth();
       await loadCohortSamples();
 
-      // Header tab switching (Patch QA vs WSI Multi-Tile)
+      const tabClinical = document.getElementById("tabClinical");
       const tabPatch = document.getElementById("tabPatchQA");
       const tabWSI = document.getElementById("tabWSI");
-      const setWorkstationTab = (isWsi) => {
-        activeWorkstationTab = isWsi ? "wsi" : "patch";
+
+      const setWorkstationTab = (mode) => {
+        activeWorkstationTab = mode;
+        const isWsi = mode === "wsi";
+        const isClinical = mode === "clinical";
+        const isResearch = mode === "patch";
+
         if (isWsi) {
           if (activeInferenceCtrl) {
             activeInferenceCtrl.abort();
@@ -3132,7 +3590,7 @@
           const runBtn = document.getElementById("btnRunInference");
           if (runBtn) {
             runBtn.disabled = false;
-            runBtn.innerText = "Run WSSS Analysis";
+            runBtn.innerText = "Phân Tích Phân Vùng AI";
           }
         } else {
           if (activeWsiCtrl) {
@@ -3143,21 +3601,74 @@
           const wsiBtn = document.getElementById("btnRunWSI");
           if (wsiBtn) {
             wsiBtn.disabled = false;
-            wsiBtn.innerText = "Stitch & Analyze WSI";
+            wsiBtn.innerText = "Ghép & Phân Tích WSI";
           }
         }
-        tabPatch.setAttribute("aria-selected", isWsi ? "false" : "true");
+
+        tabClinical.setAttribute("aria-selected", isClinical ? "true" : "false");
+        tabPatch.setAttribute("aria-selected", isResearch ? "true" : "false");
         tabWSI.setAttribute("aria-selected", isWsi ? "true" : "false");
+
+        const modeTag = document.getElementById("activeWorkModeTag");
+        if (modeTag) {
+          modeTag.innerText = isClinical
+            ? "Chế độ: Chẩn đoán Lâm sàng (Ảnh H&E)"
+            : (isWsi ? "Chế độ: Ghép lát cắt WSI (Toàn vùng)" : "Chế độ: Kiểm chứng Nghiên cứu (Có GT)");
+        }
+
         document.getElementById("patchIngestionCard").style.display = isWsi ? "none" : "block";
         document.getElementById("wsiControlPanel").style.display = isWsi ? "block" : "none";
+        document.getElementById("inferenceEngineCard").style.display = isWsi ? "none" : "block";
+        document.getElementById("gtUploadGroup").style.display = isResearch ? "block" : "none";
+        document.getElementById("btnCompareMethods").style.display = isResearch ? "block" : "none";
+        document.getElementById("advancedDisplayDetails").style.display = isResearch ? "block" : "none";
+        document.getElementById("qaAuditCard").style.display = isResearch ? "block" : "none";
+        document.getElementById("wsiRightBanner").style.display = isWsi ? "block" : "none";
+
+        const sampleLbl = document.getElementById("sampleSelectLabel");
+        if (sampleLbl) {
+          sampleLbl.innerText = isClinical
+            ? "Ca bệnh mô bệnh học TCGA-BRCA (Ảnh H&E)"
+            : "Ca bệnh Held-Out TCGA-BRCA (Có GT bác sĩ)";
+        }
+
+        document.querySelectorAll(".mode-pill").forEach(btn => {
+          const isGtOnly = btn.dataset.gtOnly === "true";
+          if (isWsi) {
+            btn.style.display = btn.dataset.mode === "overlay" ? "inline-flex" : "none";
+          } else if (isClinical) {
+            btn.style.display = isGtOnly ? "none" : "inline-flex";
+          } else {
+            btn.style.display = "inline-flex";
+          }
+        });
+
+        if (isWsi && splitCurtainMode) {
+          document.getElementById("btnToggleSplit").click();
+        }
+        if (isClinical) {
+          const gtModes = new Set(["quad_4panel", "agreement", "blurred_dual", "dual_blend", "gt"]);
+          if (gtModes.has(activeViewMode)) setActiveModePill("overlay");
+          const lSel = document.getElementById("splitLeftSelect");
+          const rSel = document.getElementById("splitRightSelect");
+          if (lSel && gtModes.has(lSel.value)) lSel.value = "raw";
+          if (rSel && gtModes.has(rSel.value)) rSel.value = "overlay";
+        } else if (isResearch && activeViewMode === "overlay" && lastResult && lastResult.agreement_overlay_base64) {
+          setActiveModePill("quad_4panel");
+        }
+
         if (!isWsi && lastLoadedImageKey && lastLoadedImageKey.startsWith("wsi:")) {
           runInference();
+        } else if (!isWsi && lastResult) {
+          updateRightSidebarMetrics(lastResult);
+          renderActiveViewMode();
         }
       };
-      tabPatch.addEventListener("click", () => setWorkstationTab(false));
-      tabWSI.addEventListener("click", () => setWorkstationTab(true));
 
-      // Cohort search & morphology filter (debounced 250ms)
+      tabClinical.addEventListener("click", () => setWorkstationTab("clinical"));
+      tabPatch.addEventListener("click", () => setWorkstationTab("patch"));
+      tabWSI.addEventListener("click", () => setWorkstationTab("wsi"));
+
       let filterTimer = null;
       const triggerCohortFilter = () => {
         clearTimeout(filterTimer);
@@ -3172,6 +3683,7 @@
       document.getElementById("morphologyFilter").addEventListener("change", triggerCohortFilter);
 
       document.getElementById("sampleSelect").addEventListener("change", () => {
+        syncSelectTooltip("sampleSelect");
         document.getElementById("patchUpload").value = "";
         document.getElementById("gtUpload").value = "";
         syncSourceBadge(false);
@@ -3197,7 +3709,13 @@
         }
       });
 
-      document.getElementById("configSelect").addEventListener("change", runInference);
+      document.getElementById("configSelect").addEventListener("change", () => {
+        syncSelectTooltip("configSelect");
+        runInference();
+      });
+      document.getElementById("wsiMethodSelect").addEventListener("change", () => {
+        syncSelectTooltip("wsiMethodSelect");
+      });
       document.getElementById("otsuToggle").addEventListener("change", runInference);
       document.getElementById("btnRunInference").addEventListener("click", runInference);
       document.getElementById("btnRunWSI").addEventListener("click", runWSIStitch);
@@ -3212,7 +3730,7 @@
           const checkedBoxes = cmpChecksBox.querySelectorAll("input[type='checkbox']:checked");
           if (checkedBoxes.length > 6) {
             target.checked = false;
-            showToast("Maximum 6 methods can be selected for side-by-side comparison.", "warn");
+            showToast("Chỉ chọn tối đa 6 mô hình để so sánh song song.", "warn");
           }
         });
       }
@@ -3261,15 +3779,16 @@
         splitBtn.classList.toggle("active-toggle", splitCurtainMode);
         document.getElementById("splitContainer").classList.toggle("active", splitCurtainMode);
         document.getElementById("splitControlBox").style.display = splitCurtainMode ? "block" : "none";
+        fitToViewport();
         if (splitCurtainMode) {
           updateSplitPosition(parseFloat(document.getElementById("splitSlider").value));
-          renderStageAndSplit();
         }
+        renderStageAndSplit();
       });
 
       const warnIfMissingGtLayer = (selectEl) => {
         if (selectEl && selectEl.value === "gt" && !gtIndexBuf && !serverImageCache.get("gt")) {
-          showToast("No Reference GT mask available for this patch.", "info");
+          showToast("Lát cắt hiện tại chưa có mặt nạ đáp án GT bác sĩ.", "info");
         }
       };
       document.getElementById("splitLeftSelect").addEventListener("change", (e) => {
@@ -3383,12 +3902,19 @@
       splitFrame.addEventListener("pointermove", (e) => {
         if (draggingDivider) {
           updateSplitFromClientX(e.clientX);
-        } else if (panningSplit) {
-          viewState.panX += e.clientX - splitPtr.x;
-          viewState.panY += e.clientY - splitPtr.y;
-          splitPtr = { x: e.clientX, y: e.clientY };
-          renderStageAndSplit();
+        } else {
+          if (panningSplit) {
+            viewState.panX += e.clientX - splitPtr.x;
+            viewState.panY += e.clientY - splitPtr.y;
+            splitPtr = { x: e.clientX, y: e.clientY };
+            renderStageAndSplit();
+          }
+          updatePixelInspectorAndLoupe(e.clientX, e.clientY, splitFrame.getBoundingClientRect());
         }
+      });
+      splitFrame.addEventListener("pointerleave", () => {
+        const loupe = document.getElementById("magnifierLoupe");
+        if (loupe) loupe.style.display = "none";
       });
       const stopSplitDrag = (e) => {
         draggingDivider = false;
@@ -3404,22 +3930,22 @@
       document.querySelectorAll(".mode-pill").forEach(btn => {
         btn.addEventListener("click", () => {
           if (activeWorkstationTab === "wsi" || (lastLoadedImageKey && lastLoadedImageKey.startsWith("wsi:"))) {
-            showToast("WSI composite active: switch to Single Patch QA tab to inspect patch overlay modes.", "info");
+            showToast("Đang ở chế độ Ghép WSI: hãy chuyển sang tab Kiểm chứng hoặc Lâm sàng để xem các chế độ từng mảnh.", "info");
             return;
           }
           if (btn.dataset.mode === "gt" && !gtIndexBuf && !serverImageCache.get("gt")) {
-            showToast("No Reference GT mask available for this patch.", "info");
+            showToast("Lát cắt hiện tại chưa có mặt nạ đáp án GT bác sĩ.", "info");
           }
           setActiveModePill(btn.dataset.mode);
           renderActiveViewMode();
         });
       });
 
-      // Instant Client-Side Class Spotlight (Zero CNN re-run!)
+      // Instant Client-Side Class Spotlight (Zero CNN re-run)
       document.querySelectorAll(".legend-item").forEach(item => {
         item.addEventListener("click", () => {
           if (activeWorkstationTab === "wsi" || (lastLoadedImageKey && lastLoadedImageKey.startsWith("wsi:"))) {
-            showToast("WSI composite active: switch to Single Patch QA tab to spotlight individual patch classes.", "info");
+            showToast("Đang ở chế độ Ghép WSI: hãy chuyển tab để soi riêng từng lớp trên lát cắt đơn.", "info");
             return;
           }
           targetSpotlightClass = parseInt(item.dataset.cls || "0", 10);
@@ -3442,8 +3968,18 @@
           document.getElementById("compareModal").classList.remove("open");
           return;
         }
-        if (e.key >= "1" && e.key <= "9") {
-          const pills = document.querySelectorAll(".mode-pill");
+        if (e.key >= "0" && e.key <= "9") {
+          const pills = Array.from(document.querySelectorAll(".mode-pill")).filter(b => b.style.display !== "none");
+          if (e.key === "0") {
+            const qBtn = document.querySelector(".mode-pill[data-mode='quad_4panel']");
+            if (qBtn && qBtn.style.display !== "none") {
+              qBtn.click();
+              return;
+            }
+            fitToViewport();
+            renderStageAndSplit();
+            return;
+          }
           const idx = parseInt(e.key, 10) - 1;
           if (pills[idx]) pills[idx].click();
           return;
@@ -3459,11 +3995,8 @@
           zoomAtPoint(1.25);
         } else if (e.key === "-") {
           zoomAtPoint(0.8);
-        } else if (e.key === "0") {
-          fitToViewport();
-          renderStageAndSplit();
         } else if (e.key === "[" || e.key === "]") {
-          if (activeWorkstationTab !== "patch") return;
+          if (activeWorkstationTab === "wsi") return;
           const sel = document.getElementById("sampleSelect");
           if (sel && sel.options.length > 0) {
             const nextIdx = e.key === "]"
@@ -3481,6 +4014,8 @@
         renderStageAndSplit();
       });
 
+      syncSelectTooltip("configSelect");
+      syncSelectTooltip("wsiMethodSelect");
       runInference();
     });
   </script>

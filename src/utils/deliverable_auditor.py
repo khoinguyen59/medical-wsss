@@ -747,7 +747,7 @@ def run_audit(target_file: str) -> bool:
 DEFAULT_ALL_TARGETS: List[str] = [
     os.path.join("product", "proposal", "SE374_MINI_PROPOSAL_WSSS_WSI.md"),
     os.path.join("product", "reports", "SE374_FINAL_TECHNICAL_REPORT_WSSS.md"),
-    os.path.join("product", "slides", "SE374_PROPOSAL_SLIDES_WSSS_WSI.md"),
+    os.path.join("product", "reports", "SE374_MULTI_AGENT_AUDIT_AND_DEFECT_RESOLUTION_REPORT.md"),
     os.path.join("product", "slides", "SE374_FINAL_DEFENSE_SLIDES_WSSS_WSI.md"),
 ]
 

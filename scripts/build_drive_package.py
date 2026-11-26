@@ -496,7 +496,7 @@ def copy_clean_src_tree(src_root: Path, dest_src_dir: Path) -> List[str]:
     return sorted(set(copied_rel_paths))
 
 
-def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
+def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Optional[Path]:
     """Updates `SE374_Colab_Scientific_Research_Runner.ipynb` to be a 100% GitHub-First Standalone Runner.
 
     Key Features:
@@ -510,6 +510,7 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
     root = repo_root or PROJECT_ROOT
     nb_path = root / "notebooks" / "SE374_Colab_Scientific_Research_Runner.ipynb"
     fixed_nb_path = root / "notebooks" / "SE374_Colab_Scientific_Research_Runner_FIXED.ipynb"
+    root_nb_path = root / "SE374_Colab_Scientific_Research_Runner.ipynb"
     if fixed_nb_path.is_file():
         fixed_text = fixed_nb_path.read_text(encoding="utf-8")
         fixed_text = fixed_text.replace(
@@ -518,15 +519,16 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
         )
         nb_data = json.loads(fixed_text)
         serialized = sanitize_ascii_hyphens(json.dumps(nb_data, ensure_ascii=False, indent=1) + "\n")
-        nb_path.write_text(serialized, encoding="utf-8", newline="\n")
-        root_nb_path = root / "SE374_Colab_Scientific_Research_Runner.ipynb"
+        if nb_path.is_file():
+            nb_path.write_text(serialized, encoding="utf-8", newline="\n")
         root_nb_path.write_text(serialized, encoding="utf-8", newline="\n")
-        return nb_path
+        return nb_path if nb_path.is_file() else root_nb_path
 
-    if not nb_path.is_file():
-        raise FileNotFoundError(f"Missing scientific runner notebook: {nb_path}")
+    source_nb_path = nb_path if nb_path.is_file() else root_nb_path
+    if not source_nb_path.is_file():
+        return None
 
-    nb_data = json.loads(nb_path.read_text(encoding="utf-8"))
+    nb_data = json.loads(source_nb_path.read_text(encoding="utf-8"))
 
     # Update Cell 0: Header Markdown
     nb_data["cells"][0]["source"] = [
@@ -941,11 +943,11 @@ def update_scientific_runner_notebook(repo_root: Optional[Path] = None) -> Path:
     serialized = json.dumps(nb_data, ensure_ascii=False, indent=1)
     serialized = sanitize_ascii_hyphens(serialized)
 
-    nb_path.write_text(serialized, encoding="utf-8", newline="\n")
-    root_nb_path = root / "SE374_Colab_Scientific_Research_Runner.ipynb"
+    if nb_path.is_file():
+        nb_path.write_text(serialized, encoding="utf-8", newline="\n")
     root_nb_path.write_text(serialized, encoding="utf-8", newline="\n")
 
-    return nb_path
+    return nb_path if nb_path.is_file() else root_nb_path
 
 
 def build_drive_package(

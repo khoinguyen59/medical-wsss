@@ -188,7 +188,7 @@ Hệ thống được tổ chức thành 3 tầng vi dịch vụ độc lập th
 
 #### 7.3 Kế Hoạch Dự Phòng (Contingency / Backup Plan)
 - **Rủi ro 1: Tải về và cấu hình weights mô hình CONCH gặp sự cố cấp phép hoặc mạng:**
-  - *Giải pháp dự phòng:* Sử dụng bộ trích xuất đặc trưng CTransPath [Wang et al., 2022] hoặc ResNet-50 kết hợp giải thuật tổng hợp ranh giới HisynSeg đã tải về đầy đủ trong [`repos/HisynSeg`](repos/HisynSeg). Pipeline vẫn bảo đảm đạt mIoU $>70\%$ mà không phụ thuộc vào CONCH.
+  - *Giải pháp dự phòng:* Sử dụng bộ trích xuất đặc trưng CTransPath [Wang et al., 2022] hoặc ResNet-50 kết hợp giải thuật tổng hợp ranh giới HisynSeg tham chiếu tại `repos/HisynSeg`. Pipeline vẫn bảo đảm đạt mIoU $>70\%$ mà không phụ thuộc vào CONCH.
 - **Rủi ro 2: Dung lượng tệp WSI Camelyon16 thô quá nặng khi thử nghiệm trạm làm việc:**
   - *Giải pháp dự phòng:* Kế thừa giải pháp nén kim tự tháp từ LowMagWSS [Pham et al., 2026] và tập đặc trưng trích xuất sẵn `camelyon16-uni` từ Hugging Face (17.3 GB) để thử nghiệm suy luận nhanh.
 

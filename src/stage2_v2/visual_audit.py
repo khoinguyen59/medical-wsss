@@ -15,7 +15,7 @@ directly reusing frozen Gate-7 Track A ensemble primitives from `src/stage2_v2/e
 3. Zero-cherry-picking 300-DPI contact sheets (01..08, nearest-neighbor crisp pixels,
    zero Gaussian blur, zero GT overwrite) + 2 column-major Whole-ROI stitches (09..10)
    + 300-DPI Academic Monochrome alignment figure (11 & stage2_training_loss.png).
-4. Atomic output packing compatible with `colab_run_script --notebook nb2`.
+4. Atomic output packing compatible with Stage-2 visual audit notebook `02d_Stage2_Visual_Overlay_Audit_G4.ipynb`.
 
 Pure ASCII hyphen '-' (0x2D) only (Invariant 12).
 """
@@ -3441,7 +3441,7 @@ def run_stage2_v2_visual_audit(
         _atomic_write_json(metrics_json_path, metrics_payload)
         rendered_files[metrics_json_path.name] = metrics_json_path
 
-        # Atomic ZIP export for colab_run_script --notebook nb2
+        # Atomic ZIP export for Stage-2 visual audit notebook
         _atomic_write_zip(zip_out, rendered_files)
         zip_mb = zip_out.stat().st_size / (1024.0 * 1024.0)
         print(

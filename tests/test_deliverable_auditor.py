@@ -183,7 +183,7 @@ class TestDeliverableAuditor:
     def test_valid_docx_proposal_passes_audit(self, tmp_path):
         """Compiled DOCX proposal must pass audit with 0 critical issues."""
         auditor = DeliverableAuditor()
-        docx_path = os.path.join("product", "proposal", "SE374_MINI_PROPOSAL_WSSS_TISSUE.docx")
+        docx_path = os.path.join("product", "proposal", "SE374_MINI_PROPOSAL_WSSS_WSI.docx")
         assert os.path.exists(docx_path), "DOCX proposal file must exist"
 
         issues = auditor.audit_docx_file(docx_path, preview_output_dir=str(tmp_path))

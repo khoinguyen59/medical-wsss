@@ -510,42 +510,43 @@ if len(ACTIVE_TEST_FILES) > 0:
 
 def build_modular_drive_readme() -> str:
     """Create `notebooks/modular_drive/README.md` with Google Drive setup instructions."""
-    text = """# BCSS-WSSS - Thin Drive Runner v2 Colab Notebook Suite
+    text = """# BCSS-WSSS - Bộ Notebook Google Colab Thin Drive Runner v2
 
-Thu muc nay chua bo 4 Google Colab Notebooks the he moi (**Thin Drive Runner v2**) danh cho he thong **Weakly-Supervised Segmentation for Whole Slide Images (LowMagWSS)** tren tap du lieu BCSS-WSSS.
+Thư mục này chứa bộ 4 Google Colab Notebook thế hệ mới (**Thin Drive Runner v2**) dành cho hệ thống phân vùng ngữ nghĩa giám sát yếu ảnh mô bệnh học **BCSS-WSSS** (`src/colab_pkg/`, `src/pipeline/colab_runner.py`, `src/models/wsss_inference_methods.py`).
 
-## 1. Diem Khac Biet Cua Kien Truc Thin Drive Runner v2
-- **Khong nhung code mo hinh khong lo vao o notebook:** Thay vi nhung hang nghin dong dinh nghia class (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`, `MultiMethodWSSSEngine`) truc tiep trong `.ipynb`, toan bo logic duoc dat trong thu muc code `src/` tren Google Drive (`src/colab_pkg/`, `src/pipeline/colab_runner.py`, `src/models/wsss_inference_methods.py`).
-- **Moi o code cuc ky ngan gon (`<= 25` dong/o):** De doc, de bao tri, khong bao gio bi loi cu phap do sua nham code dai trong Colab.
-- **Tich hop 7 Phuong Phap SOTA & Ablation (`MultiMethodWSSSEngineV2`):**
+## 1. Điểm Khác Biệt Của Kiến Trúc Thin Drive Runner v2
+
+- **Không nhúng mã mô hình khổng lồ vào ô notebook:** Thay vì nhúng hàng nghìn dòng định nghĩa lớp (`WSSSTissueStage1NetCAM`, `DeepLabV3Plus`, `MultiMethodWSSSEngine`) trực tiếp trong `.ipynb`, toàn bộ logic được đặt gọn trong gói mã `src/` (`src/colab_pkg/`, `src/pipeline/colab_runner.py`, `src/models/wsss_inference_methods.py`).
+- **Mỗi ô mã cực kỳ ngắn gọn (`<= 25` dòng/ô):** Dễ đọc, dễ bảo trì, hạn chế tối đa lỗi cú pháp khi chỉnh sửa trực tiếp trên giao diện Colab.
+- **Tích hợp đầy đủ 7 phương pháp suy luận và đối chứng (`MultiMethodWSSSEngineV2`, M1-M7):**
   1. `M1_Baseline_SingleScale`: Stage-2 DeepLabV3+ ResNet-101 Single-Scale Baseline (`Is_GM=False`)
-  2. `M2_MultiView_D4_TTA`: Stage-1 ResNet38d Net_CAM Classification Gate (`y_cls > 0.1`) + Dihedral D4 TTA
+  2. `M2_MultiView_D4_TTA`: Stage-1 ResNet-38d Net_CAM Classification Gate (`y_cls > 0.1`) + Dihedral D4 TTA
   3. `M3_LongTail_Prior_Calibration`: Stage-1 CGM + Cross-Stage CAM Fusion + Long-Tail Prior Calibration
   4. `M4_Spatial_Bilateral_Refinement`: Stage-1 CGM + D4 TTA + PistoSeg/ARML Bilateral Spatial Refinement
   5. `M5_Proposed_SOTA_Ensemble`: Proposed V1 SOTA Ensemble (CGM + CAM Fusion + D8 TTA + Prior Calib + Spatial Refinement + Glass Guard)
   6. `M6_MultiScale_Pyramid_D4_Ensemble`: Multi-Scale Pyramid (`0.75x, 1.0x, 1.25x`) Inverse-Entropy D4 + Adaptive Soft-Gating
-  7. `M7_Proposed_Ultra_SOTA_Curriculum`: **Proposed V2 Ultra-SOTA Curriculum (Multi-Scale D4 + Adaptive Soft-Gate + Entropy CAM Fusion + H&E Beer-Lambert Optical Density Calib + Multi-Stride Edge-Guided Refinement)**
+  7. `M7_Proposed_Ultra_SOTA_Curriculum`: Proposed V2 Ultra-SOTA Curriculum (Multi-Scale D4 + Adaptive Soft-Gate + Entropy CAM Fusion + H&E Beer-Lambert Optical Density Calib + Multi-Stride Edge-Guided Refinement)
 
-## 2. Danh Sach 4 Notebook Theo Cau Hinh GPU
+## 2. Danh Sách 4 Notebook Theo Cấu Hình GPU
 
-| File Notebook | GPU Muc Tieu | Che Do Danh Gia | Precision | Thoi Gian Du Kien |
+| Tệp Notebook | GPU Mục Tiêu | Chế Độ Đánh Giá | Độ Chính Xác Số | Thời Gian Dự Kiến |
 | :--- | :---: | :---: | :---: | :---: |
-| `SE374_Colab_WSSS_T4_Sanity150_ThinDriveRunner_v2.ipynb` | **NVIDIA T4 (16GB)** | Fast Sanity 150 anh | FP16 (`float16`) | ~1.5 - 2.5 phut |
-| `SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb` | **NVIDIA T4 (16GB)** | Full 4,986 anh | FP16 (`float16`) | ~25 - 35 phut |
-| `SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb` | **NVIDIA L4 (24GB)** | Full 4,986 anh | BF16 + TF32 | ~10 - 14 phut |
-| `SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb` | **NVIDIA A100 (40/80GB)** | Full 4,986 anh | BF16 + TF32 | ~5 - 8 phut |
+| [SE374_Colab_WSSS_T4_Sanity150_ThinDriveRunner_v2.ipynb](SE374_Colab_WSSS_T4_Sanity150_ThinDriveRunner_v2.ipynb) | **NVIDIA T4 (16GB)** | Chạy thử nhanh 150 ảnh | FP16 (`float16`) | Khoảng 1.5 - 2.5 phút |
+| [SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb](SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb) | **NVIDIA T4 (16GB)** | Đầy đủ 4.986 ảnh | FP16 (`float16`) | Khoảng 25 - 35 phút |
+| [SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb](SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb) | **NVIDIA L4 (24GB)** | Đầy đủ 4.986 ảnh | BF16 + TF32 | Khoảng 10 - 14 phút |
+| [SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb](SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb) | **NVIDIA A100 (40/80GB)** | Đầy đủ 4.986 ảnh | BF16 + TF32 | Khoảng 5 - 8 phút |
 
-## 3. Huong Dan Su Dung Tren Google Drive + Google Colab (3 Buoc)
+## 3. Hướng Dẫn Sử Dụng Trên Google Drive Và Google Colab (3 Bước)
 
-1. **Dong goi thu muc code de upload len Google Drive:**
-   ```cmd
-   cmd /c "python scripts/build_drive_package.py"
+1. **Đóng gói thư mục mã nguồn để tải lên Google Drive:**
+   ```powershell
+   python scripts/build_drive_package.py
    ```
-   Lenh tren tao thu muc `drive_upload_ready/SE374_WSSS_Drive_Code/` va file nen `drive_upload_ready/SE374_WSSS_Drive_Code.zip` chua day du `src/` va 4 notebook Thin Runner v2.
-2. **Upload len Google Drive:**
-   Upload thu muc `SE374_WSSS_Drive_Code` (hoac file `SE374_WSSS_Drive_Code.zip`) len `/content/drive/MyDrive/SE374_WSSS_Project/` hoac `/content/drive/MyDrive/`.
-3. **Mo Notebook va bam `Runtime -> Run all`:**
-   Chon 1 trong 4 file `*_ThinDriveRunner_v2.ipynb` phu hop voi GPU tren Colab va chay tu tren xuong duoi.
+   Lệnh trên tạo thư mục `drive_upload_ready/SE374_WSSS_Drive_Code/` và tệp nén `drive_upload_ready/SE374_WSSS_Drive_Code.zip` chứa đầy đủ `src/` và 4 notebook Thin Runner v2.
+2. **Tải lên Google Drive:**
+   Tải thư mục `SE374_WSSS_Drive_Code` (hoặc tệp `SE374_WSSS_Drive_Code.zip`) lên `/content/drive/MyDrive/SE374_WSSS_Project/` hoặc `/content/drive/MyDrive/`.
+3. **Mở Notebook và chọn `Runtime -> Run all`:**
+   Chọn 1 trong 4 tệp `*_ThinDriveRunner_v2.ipynb` phù hợp với loại GPU trên Colab và chạy tuần tự từ trên xuống dưới.
 """
     for ch in FORBIDDEN_DASHES:
         text = text.replace(ch, "-")
@@ -661,8 +662,10 @@ def run_notebook_smoke_test(nb_path: Path) -> None:
 
 def main(argv: List[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
+    write_modular_drive = "--modular-drive" in args
     NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
-    MODULAR_DRIVE_DIR.mkdir(parents=True, exist_ok=True)
+    if write_modular_drive:
+        MODULAR_DRIVE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Verify all 5 legacy notebooks exist before we start
     for legacy_name in PROTECTED_LEGACY_NOTEBOOKS:
@@ -682,13 +685,14 @@ def main(argv: List[str] | None = None) -> int:
             nb_json = nb_json.replace(ch, "-")
 
         primary_path = NOTEBOOKS_DIR / fname
-        mirror_path = MODULAR_DRIVE_DIR / fname
-
         primary_path.write_text(nb_json, encoding="utf-8")
-        mirror_path.write_text(nb_json, encoding="utf-8")
-
         validate_generated_notebook(primary_path)
-        validate_generated_notebook(mirror_path)
+
+        if write_modular_drive:
+            mirror_path = MODULAR_DRIVE_DIR / fname
+            mirror_path.write_text(nb_json, encoding="utf-8")
+            validate_generated_notebook(mirror_path)
+
         generated_paths.append(primary_path)
 
         code_cells = [c for c in nb_dict["cells"] if c["cell_type"] == "code"]
@@ -698,9 +702,10 @@ def main(argv: List[str] | None = None) -> int:
             f"| cells={len(nb_dict['cells'])} (code={len(code_cells)}, max_code_lines={max_lines})"
         )
 
-    readme_path = MODULAR_DRIVE_DIR / "README.md"
-    readme_path.write_text(build_modular_drive_readme(), encoding="utf-8")
-    print(f"[GENERATED] {readme_path.relative_to(REPO_ROOT)}")
+    if write_modular_drive:
+        readme_path = MODULAR_DRIVE_DIR / "README.md"
+        readme_path.write_text(build_modular_drive_readme(), encoding="utf-8")
+        print(f"[GENERATED] {readme_path.relative_to(REPO_ROOT)}")
 
     # Final check that all 5 protected legacy notebooks are completely untouched
     for legacy_name in PROTECTED_LEGACY_NOTEBOOKS:
@@ -711,7 +716,8 @@ def main(argv: List[str] | None = None) -> int:
     if "--smoke-test" in args:
         run_notebook_smoke_test(generated_paths[0])
 
-    print(f"[SUCCESS] Generated {len(generated_paths)} Thin Drive Runner v2 notebooks in notebooks/ and notebooks/modular_drive/.")
+    target_msg = "notebooks/ and notebooks/modular_drive/" if write_modular_drive else "notebooks/"
+    print(f"[SUCCESS] Generated {len(generated_paths)} Thin Drive Runner v2 notebooks in {target_msg}.")
     return 0
 
 

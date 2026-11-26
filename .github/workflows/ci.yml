@@ -25,32 +25,44 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-          pip install -r requirements.txt
+          pip install -r requirements.txt -r requirements-dev.txt
 
       - name: 1. Code Style & Linting Check
         run: |
           # Stop build if there are Python syntax errors or formatting/import issues
-          ruff check src/ tests/ colab_runner_local/ --no-cache
+          ruff check src/ tests/ scripts/ --no-cache
 
-      - name: 2. Academic & Medical Integrity Audit (Zero Mockup)
+      - name: 2. Academic & Medical Integrity Audit (Zero Mockup & Zero Private Account Leak)
         run: |
           echo "Scanning for forbidden mock/fake/dummy tokens in src/..."
           if grep -rnw 'src/' -e 'TODO: mock' -e 'fakeData' -e 'dummyData' -e 'fake_metric' -e 'simulateTx'; then
             echo "FAILED: Detected fake or mock data. Academic & Medical integrity violation!"
             exit 1
-          else
-            echo "PASSED: Zero mockup verified."
           fi
+          echo "Scanning tracked repository files for private infrastructure or account leaks..."
+          set +e
+          git grep -nEi '\bacc[0-9]{2}\b|\bacc[0-9]+_adc\b|\b(vps_colab_runner|run_colab_vps|session_guard|dash_auth|setup_vps_colab|VPS_COLAB_RUNBOOK)\b|(file:///)?[A-Za-z]:(/|\\{1,2})Users(/|\\{1,2})' -- . ':!.gitignore' ':!.github/workflows/ci.yml' ':!tests/test_governance_invariants.py'
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "FAILED: Detected private infrastructure or account identifier in tracked academic repository!"
+            exit 1
+          elif [ "$rc" -gt 1 ]; then
+            echo "FAILED: git grep failed with exit code $rc!"
+            exit "$rc"
+          fi
+          echo "PASSED: Zero mockup and zero private leak verified."
 
       - name: 3. Deliverables & Scientific Visuals Quality Gate
         run: |
-          echo "Running Deliverable Quality Auditor on README.md..."
+          echo "Running Deliverable Quality Auditor on README.md and core deliverables..."
           python -m src.utils.deliverable_auditor README.md
+          python -m src.utils.deliverable_auditor --all
 
       - name: 4. Run Unit Tests & Integration Tests
         run: |
           if [ -d "tests" ]; then
-            pytest tests/ colab_runner_local/test_vps_colab_runner.py colab_runner_local/test_dashboard.py -v
+            pytest tests/ -v
           else
             echo "No tests directory found yet. Skipping pytest."
           fi

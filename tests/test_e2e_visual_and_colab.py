@@ -37,6 +37,8 @@ import csv
 import io
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1063,6 +1065,162 @@ def test_tier3_html_workstation_enterprise_ui_contracts(isolated_api_client: Tes
         assert "<button" in html and re.search(r'class=["\'][^"\']*legend-item', html)
         assert "keydown" in html, "Expected keyboard shortcuts handler"
         assert "alert(" not in html
+
+
+def test_tier3_workstation_wsi_reset_and_native_split_loupe_contracts():
+    """Verify index.html natively supports Split-Curtain Loupe/HUD and clears stale GT state on WSI stitch."""
+    html_path = PROJECT_ROOT / "src" / "visualization" / "static" / "index.html"
+    html = html_path.read_text(encoding="utf-8")
+
+    # 1. Pure offline & ASCII hyphen invariants (0 CDN URLs, 0 forbidden dashes)
+    for cdn_tok in ("https://cdn.", "cdnjs.cloudflare.com", "unpkg.com", "cdn.jsdelivr.net"):
+        assert cdn_tok not in html, f"External CDN URL leaked into offline index.html: {cdn_tok}"
+    for ch in FORBIDDEN_DASHES:
+        assert ch not in html, f"Forbidden non-ASCII dash U+{ord(ch):04X} in index.html"
+
+    # 2. Native z-index layering above .split-curtain-container (z-index: 15)
+    m_split = re.search(r"\.split-curtain-container\s*\{[^}]*z-index\s*:\s*(\d+)", html, re.S)
+    m_hud = re.search(r"\.pixel-inspector-hud\s*\{[^}]*z-index\s*:\s*(\d+)", html, re.S)
+    m_scale = re.search(r"\.scale-bar-hud\s*\{[^}]*z-index\s*:\s*(\d+)", html, re.S)
+    m_loupe = re.search(r"#magnifierLoupe\s*\{[^}]*z-index\s*:\s*(\d+)", html, re.S)
+    assert m_split and m_hud and m_scale and m_loupe
+    z_split = int(m_split.group(1))
+    assert int(m_hud.group(1)) > z_split, "pixel-inspector-hud must layer above split-curtain-container"
+    assert int(m_scale.group(1)) > z_split, "scale-bar-hud must layer above split-curtain-container"
+    assert int(m_loupe.group(1)) > z_split, "magnifierLoupe must layer above split-curtain-container"
+
+    # 3. Native Split-Curtain Loupe & Pixel HUD wiring (zero !splitCurtainMode block)
+    assert "&& !splitCurtainMode" not in html, "Magnifier loupe must work natively in Split-Curtain mode"
+    m_split_move = re.search(
+        r'splitFrame\.addEventListener\("pointermove"[\s\S]{0,600}updatePixelInspectorAndLoupe',
+        html,
+    )
+    assert m_split_move is not None, "splitFrame pointermove must natively call updatePixelInspectorAndLoupe"
+    assert 'splitFrame.addEventListener("pointerleave"' in html
+
+    # 4. Native runWSIStitch() stale single-patch DOM cleanup contracts
+    m_wsi = re.search(r"async function runWSIStitch\(\)\s*\{[\s\S]*?\n    \}\n\n    async function checkHealth", html)
+    assert m_wsi is not None, "Could not locate runWSIStitch() in index.html"
+    wsi_fn = m_wsi.group(0)
+    for required_tok in (
+        "latencyLabel",
+        "methodBadgeFooter",
+        "biomarkerAssessment",
+        "gtRefVTP",
+        "gtRefTSR",
+        "WSI COMPOSITE (NO GT)",
+        "qaExactMatch",
+        "qaCoreErr",
+        "qaMIoU",
+        "qaBF1",
+        "topConfusionsList",
+        "spotlightStatText",
+        "pixelInspectorHUD",
+        'setActiveModePill("overlay")',
+        'updateActiveModeLegend("overlay")',
+    ):
+        assert required_tok in wsi_fn, f"runWSIStitch() missing required DOM sync/reset token: {required_tok}"
+
+
+def test_tier3_workstation_high_zoom_scale_bar_calibration():
+    """Regression test: updateScaleBarAndZoomReadout() must include 2 and 5 um and stay calibrated at >=376% zoom."""
+    html_path = PROJECT_ROOT / "src" / "visualization" / "static" / "index.html"
+    html = html_path.read_text(encoding="utf-8")
+
+    m_fn = re.search(
+        r"function updateScaleBarAndZoomReadout\(\)\s*\{[\s\S]*?\n    \}",
+        html,
+    )
+    assert m_fn is not None, "Could not locate updateScaleBarAndZoomReadout() in index.html"
+    fn_src = m_fn.group(0)
+
+    m_cands = re.search(r"const\s+candidatesUm\s*=\s*\[([0-9,\s]+)\]", fn_src)
+    assert m_cands is not None, "Missing candidatesUm array in updateScaleBarAndZoomReadout()"
+    candidates = [int(tok.strip()) for tok in m_cands.group(1).split(",") if tok.strip()]
+    assert 2 in candidates and 5 in candidates, f"candidatesUm must include 2 and 5 um for high zoom: {candidates}"
+    assert candidates == [2, 5, 10, 25, 50, 100, 200], f"Unexpected candidatesUm list: {candidates}"
+    assert "Math.min(180, chosenPx)" not in fn_src, "Must not distort physical calibration by clamping chosenPx to 180px"
+
+    # Pure-Python verification of physical calibration across low, high (>=376%), and extreme zoom
+    mpp_um = 0.25
+    target_px = 96.0
+    for scale in (0.25, 1.0, 3.76, 3.80, 4.00, 8.00, 24.0):
+        in_range = [um for um in candidates if 42.0 <= (um / mpp_um) * scale <= 150.0]
+        pool = in_range if in_range else candidates
+        chosen_um = min(pool, key=lambda um: abs((um / mpp_um) * scale - target_px))
+        chosen_px = round((chosen_um / mpp_um) * scale)
+        implied_um = (chosen_px / scale) * mpp_um
+        rel_err = abs(implied_um - chosen_um) / chosen_um
+        assert rel_err < 0.02, f"Scale bar miscalibrated at {scale * 100:.0f}%: {chosen_px}px for {chosen_um}um"
+        if scale in (3.80, 4.00):
+            assert chosen_um in (5, 10), f"Expected 5 or 10 um at {scale * 100:.0f}%, got {chosen_um} um"
+
+    # Execute the actual JS function from index.html in Node.js when available
+    node_bin = shutil.which("node")
+    if node_bin is None:
+        win_node = Path(r"C:\Program Files\nodejs\node.exe")
+        if win_node.is_file():
+            node_bin = str(win_node)
+    if node_bin is not None:
+        js_harness = (
+            "const MPP_UM = 0.25;\n"
+            "const viewState = { scale: 1.0 };\n"
+            "const dom = {\n"
+            "  zoomReadout: { innerText: '' },\n"
+            "  scaleBarLine: { style: { width: '' } },\n"
+            "  scaleBarLabel: { innerText: '' },\n"
+            "};\n"
+            "const document = { getElementById: (id) => dom[id] || null };\n"
+            f"{fn_src}\n"
+            "const out = [];\n"
+            "for (const s of [0.25, 1.0, 3.76, 3.80, 4.00, 8.00, 24.0]) {\n"
+            "  viewState.scale = s;\n"
+            "  updateScaleBarAndZoomReadout();\n"
+            "  out.push({ scale: s, zoom: dom.zoomReadout.innerText, width: dom.scaleBarLine.style.width, label: dom.scaleBarLabel.innerText });\n"
+            "}\n"
+            "const invalid = [];\n"
+            "for (const bad of [0, -2, Number.NaN]) {\n"
+            "  viewState.scale = bad;\n"
+            "  updateScaleBarAndZoomReadout();\n"
+            "  invalid.push({ zoom: dom.zoomReadout.innerText, width: dom.scaleBarLine.style.width, label: dom.scaleBarLabel.innerText });\n"
+            "}\n"
+            "console.log(JSON.stringify({ out, invalid }));\n"
+        )
+        proc = subprocess.run([node_bin, "-e", js_harness], capture_output=True, text=True, check=True)
+        payload = json.loads(proc.stdout)
+        rows = payload["out"]
+        for row in rows:
+            s = float(row["scale"])
+            px = int(row["width"].replace("px", ""))
+            um = int(row["label"].split(" ")[0])
+            implied_um = (px / s) * mpp_um
+            assert abs(implied_um - um) / um < 0.02, f"JS scale bar miscalibrated: {row}"
+            if s in (3.76, 3.80, 4.00):
+                assert um == 5, f"Expected 5 um bar at {s * 100:.0f}% zoom, got {row}"
+                assert px == round((5.0 / mpp_um) * s), f"Expected exact pixel width at {s * 100:.0f}% zoom, got {row}"
+        for bad_row in payload["invalid"]:
+            assert bad_row["zoom"] == "100%", f"Invalid scale must fall back cleanly to 100%: {bad_row}"
+            assert bad_row["width"] == "100px" and bad_row["label"] == "25 um (0.25 MPP)", bad_row
+
+
+def test_tier3_workstation_medical_green_palette_3modes_quad_and_ruo():
+    """Verify Clinical White + Medical Scrub Green palette, 3 modes, 4-panel view, 100% KPI, and RUO banner."""
+    html = (PROJECT_ROOT / "src" / "visualization" / "static" / "index.html").read_text(encoding="utf-8")
+
+    # 1. Clinical White + Surgical/Medical Scrub Green ergonomic palette (no dark navy cyberpunk theme)
+    for required_hex in ("#F4FAFA", "#FFFFFF", "#0E7C86", "#00957E", "#2A9D8F", "#14313A"):
+        assert required_hex in html, f"Missing medical color token {required_hex} in index.html"
+    for forbidden_dark in ("#0b111d", "#11192b", "#070b14"):
+        assert forbidden_dark not in html.lower(), f"Forbidden dark cyberpunk color {forbidden_dark} remains in index.html"
+
+    # 2. 3-mode separation (Clinical vs Research GT vs WSI) & no duplicate inference card in WSI
+    for tok in ("id=\"tabClinical\"", "id=\"tabPatchQA\"", "id=\"tabWSI\"", "id=\"inferenceEngineCard\"", "id=\"ruoClinicalNotice\""):
+        assert tok in html, f"Missing 3-mode / RUO contract token {tok}"
+    assert 'document.getElementById("inferenceEngineCard").style.display = isWsi ? "none" : "block"' in html
+
+    # 3. 4-panel verification view & 100% KPI sum (Exact + Margin 2px + Core Error)
+    for tok in ("quad_4panel", "renderQuad4PanelIntoCanvas", "qaMarginShift", "boundary_margin_pct", "barExactMatch", "barMarginShift", "barCoreErr"):
+        assert tok in html, f"Missing 4-panel or 100%-KPI accounting token {tok}"
 
 
 def test_tier3_colab_notebooks_and_drive_packager_contracts():

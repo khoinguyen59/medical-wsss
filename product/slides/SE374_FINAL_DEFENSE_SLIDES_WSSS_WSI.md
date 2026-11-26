@@ -629,15 +629,15 @@ Do đoàn hệ Held-Out Test <code>23</code> BN chỉ ghi nhận <strong><code>2
 
 ---
 
-# 17. Sản Phẩm Phần Mềm: Trạm Lâm Sàng FastAPI, HTML5 Canvas & Docker (`079fee0`)
+# 17. Sản Phẩm Phần Mềm: Trạm Lâm Sàng Trắng - Xanh Y Khoa & Docker
 
 <div class="grid-2">
 <div>
 
 ## Trạm Làm Việc Ngoại Tuyến (`api_server.py` + `index.html`)
-- **100% Offline HTML5 Canvas:** Không phụ thuộc CDN; **9 chế độ QA** (`Blurred Dual QA`, `Match vs Error`, `Seg Mask`, `GT + AI Blend`, `Contours`, `Entropy`, `Stage-1 CAM`, `Spotlight`, `Doctor GT`).
-- **Tương tác giải phẫu bệnh (Stage 2 `079fee0`):** **Zoom / Pan** mượt, Split-Curtain (`S`), Magnifier Loupe (`L`), Pixel Inspector HUD, Scale Bar (`50 um`), WSI Multi-Tile Stitch (tối đa 64 tiles).
-- **18 chế độ suy luận + Cô lập môi trường:** 7 chế độ Gate-7 đồng bộ hằng số `02c_v2` (`8dabf65`) + 11 chế độ cổ điển; fail-closed HTTP `503` khi `strict_weights=True` thiếu trọng số.
+- **Công thái học màu sắc bệnh viện:** Hệ màu **Trắng Lâm Sàng + Xanh Y Khoa (`#FFFFFF`, `#F4FAFA`, `#0E7C86`, `#00957E`, `#2A9D8F`)** trung hòa dư ảnh đỏ của máu/mô H&E, giảm mỏi mắt và giữ nguyên 100% màu sinh học 4 lớp `TUM/STR/LYM/NEC`.
+- **Tách rõ 3 chế độ làm việc (100% Offline, 0 CDN):** (1) **Chẩn đoán Lâm sàng** (không bảng GT), (2) **Kiểm chứng Nghiên cứu GT** (mặc định **Đối chiếu 4 Khung** + 9 góc nhìn QA + KPI đủ `100%` Khớp/Biên/Lỗi), (3) **Ghép lát cắt WSI** (tối đa 64 tiles).
+- **Tương tác giải phẫu bệnh:** **Zoom / Pan** mượt, Split-Curtain (`S`), Magnifier Loupe (`L`), Pixel HUD, Scale Bar động `[2-200] um`, 18 chế độ AI, cảnh báo **RUO** thường trực và fail-closed HTTP `503`.
 
 </div>
 <div>
@@ -645,47 +645,47 @@ Do đoàn hệ Held-Out Test <code>23</code> BN chỉ ghi nhận <strong><code>2
 ## Xuất Báo Cáo CAP PDF, Docker & Clean Architecture
 - **`POST /api/v1/export/report`:** Xuất 300-DPI PNG, JSON, CSV hoặc **Báo cáo PDF Lâm sàng 2 trang chuẩn CAP** (VTP/TSR, phân tầng Mesker/UNITED `<= 50%`, ảnh đối chiếu, khuyến cáo RUO).
 - **Container hóa (`Dockerfile` + `docker-compose.yml`):** Nền `python:3.11-slim`, người dùng không đặc quyền `appuser`, gắn chỉ đọc `./checkpoints` & `./data`, `HEALTHCHECK` tự động `/health`.
-- **Clean Architecture:** 11 gói dịch vụ gọn gàng (`<= 400` dòng/module mới), đồng bộ **`65/65` tệp `src/`** sang gói Colab Drive & ZIP.
+- **Clean Architecture:** 11 gói dịch vụ gọn gàng (`<= 400` dòng/module mới), đóng gói chuẩn hóa sẵn sàng cho thực thi cục bộ và Google Colab.
 
 </div>
 </div>
 
 ---
 
-# 18. Hạ Tầng Đa GPU `colab_runner_local/` & Kiểm Thử Đa Nền Tảng
+# 18. Kiến Trúc Kiểm Thử Tự Động, Đồ Thị AST & Cổng CI/CD Y Khoa
 
 <div class="grid-2">
 <div>
 
-## Điều Phối Đa GPU & Bảo Vệ P0 external_service
-- **Tài khoản & GPU tường minh:** Luôn dùng `--credentials ~/.config/gcloud/colab_adc.json` (`colab_account`) và chuỗi tốc độ cao `--gpu H100 --gpu-fallback G4,A100,L4`.
-- **Bảo vệ P0 (`runtime_guard.py`):** Khóa `flock` theo tài khoản (`acct_<sha256_12>`), snapshot `protected_endpoints` fail-closed bảo vệ tuyệt đối external_service A100, tắt khớp kép (`owned_sessions` + ngoài `protected_endpoints`).
-- **Đồng bộ & Web Dashboard:** `sync_remote_file_atomic` kiểm SHA256, ép chuẩn **LF 100%** (`.gitattributes`), allowlist đồng bộ `04b_Stage2_Gate7_Clinical_LUAD_Bench_G4.ipynb`, PBKDF2 auth.
+## Bản Đồ Mã Nguồn AST & Vệ Sinh Học Thuật
+- **Đồ thị tri thức mã nguồn AST (`scripts/build_ast_code_graph.py`):** Quét chuẩn Python AST toàn bộ `105` module học thuật (`src/`, `scripts/`, `tests/`), xác định `12` Hub Modules và chuỗi gọi hàm đầu-cuối cho nhóm 3 thành viên.
+- **Bảo vệ liêm chính học thuật tự động:** Cổng kiểm thử & CI chặn tuyệt đối mockup, dấu gạch ngang phi ASCII, rò rỉ 151 bệnh nhân, rò rỉ GT vào `BACK (4)` và rò rỉ công cụ/tài khoản cá nhân khỏi kho git.
+- **Bộ minh họa sống 10 Option (`N1-N5`, `P1-P5`):** `25` ảnh `300 DPI` + CAP PDF 2 trang xuất từ máy chủ thật.
 
 </div>
 <div>
 
-## Kiểm Định Tự Động Đa Nền Tảng (Stage 2 & 3)
+## Kiểm Định Tự Động & Chất Lượng Phần Mềm
 <div class="kpi-2x2">
   <div class="kpi">
-    <div class="kpi-val">541</div>
-    <div class="kpi-lbl">Test cases thu thập (32 modules: 505 + 36)</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-val">36 / 36</div>
-    <div class="kpi-lbl">Native Linux ARM64 VPS PASS (0 skip)</div>
+    <div class="kpi-val">501</div>
+    <div class="kpi-lbl">Ca kiểm thử phần mềm y khoa (30 bộ tests/)</div>
   </div>
   <div class="kpi">
     <div class="kpi-val">0 lỗi</div>
-    <div class="kpi-lbl">ruff check . toàn kho & DeliverableAuditor</div>
+    <div class="kpi-lbl">ruff check src tests &amp; DeliverableAuditor</div>
   </div>
   <div class="kpi">
-    <div class="kpi-val">65 / 65</div>
-    <div class="kpi-lbl">Tệp src/ đồng bộ Drive & ZIP</div>
+    <div class="kpi-val">105</div>
+    <div class="kpi-lbl">Module mã nguồn lập bản đồ AST &amp; Clean Arch</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val">0 rò rỉ</div>
+    <div class="kpi-lbl">Bệnh nhân, GT-&gt;BACK và nội bộ cá nhân</div>
   </div>
 </div>
 
-- Stage 2 Round-2 đồng thuận **`Swarm 30/30 PASS` + `/teamwork 30/30 PASS` (`0` Red Flags)**; xanh CI `.github/workflows/ci.yml`.
+- Đạt đồng thuận kiểm toán chéo đa luồng độc lập 3 hệ thống (2 vòng), vượt cổng kiểm định chất lượng **40+40 (`0` Red Flags)** và xanh CI `.github/workflows/ci.yml`.
 
 </div>
 </div>
@@ -699,7 +699,7 @@ Do đoàn hệ Held-Out Test <code>23</code> BN chỉ ghi nhận <strong><code>2
 
 ## Kiểm Toán Mật Mã Phase 1B (`SHA256SUMS.txt`)
 - **`228 / 228` tệp khóa cứng (`BAD = 0`, `UNLISTED = 0`):** Hoàn tất **`6/6` job GPU hậu bản vá** (`02c_v2` A100, `04b_v2` L4, `02d_v2` G4, `H1` A100, `H2` G4, `H3` L4), **`19/19`** hình kết quả kiểm định Vision, và **`3/3`** phân tích thống kê không cần GPU (`phase1b_zero_gpu_analytics.json`).
-- **Minh bạch sự cố ngày 2026-11-23:** Lỗi thoát ngoặc kép PowerShell-to-cmd trên máy Windows làm **mất vĩnh viễn tệp ngoại khóa không theo dõi git `Lab1.ipynb`**; 100% kho sản phẩm chính và minh chứng mật mã nguyên vẹn.
+- **Minh bạch 2 sự cố dữ liệu:** (1) **2026-11-05:** mất `checkpoints/medsam_wsss_adapter_{best,last}.pth` (`2x86 MB`) do test `D5/D16` chưa cô lập `tmp_path` (đã vá và chuyển sang Gate-7 Track A); (2) **2026-11-23:** lỗi thoát ngoặc kép PowerShell-to-cmd làm mất vĩnh viễn tệp ngoại khóa `Lab1.ipynb` + đĩa ảo WSL2 `ext4.vhdx`; 100% kho sản phẩm chính và `228/228` SHA256 nguyên vẹn.
 
 </div>
 <div>
@@ -730,14 +730,14 @@ Do đoàn hệ Held-Out Test <code>23</code> BN chỉ ghi nhận <strong><code>2
     <div class="kpi-lbl">Tệp minh chứng SHA256 (BAD = 0, 6/6 GPU)</div>
   </div>
   <div class="kpi">
-    <div class="kpi-val">541 (36/36 VPS)</div>
-    <div class="kpi-lbl">Automated tests &amp; 0 lỗi ruff / auditor</div>
+    <div class="kpi-val">501 PASS</div>
+    <div class="kpi-lbl">Medical tests &amp; 0 lỗi ruff / auditor</div>
   </div>
 </div>
 
 1. **Nghiên cứu lõi AI Y khoa (Phase 1B):** Chưng cất hai vòng 4 họ kiến trúc sạch nhãn (`0%` rò rỉ BN, `0%` TCGA, `151/151` GDC 46.0), vượt toàn bộ SOTA 4-class pooled 2022-2026 (`+3.31%` vs Pure Author), `p_holm < 0.05` trên cả `4/4` lớp mô, ổn định 3 hạt giống **`72.74 +/- 0.05%`**, xóa **`6/8` BN vắng NEC về `0 px`**, Hann-50% giảm **`-98.35%`** đứt gãy đường nối và LUAD `2x` zoom đạt **`51.47%`**.
-2. **Sản phẩm phần mềm lâm sàng (Stage 2):** Trạm Làm Việc FastAPI + HTML5 Canvas 100% ngoại tuyến (Zoom/Pan, 9 QA views, CAP PDF 2 trang, Docker Compose), **`arm7` trội Pareto tuyệt đối `202.51 FPS`** BF16 trên `NVIDIA L4`.
-3. **Kỹ thuật hạ tầng & Liêm chính học thuật:** Điều phối đa GPU `colab_runner_local/` an toàn P0 external_service (`36/36` Linux VPS PASS), `228/228` SHA256, `0` lỗi `ruff` và công bố trung thực mọi giới hạn.
+2. **Sản phẩm phần mềm lâm sàng:** Trạm Làm Việc FastAPI + HTML5 Canvas 100% ngoại tuyến theo hệ màu **Trắng - Xanh Y Khoa** (3 chế độ Lâm sàng / Kiểm chứng 4 Khung GT / Ghép WSI, CAP PDF 2 trang, Docker Compose), **`arm7` trội Pareto tuyệt đối `202.51 FPS`** BF16 trên `NVIDIA L4`.
+3. **Chất lượng kỹ nghệ & Liêm chính học thuật:** **`501`** bài kiểm thử phần mềm y khoa tự động, bản đồ AST, `228/228` SHA256, `0` lỗi `ruff` / `DeliverableAuditor`, `0` rò rỉ nội bộ và công bố trung thực mọi giới hạn.
 
 ---
 

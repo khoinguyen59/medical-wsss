@@ -42,7 +42,10 @@ htmlcov/
 
 # Graphify & Multi-Agent Internal Scaffolding (Excluded from Clean Project Source)
 .agents/
+.opencode/
 AGENTS.md
+docs/architecture/AGENT_TEAM_SPEC.md
+graphify-out/
 graphify-out*/
 scripts/update_graphify.py
 product/reports/archive/
@@ -53,6 +56,15 @@ docs/papers/
 docs/references/
 docs/diary/
 docs/notes/
+scripts/download_papers.py
+
+# Private Local GPU Infrastructure Scripts & Runbook (Excluded from Academic Repo)
+vps_colab_runner/
+docs/architecture/VPS_COLAB_RUNBOOK.md
+
+# Local Showcase Scripts & Cache Artifacts
+experiments/visual_option_showcase/
+scripts/showcase_*
 
 # LaTeX Build Artifacts
 *.aux
@@ -61,6 +73,12 @@ docs/notes/
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+*.synctex(busy)
+*.bcf-SAVE-ERROR
+*.acn
+*.glo
+*.lol
+*.ist
 *.toc
 product/reports/*.log
 

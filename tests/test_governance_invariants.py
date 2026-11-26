@@ -156,3 +156,91 @@ def test_no_raw_phone_photos_in_product_directory():
             lower = fname.lower()
             for pref in forbidden_prefixes:
                 assert not lower.startswith(pref), f"Raw photo/screenshot detected in product: {os.path.join(root, fname)}"
+
+
+def test_no_private_vps_runner_or_account_leaks_in_tracked_repo():
+    """Verify zero private account IDs, runner tools, or personal local paths leak in tracked text or OOXML/PDF files."""
+    import subprocess
+    import zipfile
+
+    try:
+        import pymupdf
+    except ImportError:
+        import fitz as pymupdf
+
+    git_check = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=False)
+    if git_check.returncode != 0:
+        pytest.skip("Not inside a git working tree.")
+
+    tracked_files = [f.strip() for f in git_check.stdout.splitlines() if f.strip()]
+    binary_exts = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".docx", ".pptx", ".zip", ".pth", ".npz", ".ico", ".xlsx"}
+    exempt = {".gitignore", ".github/workflows/ci.yml", "tests/test_governance_invariants.py"}
+    forbidden_rgx = re.compile(
+        r"\bacc[0-9]{2}\b|\bacc[0-9]+_adc\b"
+        r"|\b(?:vps_colab_runner|run_colab_vps|session_guard|dash_auth|setup_vps_colab|VPS_COLAB_RUNBOOK)\b"
+        r"|(?:file:///)?[A-Za-z]:[/\\]{1,2}Users[/\\]{1,2}",
+        re.IGNORECASE,
+    )
+    personal_binary_rgx = re.compile(
+        r"(?i)file:///|[A-Za-z]:[/\\]{1,2}Users[/\\]{1,2}|/Users/[^/\s]+/"
+    )
+    xml_tag_rgx = re.compile(r"<[^>]+>")
+
+    violations = []
+    for rel in tracked_files:
+        norm = rel.replace("\\", "/")
+        p = Path(rel)
+        if not p.is_file():
+            continue
+        suf = p.suffix.lower()
+
+        if suf in {".docx", ".pptx"}:
+            with zipfile.ZipFile(p, "r") as zf:
+                for member in zf.namelist():
+                    if not member.endswith((".xml", ".rels")):
+                        continue
+                    xml_text = zf.read(member).decode("utf-8", errors="ignore")
+                    m = personal_binary_rgx.search(xml_text) or personal_binary_rgx.search(
+                        xml_tag_rgx.sub("", xml_text)
+                    )
+                    if m:
+                        violations.append(f"{norm}::{member} contains personal path token '{m.group(0)}'")
+                        break
+            continue
+
+        if suf == ".pdf":
+            with pymupdf.open(p) as doc:
+                hit = False
+                for page_idx, page in enumerate(doc, start=1):
+                    m = personal_binary_rgx.search(page.get_text())
+                    if m:
+                        violations.append(f"{norm}#p{page_idx} contains personal path token '{m.group(0)}'")
+                        hit = True
+                        break
+                    for lnk in page.get_links():
+                        uri = str(lnk.get("uri", ""))
+                        m_uri = personal_binary_rgx.search(uri)
+                        if m_uri:
+                            violations.append(f"{norm}#p{page_idx} link contains personal path '{m_uri.group(0)}'")
+                            hit = True
+                            break
+                    if hit:
+                        break
+                if not hit:
+                    m_meta = personal_binary_rgx.search(str(doc.metadata))
+                    if m_meta:
+                        violations.append(f"{norm} metadata contains personal path token '{m_meta.group(0)}'")
+            continue
+
+        if norm in exempt or suf in binary_exts:
+            continue
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        for idx, line in enumerate(text.splitlines(), start=1):
+            m = forbidden_rgx.search(line)
+            if m:
+                violations.append(f"{norm}:{idx} contains forbidden private token '{m.group(0)}'")
+
+    assert not violations, "Private account / runner / personal path leak detected in tracked academic repo:\n" + "\n".join(
+        violations[:20]
+    )
+

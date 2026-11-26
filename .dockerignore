@@ -17,7 +17,7 @@ experiments
 product
 docs
 notebooks
-colab_runner_local
+*_runner
 graphify-out
 *.zip
 *.pth
