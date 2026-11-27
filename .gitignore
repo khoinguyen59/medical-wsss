@@ -90,11 +90,13 @@ product/reports/*.log
 .DS_Store
 Thumbs.db
 
-# User Downloaded Execution Artifacts at Root
+# User Downloaded Execution Artifacts & Course Labs (Excluded from Project GitHub)
 /01_Train_Stage1_Classifier.ipynb
 /01_Train_Stage1_Classifier_v2.ipynb
 /*_T4.ipynb
 /*_L4.ipynb
+Lab1*.ipynb
+notebooks/Lab1*.ipynb
 
 
 

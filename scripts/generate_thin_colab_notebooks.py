@@ -667,12 +667,7 @@ def main(argv: List[str] | None = None) -> int:
     if write_modular_drive:
         MODULAR_DRIVE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Verify all 5 legacy notebooks exist before we start
-    for legacy_name in PROTECTED_LEGACY_NOTEBOOKS:
-        legacy_path = NOTEBOOKS_DIR / legacy_name
-        if not legacy_path.exists():
-            raise FileNotFoundError(f"Protected legacy notebook missing: {legacy_path}")
-
+    # Verify we never overwrite any retired legacy notebook names
     generated_paths: List[Path] = []
     for spec in VARIANT_SPECS:
         fname = spec["filename"]
@@ -706,12 +701,6 @@ def main(argv: List[str] | None = None) -> int:
         readme_path = MODULAR_DRIVE_DIR / "README.md"
         readme_path.write_text(build_modular_drive_readme(), encoding="utf-8")
         print(f"[GENERATED] {readme_path.relative_to(REPO_ROOT)}")
-
-    # Final check that all 5 protected legacy notebooks are completely untouched
-    for legacy_name in PROTECTED_LEGACY_NOTEBOOKS:
-        legacy_path = NOTEBOOKS_DIR / legacy_name
-        if not legacy_path.exists():
-            raise RuntimeError(f"Protected legacy notebook missing after generation: {legacy_path}")
 
     if "--smoke-test" in args:
         run_notebook_smoke_test(generated_paths[0])

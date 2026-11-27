@@ -1,7 +1,6 @@
 import ast
 import glob
 import hashlib
-import json
 import os
 import re
 from pathlib import Path
@@ -18,10 +17,8 @@ IGNORED_DASH_PREFIXES = (
     ".git\\", ".git/",
 )
 
-# Exact byte-for-byte copy of instructor's lab notebook and user-uploaded reference documents
+# User-uploaded reference documents exempt from repo dash lint
 EXEMPT_EXTERNAL_DOCS = {
-    os.path.normpath("notebooks/Lab1.ipynb"),
-    os.path.normpath("Lab1.ipynb"),
     os.path.normpath("docs/references/Quy Trình Tester Y Khoa.md"),
 }
 
@@ -128,13 +125,20 @@ def test_src_and_drive_bundle_ast_and_content_sync():
     assert len(mismatches) == 0, "Drive bundle out of sync with src/:\n" + "\n".join(mismatches)
 
 
-def test_teacher_lab1_notebook_copy_untouched_and_valid_json():
-    """Verify that if notebooks/Lab1.ipynb exists, it is valid nbformat v4 JSON and untouched."""
-    lab1_path = Path("notebooks/Lab1.ipynb")
-    if lab1_path.is_file():
-        data = json.loads(lab1_path.read_text(encoding="utf-8"))
-        assert data.get("nbformat") == 4
-        assert len(data.get("cells", [])) >= 10
+def test_no_course_lab1_or_root_ipynb_tracked_in_git():
+    """Verify no course Lab1 notebook or misplaced root-level .ipynb is tracked in git."""
+    import subprocess
+
+    git_check = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=False)
+    if git_check.returncode != 0:
+        pytest.skip("Not inside a git working tree.")
+    tracked = [f.strip().replace("\\", "/") for f in git_check.stdout.splitlines() if f.strip()]
+    bad = [
+        f
+        for f in tracked
+        if f.endswith(".ipynb") and ("/" not in f or Path(f).name.lower().startswith("lab1"))
+    ]
+    assert not bad, f"Misplaced root .ipynb or non-project Lab1 notebook tracked in git: {bad}"
 
 
 def test_invariants_24_and_25_defined_in_agents_md():

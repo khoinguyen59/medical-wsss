@@ -520,20 +520,7 @@ class TestTCDrift01DistributionDriftStressTesting:
 # ==============================================================================
 
 class TestTCQMS01TraceabilityAndChangeControl:
-    """Verifies QMS change control, file integrity checksums, and teacher notebook protection (TC-QMS-01)."""
-
-    def test_teacher_notebook_lab1_byte_for_byte_immutability(self):
-        """FDA 21 CFR 820 / ISO 13485: Verifies notebooks/Lab1.ipynb is 100% byte-identical to Lab1.ipynb."""
-        root_lab1 = Path("Lab1.ipynb")
-        notebooks_lab1 = Path("notebooks/Lab1.ipynb")
-
-        if not root_lab1.is_file() and not notebooks_lab1.is_file():
-            pytest.skip("Untracked instructor notebook Lab1.ipynb is not present in this checkout.")
-        assert notebooks_lab1.is_file(), "Missing required teacher notebook: notebooks/Lab1.ipynb"
-        assert root_lab1.is_file(), "Missing reference root notebook: Lab1.ipynb"
-        h_root = hashlib.sha256(root_lab1.read_bytes()).hexdigest()
-        h_nb = hashlib.sha256(notebooks_lab1.read_bytes()).hexdigest()
-        assert h_root == h_nb, "Instructor notebook notebooks/Lab1.ipynb was modified! Strict immutability violated."
+    """Verifies QMS change control and file integrity checksums (TC-QMS-01)."""
 
     def test_sha256_checksum_verification_utility(self, tmp_path):
         """Verifies deterministic SHA-256 calculation for pipeline configuration files."""

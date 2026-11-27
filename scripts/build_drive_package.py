@@ -965,7 +965,6 @@ def build_drive_package(
         sys.path.insert(0, str(root))
     should_sync_repo = bool(sync_repo_files)
     if should_sync_repo:
-        update_scientific_runner_notebook(root)
         sync_historical_and_standalone_outputs(root)
     out_base = (output_base_dir or (root / "drive_upload_ready")).resolve()
     bundle_dir = out_base / "SE374_WSSS_Drive_Code"
@@ -1009,16 +1008,16 @@ def build_drive_package(
             (bundle_dir / fname).write_text(nb_json, encoding="utf-8", newline="\n")
             packaged_notebooks.append(fname)
 
-    # 3b. Copy all 5 legacy standalone notebooks into bundle/notebooks/legacy_standalone_v1/
-    bundle_legacy_dir = bundle_nb_dir / "legacy_standalone_v1"
-    bundle_legacy_dir.mkdir(parents=True, exist_ok=True)
+    # 3b. Copy any present legacy standalone notebooks into bundle/notebooks/legacy_standalone_v1/
     legacy_hashes: Dict[str, str] = {}
-    for leg_name in sorted(LEGACY_NOTEBOOKS):
-        leg_path = notebooks_dir / leg_name
-        if leg_path.is_file():
-            legacy_hashes[leg_name] = sha256_file(leg_path)
+    existing_legacy = [notebooks_dir / n for n in sorted(LEGACY_NOTEBOOKS) if (notebooks_dir / n).is_file()]
+    if existing_legacy:
+        bundle_legacy_dir = bundle_nb_dir / "legacy_standalone_v1"
+        bundle_legacy_dir.mkdir(parents=True, exist_ok=True)
+        for leg_path in existing_legacy:
+            legacy_hashes[leg_path.name] = sha256_file(leg_path)
             leg_compact = _compact_notebook_for_bundle(leg_path.read_text(encoding="utf-8"))
-            (bundle_legacy_dir / leg_name).write_text(leg_compact, encoding="utf-8", newline="\n")
+            (bundle_legacy_dir / leg_path.name).write_text(leg_compact, encoding="utf-8", newline="\n")
 
     # 3c. Copy all 3 historical full-run research notebooks (Run 1 -> Run 3) into bundle/notebooks/history_runs/
     history_src_dir = notebooks_dir / "history_runs"

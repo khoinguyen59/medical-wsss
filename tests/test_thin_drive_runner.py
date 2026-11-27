@@ -44,12 +44,12 @@ NOTEBOOKS_DIR = PROJECT_ROOT / "notebooks"
 DRIVE_READY_DIR = PROJECT_ROOT / "drive_upload_ready"
 BUNDLE_DIR = DRIVE_READY_DIR / "SE374_WSSS_Drive_Code"
 
-LEGACY_SPECS = [
-    ("SE374_Colab_WSSS_Pipeline.ipynb", 19, 90000),
-    ("SE374_Colab_WSSS_T4_Sanity150.ipynb", 19, 90000),
-    ("SE374_Colab_WSSS_T4_Full4986.ipynb", 19, 90000),
-    ("SE374_Colab_WSSS_L4_Full4986.ipynb", 19, 90000),
-    ("SE374_Colab_WSSS_A100_Full4986.ipynb", 19, 90000),
+ACTIVE_THIN_SPECS = [
+    ("SE374_Colab_WSSS_T4_Sanity150_ThinDriveRunner_v2.ipynb", 4),
+    ("SE374_Colab_WSSS_T4_Full4986_ThinDriveRunner_v2.ipynb", 4),
+    ("SE374_Colab_WSSS_L4_Full4986_ThinDriveRunner_v2.ipynb", 4),
+    ("SE374_Colab_WSSS_A100_Full4986_ThinDriveRunner_v2.ipynb", 4),
+    ("SE374_Colab_WSI_LowMag_HighMag_BonusDemo.ipynb", 4),
 ]
 
 FORBIDDEN_DASHES = (
@@ -65,30 +65,20 @@ def _load_stage2_deeplabv3plus_class():
     return Stage2DeepLabV3Plus
 
 
-def test_1_existing_legacy_notebooks_untouched():
-    """Verify all 5 original notebooks in `notebooks/` are preserved untouched."""
-    for fname, expected_cells, min_bytes in LEGACY_SPECS:
+def test_1_active_thin_runner_notebooks_present_and_valid():
+    """Verify all active Thin Runner v2 & BonusDemo notebooks in `notebooks/` are valid nbformat v4."""
+    for fname, min_cells in ACTIVE_THIN_SPECS:
         nb_path = NOTEBOOKS_DIR / fname
-        assert nb_path.is_file(), f"Original notebook missing: {nb_path}"
-        size_bytes = nb_path.stat().st_size
-        assert size_bytes >= min_bytes, (
-            f"Original notebook {fname} was truncated or overwritten (size={size_bytes} < {min_bytes})"
-        )
-
+        assert nb_path.is_file(), f"Active notebook missing: {nb_path}"
         raw_text = nb_path.read_text(encoding="utf-8")
         for char, name in FORBIDDEN_DASHES:
             assert char not in raw_text, f"Forbidden {name} found in {fname}"
 
         nb_data = json.loads(raw_text)
         assert nb_data.get("nbformat") == 4, f"Expected nbformat 4 in {fname}"
-        assert len(nb_data.get("cells", [])) == expected_cells, (
-            f"Expected {expected_cells} cells in untouched {fname}, got {len(nb_data.get('cells', []))}"
+        assert len(nb_data.get("cells", [])) >= min_cells, (
+            f"Expected >= {min_cells} cells in {fname}, got {len(nb_data.get('cells', []))}"
         )
-
-        # Verify inline classes in Cell 12 of original notebooks remain intact
-        cell_12_src = "".join(nb_data["cells"][12].get("source", []))
-        assert "class DeepLabV3Plus" in cell_12_src, f"Missing DeepLabV3Plus in untouched {fname}"
-        assert "class WSSSTissueStage1NetCAM" in cell_12_src, f"Missing WSSSTissueStage1NetCAM in untouched {fname}"
 
 
 def test_2_drive_bundle_packager_creates_complete_folder_and_zip(tmp_path):
